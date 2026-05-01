@@ -181,6 +181,42 @@ defmodule SymphonyElixir.CoreTest do
              Workflow.load(workflow_path)
   end
 
+  test "workflow load preserves UTF-8 prompt text after front matter" do
+    workflow_path = Path.join(Path.dirname(Workflow.workflow_file_path()), "UTF8_WORKFLOW.md")
+
+    File.write!(workflow_path, """
+    ---
+    tracker:
+      kind: linear
+    ---
+    ## Review Handoff
+
+    审核重点（仅 PR review；否则省略）:
+    - 已回应的问题需要保留完整中文字符。
+
+    Ticket {{ issue.identifier }}: {{ issue.title }}
+    """)
+
+    assert {:ok, %{prompt_template: prompt_template}} = Workflow.load(workflow_path)
+    assert String.valid?(prompt_template)
+
+    issue = %Issue{
+      id: "issue-utf8",
+      identifier: "DEV-UTF8",
+      title: "中文标题",
+      description: "中文描述",
+      state: "In Progress"
+    }
+
+    Workflow.set_workflow_file_path(workflow_path)
+    prompt = PromptBuilder.build_prompt(issue)
+
+    assert String.valid?(prompt)
+    assert prompt =~ "审核重点"
+    assert prompt =~ "中文标题"
+    assert {:ok, _json} = Jason.encode(%{"text" => prompt})
+  end
+
   test "workflow load accepts unterminated front matter with an empty prompt" do
     workflow_path = Path.join(Path.dirname(Workflow.workflow_file_path()), "UNTERMINATED_WORKFLOW.md")
     File.write!(workflow_path, "---\ntracker:\n  kind: linear\n")
