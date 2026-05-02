@@ -333,6 +333,7 @@ Top-level keys:
 - `hooks`
 - `agent`
 - `codex`
+- `claude_code`
 
 Unknown keys SHOULD be ignored for forward compatibility.
 
@@ -409,6 +410,12 @@ Fields:
 
 Fields:
 
+- `provider` (string)
+  - Default: `codex`
+  - Supported values: `codex`, `claude_code`
+  - Selects which coding-agent runtime the worker launches for issue execution.
+  - `claude_code` is an experimental implementation-defined extension; implementations that do
+    not support it MUST fail validation rather than silently falling back to Codex.
 - `max_concurrent_agents` (integer)
   - Default: `10`
   - Changes SHOULD be re-applied at runtime and affect subsequent dispatch decisions.
@@ -453,6 +460,24 @@ fields locally if they want stricter startup checks.
 - `stall_timeout_ms` (integer)
   - Default: `300000` (5 minutes)
   - If `<= 0`, stall detection is disabled.
+
+#### 5.3.7 `claude_code` (object, OPTIONAL extension)
+
+Fields:
+
+- `command` (string shell command)
+  - Default: `claude --bare -p --output-format stream-json --input-format stream-json --verbose`
+  - Used only when `agent.provider == "claude_code"`.
+  - The runtime launches this command via `bash -lc` in the workspace directory.
+  - The launched process MUST accept Claude Code JSONL user-message input on stdin and emit
+    newline-delimited `stream-json` output on stdout.
+- `turn_timeout_ms` (integer)
+  - Default: `3600000` (1 hour)
+  - Applies to the Claude Code CLI process for one Symphony worker turn.
+
+Claude Code does not speak the Codex app-server protocol. Implementations MUST keep `claude_code.*`
+separate from `codex.*` and MUST NOT document `claude_code.command` as a drop-in replacement for
+`codex.command`.
 
 ### 5.4 Prompt Template Contract
 
@@ -584,6 +609,7 @@ not require recognizing or validating extension fields unless that extension is 
 - `hooks.before_remove`: shell script or null
 - `hooks.timeout_ms`: integer, default `60000`
 - `agent.max_concurrent_agents`: integer, default `10`
+- `agent.provider`: string, default `codex`
 - `agent.max_turns`: integer, default `20`
 - `agent.max_retry_backoff_ms`: integer, default `300000` (5m)
 - `agent.max_concurrent_agents_by_state`: map of positive integers, default `{}`
@@ -594,6 +620,9 @@ not require recognizing or validating extension fields unless that extension is 
 - `codex.turn_timeout_ms`: integer, default `3600000`
 - `codex.read_timeout_ms`: integer, default `5000`
 - `codex.stall_timeout_ms`: integer, default `300000`
+- `claude_code.command`: shell command string, default
+  `claude --bare -p --output-format stream-json --input-format stream-json --verbose`
+- `claude_code.turn_timeout_ms`: integer, default `3600000`
 
 ## 7. Orchestration State Machine
 
@@ -905,9 +934,10 @@ Invariant 3: Workspace key is sanitized.
 
 ## 10. Agent Runner Protocol (Coding Agent Integration)
 
-This section defines Symphony's language-neutral responsibilities when integrating a Codex
-app-server. The Codex app-server protocol for the targeted Codex version is the source of truth for
-protocol schemas, message payloads, transport framing, and method names.
+This section defines Symphony's language-neutral responsibilities when integrating a coding-agent
+runtime. The default runtime is a Codex app-server. The Codex app-server protocol for the targeted
+Codex version is the source of truth for protocol schemas, message payloads, transport framing, and
+method names on the Codex path.
 
 Protocol source of truth:
 
@@ -1052,6 +1082,8 @@ Optional client-side tool extension:
   using the protocol mechanism supported by the targeted Codex app-server version.
 - Unsupported tool names SHOULD still return a failure result using the targeted protocol and
   continue the session.
+- This extension is Codex app-server-specific unless an alternate provider explicitly documents an
+  equivalent tool mechanism.
 
 `linear_graphql` extension contract:
 
@@ -1094,7 +1126,30 @@ User-input-required policy:
   through an approved operator channel, or auto-resolve it according to its documented policy.
 - The example high-trust behavior above fails user-input-required turns immediately.
 
-### 10.6 Timeouts and Error Mapping
+### 10.6 Experimental Claude Code Provider
+
+Implementations MAY support `agent.provider: claude_code` as an experimental provider using the
+Claude Code CLI/Agent SDK stream-json interface.
+
+Claude Code launch requirements:
+
+- Command: `claude_code.command`
+- Invocation: `bash -lc <adapter launch wrapper>` in the per-issue workspace
+- Input: one JSONL user message on stdin with the rendered issue prompt as a text content block
+- Output: newline-delimited `stream-json` events from Claude Code
+- Completion: a final `type == "result"` event with `subtype == "success"` and `is_error != true`
+- Failure: any non-success result subtype, timeout, or subprocess exit before a final result
+
+The adapter SHOULD emit the same high-level runtime event names as the Codex path where practical:
+`session_started`, `turn_completed`, `turn_failed`, and `notification`. Claude Code `session_id`
+MAY be reused as Symphony `thread_id`; `turn_id` MAY be derived from the final result's `num_turns`
+when Claude Code does not expose a separate turn identifier.
+
+Linear tooling on the Claude Code path is implementation-defined. If the Codex `linear_graphql`
+dynamic tool is not available, the workflow MUST document the replacement, such as a `linear-cli`
+binary, MCP server configured through `claude_code.command`, or project-local instructions.
+
+### 10.7 Timeouts and Error Mapping
 
 Timeouts:
 
@@ -1114,7 +1169,7 @@ Error mapping (RECOMMENDED normalized categories):
 - `turn_cancelled`
 - `turn_input_required`
 
-### 10.7 Agent Runner Contract
+### 10.8 Agent Runner Contract
 
 The `Agent Runner` wraps workspace + prompt + app-server client.
 
@@ -2078,6 +2133,7 @@ Use the same validation profiles as Section 17:
 - Hook timeout config (`hooks.timeout_ms`, default `60000`)
 - Coding-agent app-server subprocess client with JSON line protocol
 - Codex launch command config (`codex.command`, default `codex app-server`)
+- Agent provider selection config (`agent.provider`, default `codex`)
 - Strict prompt rendering with `issue` and `attempt` variables
 - Exponential retry queue with continuation retries after normal exit
 - Configurable retry backoff cap (`agent.max_retry_backoff_ms`, default 5m)
@@ -2092,6 +2148,8 @@ Use the same validation profiles as Section 17:
   exposes the baseline endpoints/error semantics in Section 13.7 if shipped.
 - `linear_graphql` client-side tool extension exposes raw Linear GraphQL access through the
   app-server session using configured Symphony auth.
+- Experimental Claude Code provider launches `claude_code.command` through a stream-json CLI
+  adapter and documents its Linear tooling replacement when `linear_graphql` is unavailable.
 - TODO: Persist retry queue and session metadata across process restarts.
 - TODO: Make observability settings configurable in workflow front matter without prescribing UI
   implementation details.

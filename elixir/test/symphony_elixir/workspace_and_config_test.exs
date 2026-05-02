@@ -744,7 +744,13 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert config.workspace.root == Path.join(System.tmp_dir!(), "symphony_workspaces")
     assert config.worker.max_concurrent_agents_per_host == nil
     assert config.agent.max_concurrent_agents == 10
+    assert config.agent.provider == "codex"
     assert config.codex.command == "codex app-server"
+
+    assert config.claude_code.command ==
+             "claude --bare -p --output-format stream-json --input-format stream-json --verbose"
+
+    assert config.claude_code.turn_timeout_ms == 3_600_000
 
     assert config.codex.approval_policy == %{
              "reject" => %{
@@ -885,6 +891,25 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
 
     write_workflow_file!(Workflow.workflow_file_path(), codex_command: "codex app-server")
     assert Config.settings!().codex.command == "codex app-server"
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      agent_provider: "claude_code",
+      claude_code_command: "claude -p --output-format stream-json --input-format stream-json",
+      claude_code_turn_timeout_ms: 120_000
+    )
+
+    config = Config.settings!()
+    assert config.agent.provider == "claude_code"
+    assert config.claude_code.command == "claude -p --output-format stream-json --input-format stream-json"
+    assert config.claude_code.turn_timeout_ms == 120_000
+
+    write_workflow_file!(Workflow.workflow_file_path(), agent_provider: "bad")
+    assert {:error, {:invalid_workflow_config, message}} = Config.validate!()
+    assert message =~ "agent.provider"
+
+    write_workflow_file!(Workflow.workflow_file_path(), claude_code_turn_timeout_ms: "bad")
+    assert {:error, {:invalid_workflow_config, message}} = Config.validate!()
+    assert message =~ "claude_code.turn_timeout_ms"
   end
 
   test "config resolves $VAR references for env-backed secret and path values" do

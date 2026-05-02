@@ -81,7 +81,7 @@ Optional flags:
 - `--port` also starts the Phoenix observability service (default: disabled)
 
 The `WORKFLOW.md` file uses YAML front matter for configuration, plus a Markdown body used as the
-Codex session prompt.
+coding-agent session prompt.
 
 Minimal example:
 
@@ -96,6 +96,7 @@ hooks:
   after_create: |
     git clone git@github.com:your-org/your-repo.git .
 agent:
+  provider: codex
   max_concurrent_agents: 10
   max_turns: 20
 codex:
@@ -110,6 +111,8 @@ Title: {{ issue.title }} Body: {{ issue.description }}
 Notes:
 
 - If a value is missing, defaults are used.
+- `agent.provider` defaults to `codex`. Set it to `claude_code` to use the experimental Claude Code
+  CLI provider.
 - Safer Codex defaults are used when policy fields are omitted:
   - `codex.approval_policy` defaults to `{"reject":{"sandbox_approval":true,"rules":true,"mcp_elicitations":true}}`
   - `codex.thread_sandbox` defaults to `workspace-write`
@@ -119,8 +122,14 @@ Notes:
 - When `codex.turn_sandbox_policy` is set explicitly, Symphony passes the map through to Codex
   unchanged. Compatibility then depends on the targeted Codex app-server version rather than local
   Symphony validation.
-- `agent.max_turns` caps how many back-to-back Codex turns Symphony will run in a single agent
+- `agent.max_turns` caps how many back-to-back coding-agent turns Symphony will run in a single agent
   invocation when a turn completes normally but the issue is still in an active state. Default: `20`.
+- The experimental Claude Code provider uses a separate `claude_code` config block and does not
+  reuse `codex.command`. Its default command is:
+  `claude --bare -p --output-format stream-json --input-format stream-json --verbose`.
+- Claude Code does not receive Symphony's Codex app-server `linear_graphql` dynamic tool. If your
+  workflow requires Linear writes, make a shell-accessible replacement available, such as
+  `linear-cli`, and allow it through Claude Code permissions or MCP configuration.
 - If the Markdown body is blank, Symphony uses a default prompt template that includes the issue
   identifier, title, and body.
 - Use `hooks.after_create` to bootstrap a fresh workspace. For a Git-backed repo, you can run
@@ -143,6 +152,15 @@ hooks:
     git clone --depth 1 "$SOURCE_REPO_URL" .
 codex:
   command: "$CODEX_BIN --config 'model=\"gpt-5.5\"' app-server"
+```
+
+Experimental Claude Code example:
+
+```yaml
+agent:
+  provider: claude_code
+claude_code:
+  command: "claude --bare -p --output-format stream-json --input-format stream-json --verbose --permission-mode acceptEdits --allowedTools \"Read,Edit,Write,Glob,Grep,Bash(linear-cli *)\""
 ```
 
 - If `WORKFLOW.md` is missing or has invalid YAML at startup, Symphony does not boot.
