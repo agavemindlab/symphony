@@ -20,6 +20,7 @@ defmodule SymphonyElixir.MixProject do
           SymphonyElixir.Orchestrator.State,
           SymphonyElixir.AgentRunner,
           SymphonyElixir.CLI,
+          SymphonyElixir.ClaudeCode.StreamJson,
           SymphonyElixir.Codex.AppServer,
           SymphonyElixir.Codex.DynamicTool,
           SymphonyElixir.HttpServer,

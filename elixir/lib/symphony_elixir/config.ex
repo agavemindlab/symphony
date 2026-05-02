@@ -25,6 +25,10 @@ defmodule SymphonyElixir.Config do
           thread_sandbox: String.t(),
           turn_sandbox_policy: map()
         }
+  @type claude_code_runtime_settings :: %{
+          command: String.t(),
+          turn_timeout_ms: pos_integer()
+        }
 
   @spec settings() :: {:ok, Schema.t()} | {:error, term()}
   def settings do
@@ -111,6 +115,17 @@ defmodule SymphonyElixir.Config do
            turn_sandbox_policy: turn_sandbox_policy
          }}
       end
+    end
+  end
+
+  @spec claude_code_runtime_settings() :: {:ok, claude_code_runtime_settings()} | {:error, term()}
+  def claude_code_runtime_settings do
+    with {:ok, settings} <- settings() do
+      {:ok,
+       %{
+         command: settings.claude_code.command,
+         turn_timeout_ms: settings.claude_code.turn_timeout_ms
+       }}
     end
   end
 

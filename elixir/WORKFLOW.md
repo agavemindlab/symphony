@@ -26,6 +26,7 @@ hooks:
   before_remove: |
     cd elixir && mise exec -- mix workspace.before_remove
 agent:
+  provider: codex
   max_concurrent_agents: 10
   max_turns: 20
 codex:
@@ -34,6 +35,8 @@ codex:
   thread_sandbox: workspace-write
   turn_sandbox_policy:
     type: workspaceWrite
+claude_code:
+  command: claude --bare -p --output-format stream-json --input-format stream-json --verbose --permission-mode acceptEdits --allowedTools "Read,Edit,Write,Glob,Grep,Bash(linear-cli *)"
 ---
 
 You are working on a Linear ticket `{{ issue.identifier }}`

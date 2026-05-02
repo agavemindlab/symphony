@@ -4,6 +4,7 @@ defmodule SymphonyElixir.AgentRunner do
   """
 
   require Logger
+  alias SymphonyElixir.ClaudeCode.StreamJson
   alias SymphonyElixir.Codex.AppServer
   alias SymphonyElixir.{Config, Linear.Issue, PromptBuilder, Tracker, Workspace}
 
@@ -35,7 +36,7 @@ defmodule SymphonyElixir.AgentRunner do
 
         try do
           with :ok <- Workspace.run_before_run_hook(workspace, issue, worker_host) do
-            run_codex_turns(workspace, issue, codex_update_recipient, opts, worker_host)
+            run_agent_turns(workspace, issue, codex_update_recipient, opts, worker_host)
           end
         after
           Workspace.run_after_run_hook(workspace, issue, worker_host)
@@ -75,6 +76,84 @@ defmodule SymphonyElixir.AgentRunner do
   end
 
   defp send_worker_runtime_info(_recipient, _issue, _worker_host, _workspace), do: :ok
+
+  defp run_agent_turns(workspace, issue, codex_update_recipient, opts, worker_host) do
+    case Config.settings!().agent.provider do
+      "claude_code" ->
+        run_claude_code_turns(workspace, issue, codex_update_recipient, opts, worker_host)
+
+      _ ->
+        run_codex_turns(workspace, issue, codex_update_recipient, opts, worker_host)
+    end
+  end
+
+  defp run_claude_code_turns(workspace, issue, codex_update_recipient, opts, worker_host) do
+    max_turns = Keyword.get(opts, :max_turns, Config.settings!().agent.max_turns)
+    issue_state_fetcher = Keyword.get(opts, :issue_state_fetcher, &Tracker.fetch_issue_states_by_ids/1)
+
+    do_run_claude_code_turns(
+      workspace,
+      issue,
+      codex_update_recipient,
+      opts,
+      issue_state_fetcher,
+      worker_host,
+      1,
+      max_turns
+    )
+  end
+
+  defp do_run_claude_code_turns(
+         workspace,
+         issue,
+         codex_update_recipient,
+         opts,
+         issue_state_fetcher,
+         worker_host,
+         turn_number,
+         max_turns
+       ) do
+    prompt = build_turn_prompt(issue, opts, turn_number, max_turns)
+    claude_code_provider = Keyword.get(opts, :claude_code_provider, &StreamJson.run/4)
+
+    with {:ok, turn_session} <-
+           claude_code_provider.(
+             workspace,
+             prompt,
+             issue,
+             on_message: codex_message_handler(codex_update_recipient, issue),
+             worker_host: worker_host
+           ) do
+      Logger.info("Completed Claude Code agent run for #{issue_context(issue)} session_id=#{turn_session[:session_id]} workspace=#{workspace} turn=#{turn_number}/#{max_turns}")
+
+      case continue_with_issue?(issue, issue_state_fetcher) do
+        {:continue, refreshed_issue} when turn_number < max_turns ->
+          Logger.info("Continuing Claude Code agent run for #{issue_context(refreshed_issue)} after normal turn completion turn=#{turn_number}/#{max_turns}")
+
+          do_run_claude_code_turns(
+            workspace,
+            refreshed_issue,
+            codex_update_recipient,
+            opts,
+            issue_state_fetcher,
+            worker_host,
+            turn_number + 1,
+            max_turns
+          )
+
+        {:continue, refreshed_issue} ->
+          Logger.info("Reached agent.max_turns for #{issue_context(refreshed_issue)} with issue still active; returning control to orchestrator")
+
+          :ok
+
+        {:done, _refreshed_issue} ->
+          :ok
+
+        {:error, reason} ->
+          {:error, reason}
+      end
+    end
+  end
 
   defp run_codex_turns(workspace, issue, codex_update_recipient, opts, worker_host) do
     max_turns = Keyword.get(opts, :max_turns, Config.settings!().agent.max_turns)
