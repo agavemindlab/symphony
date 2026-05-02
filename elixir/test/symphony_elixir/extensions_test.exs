@@ -354,6 +354,18 @@ defmodule SymphonyElixir.ExtensionsTest do
                  "turn_count" => 7,
                  "last_event" => "notification",
                  "last_message" => "rendered",
+                 "recent_events" => [
+                   %{
+                     "at" => "2026-05-02T05:00:01Z",
+                     "event" => "session_started",
+                     "message" => "session started"
+                   },
+                   %{
+                     "at" => "2026-05-02T05:00:02Z",
+                     "event" => "notification",
+                     "message" => "rendered"
+                   }
+                 ],
                  "started_at" => state_payload["running"] |> List.first() |> Map.fetch!("started_at"),
                  "last_event_at" => nil,
                  "tokens" => %{"input_tokens" => 4, "output_tokens" => 8, "total_tokens" => 12}
@@ -400,12 +412,35 @@ defmodule SymphonyElixir.ExtensionsTest do
                "started_at" => issue_payload["running"]["started_at"],
                "last_event" => "notification",
                "last_message" => "rendered",
+               "recent_events" => [
+                 %{
+                   "at" => "2026-05-02T05:00:01Z",
+                   "event" => "session_started",
+                   "message" => "session started"
+                 },
+                 %{
+                   "at" => "2026-05-02T05:00:02Z",
+                   "event" => "notification",
+                   "message" => "rendered"
+                 }
+               ],
                "last_event_at" => nil,
                "tokens" => %{"input_tokens" => 4, "output_tokens" => 8, "total_tokens" => 12}
              },
              "retry" => nil,
              "logs" => %{"codex_session_logs" => []},
-             "recent_events" => [],
+             "recent_events" => [
+               %{
+                 "at" => "2026-05-02T05:00:01Z",
+                 "event" => "session_started",
+                 "message" => "session started"
+               },
+               %{
+                 "at" => "2026-05-02T05:00:02Z",
+                 "event" => "notification",
+                 "message" => "rendered"
+               }
+             ],
              "last_error" => nil,
              "tracked" => %{}
            }
@@ -548,6 +583,8 @@ defmodule SymphonyElixir.ExtensionsTest do
     assert html =~ "Offline"
     assert html =~ "Copy ID"
     assert html =~ "Codex update"
+    assert html =~ "Recent activity"
+    assert html =~ "session started"
     refute html =~ "data-runtime-clock="
     refute html =~ "setInterval(refreshRuntimeClocks"
     refute html =~ "Refresh now"
@@ -578,6 +615,34 @@ defmodule SymphonyElixir.ExtensionsTest do
             }
           },
           last_codex_timestamp: DateTime.utc_now(),
+          recent_codex_events: [
+            %{
+              event: :notification,
+              message: %{
+                payload: %{
+                  "method" => "codex/event/agent_reasoning",
+                  "params" => %{
+                    "msg" => %{"payload" => %{"summaryText" => "checking workspace"}}
+                  }
+                }
+              },
+              timestamp: DateTime.utc_now()
+            },
+            %{
+              event: :notification,
+              message: %{
+                payload: %{
+                  "method" => "codex/event/agent_message_content_delta",
+                  "params" => %{
+                    "msg" => %{
+                      "content" => "structured update"
+                    }
+                  }
+                }
+              },
+              timestamp: DateTime.utc_now()
+            }
+          ],
           codex_input_tokens: 10,
           codex_output_tokens: 12,
           codex_total_tokens: 22,
@@ -594,6 +659,8 @@ defmodule SymphonyElixir.ExtensionsTest do
     assert_eventually(fn ->
       render(view) =~ "agent message content streaming: structured update"
     end)
+
+    assert render(view) =~ "reasoning update: checking workspace"
   end
 
   test "dashboard liveview renders an unavailable state without crashing" do
@@ -684,6 +751,19 @@ defmodule SymphonyElixir.ExtensionsTest do
   end
 
   defp static_snapshot do
+    recent_events = [
+      %{
+        event: :session_started,
+        message: nil,
+        timestamp: ~U[2026-05-02 05:00:01Z]
+      },
+      %{
+        event: :notification,
+        message: "rendered",
+        timestamp: ~U[2026-05-02 05:00:02Z]
+      }
+    ]
+
     %{
       running: [
         %{
@@ -696,6 +776,7 @@ defmodule SymphonyElixir.ExtensionsTest do
           last_codex_message: "rendered",
           last_codex_timestamp: nil,
           last_codex_event: :notification,
+          recent_codex_events: recent_events,
           codex_input_tokens: 4,
           codex_output_tokens: 8,
           codex_total_tokens: 12,

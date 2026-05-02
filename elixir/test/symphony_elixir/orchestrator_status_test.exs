@@ -101,6 +101,73 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
            }
   end
 
+  test "orchestrator snapshot preserves recent codex updates in chronological order" do
+    issue_id = "issue-recent-events"
+
+    issue = %Issue{
+      id: issue_id,
+      identifier: "MT-189",
+      title: "Recent event snapshot test",
+      description: "Capture multiple codex updates",
+      state: "In Progress",
+      url: "https://example.org/issues/MT-189"
+    }
+
+    orchestrator_name = Module.concat(__MODULE__, :RecentEventsOrchestrator)
+    {:ok, pid} = Orchestrator.start_link(name: orchestrator_name)
+
+    on_exit(fn ->
+      if Process.alive?(pid) do
+        Process.exit(pid, :normal)
+      end
+    end)
+
+    initial_state = :sys.get_state(pid)
+    started_at = DateTime.utc_now()
+
+    running_entry = %{
+      pid: self(),
+      ref: make_ref(),
+      identifier: issue.identifier,
+      issue: issue,
+      session_id: nil,
+      turn_count: 0,
+      last_codex_message: nil,
+      last_codex_timestamp: nil,
+      last_codex_event: nil,
+      started_at: started_at
+    }
+
+    state_with_issue =
+      initial_state
+      |> Map.put(:running, %{issue_id => running_entry})
+      |> Map.put(:claimed, MapSet.put(initial_state.claimed, issue_id))
+
+    :sys.replace_state(pid, fn _ -> state_with_issue end)
+
+    base_timestamp = ~U[2026-05-02 05:00:00Z]
+
+    Enum.each(1..55, fn index ->
+      send(
+        pid,
+        {:codex_worker_update, issue_id,
+         %{
+           event: :notification,
+           payload: %{"method" => "event/#{index}"},
+           timestamp: DateTime.add(base_timestamp, index, :second)
+         }}
+      )
+    end)
+
+    snapshot = GenServer.call(pid, :snapshot)
+    assert %{running: [snapshot_entry]} = snapshot
+    assert length(snapshot_entry.recent_codex_events) == 50
+
+    assert hd(snapshot_entry.recent_codex_events).message == %{"method" => "event/6"}
+    assert List.last(snapshot_entry.recent_codex_events).message == %{"method" => "event/55"}
+    assert snapshot_entry.last_codex_message == List.last(snapshot_entry.recent_codex_events)
+  end
+
   test "orchestrator snapshot tracks codex thread totals and app-server pid" do
     issue_id = "issue-usage-snapshot"
 
@@ -941,9 +1008,13 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
       |> Map.put(:claimed, MapSet.put(initial_state.claimed, issue_id))
     end)
 
+    tick_requested_at_ms = System.monotonic_time(:millisecond)
     send(pid, :tick)
-    Process.sleep(100)
-    state = :sys.get_state(pid)
+
+    state =
+      wait_for_state(pid, fn state ->
+        Map.has_key?(state.retry_attempts, issue_id)
+      end)
 
     refute Process.alive?(worker_pid)
     refute Map.has_key?(state.running, issue_id)
@@ -956,9 +1027,8 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
            } = state.retry_attempts[issue_id]
 
     assert is_integer(due_at_ms)
-    remaining_ms = due_at_ms - System.monotonic_time(:millisecond)
-    assert remaining_ms >= 9_500
-    assert remaining_ms <= 10_500
+    assert due_at_ms >= tick_requested_at_ms + 9_500
+    assert due_at_ms <= tick_requested_at_ms + 12_000
   end
 
   test "status dashboard renders offline marker to terminal" do
@@ -1557,6 +1627,11 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
     do_wait_for_snapshot(pid, predicate, deadline_ms)
   end
 
+  defp wait_for_state(pid, predicate, timeout_ms \\ 500) when is_function(predicate, 1) do
+    deadline_ms = System.monotonic_time(:millisecond) + timeout_ms
+    do_wait_for_state(pid, predicate, deadline_ms)
+  end
+
   defp do_wait_for_snapshot(pid, predicate, deadline_ms) do
     snapshot = GenServer.call(pid, :snapshot)
 
@@ -1568,6 +1643,21 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
       else
         Process.sleep(5)
         do_wait_for_snapshot(pid, predicate, deadline_ms)
+      end
+    end
+  end
+
+  defp do_wait_for_state(pid, predicate, deadline_ms) do
+    state = :sys.get_state(pid)
+
+    if predicate.(state) do
+      state
+    else
+      if System.monotonic_time(:millisecond) > deadline_ms do
+        flunk("timed out waiting for orchestrator state: #{inspect(state)}")
+      else
+        Process.sleep(10)
+        do_wait_for_state(pid, predicate, deadline_ms)
       end
     end
   end

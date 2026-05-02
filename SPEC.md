@@ -1405,6 +1405,18 @@ Minimum endpoints:
           "turn_count": 7,
           "last_event": "turn_completed",
           "last_message": "",
+          "recent_events": [
+            {
+              "at": "2026-02-24T20:14:30Z",
+              "event": "notification",
+              "message": "Running tests"
+            },
+            {
+              "at": "2026-02-24T20:14:59Z",
+              "event": "turn_completed",
+              "message": "turn completed"
+            }
+          ],
           "started_at": "2026-02-24T20:10:12Z",
           "last_event_at": "2026-02-24T20:14:59Z",
           "tokens": {
@@ -1457,6 +1469,18 @@ Minimum endpoints:
         "started_at": "2026-02-24T20:10:12Z",
         "last_event": "notification",
         "last_message": "Working on tests",
+        "recent_events": [
+          {
+            "at": "2026-02-24T20:14:30Z",
+            "event": "notification",
+            "message": "Running tests"
+          },
+          {
+            "at": "2026-02-24T20:14:59Z",
+            "event": "notification",
+            "message": "Working on tests"
+          }
+        ],
         "last_event_at": "2026-02-24T20:14:59Z",
         "tokens": {
           "input_tokens": 1200,

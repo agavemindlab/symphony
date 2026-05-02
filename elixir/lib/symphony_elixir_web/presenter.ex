@@ -106,6 +106,7 @@ defmodule SymphonyElixirWeb.Presenter do
       turn_count: Map.get(entry, :turn_count, 0),
       last_event: entry.last_codex_event,
       last_message: summarize_message(entry.last_codex_message),
+      recent_events: recent_events_payload(entry),
       started_at: iso8601(entry.started_at),
       last_event_at: iso8601(entry.last_codex_timestamp),
       tokens: %{
@@ -138,6 +139,7 @@ defmodule SymphonyElixirWeb.Presenter do
       started_at: iso8601(running.started_at),
       last_event: running.last_codex_event,
       last_message: summarize_message(running.last_codex_message),
+      recent_events: recent_events_payload(running),
       last_event_at: iso8601(running.last_codex_timestamp),
       tokens: %{
         input_tokens: running.codex_input_tokens,
@@ -168,15 +170,38 @@ defmodule SymphonyElixirWeb.Presenter do
   end
 
   defp recent_events_payload(running) do
-    [
-      %{
-        at: iso8601(running.last_codex_timestamp),
-        event: running.last_codex_event,
-        message: summarize_message(running.last_codex_message)
-      }
-    ]
-    |> Enum.reject(&is_nil(&1.at))
+    case Map.get(running, :recent_codex_events) do
+      events when is_list(events) ->
+        events
+        |> Enum.map(&recent_event_payload/1)
+        |> Enum.reject(&is_nil(&1.at))
+
+      _ ->
+        [
+          %{
+            at: iso8601(running.last_codex_timestamp),
+            event: event_name(running.last_codex_event),
+            message: summarize_message(running.last_codex_message)
+          }
+        ]
+        |> Enum.reject(&is_nil(&1.at))
+    end
   end
+
+  defp recent_event_payload(%{timestamp: timestamp, event: event, message: message}) do
+    %{
+      at: iso8601(timestamp),
+      event: event_name(event),
+      message: summarize_message(%{event: event, message: message})
+    }
+  end
+
+  defp recent_event_payload(_event), do: %{at: nil, event: nil, message: nil}
+
+  defp event_name(event) when is_atom(event), do: Atom.to_string(event)
+  defp event_name(event) when is_binary(event), do: event
+  defp event_name(nil), do: nil
+  defp event_name(event), do: to_string(event)
 
   defp summarize_message(nil), do: nil
   defp summarize_message(message), do: StatusDashboard.humanize_codex_message(message)
