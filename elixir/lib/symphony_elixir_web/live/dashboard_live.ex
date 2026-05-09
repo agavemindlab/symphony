@@ -149,7 +149,8 @@ defmodule SymphonyElixirWeb.DashboardLive do
                   </tr>
                 </thead>
                 <tbody>
-                  <tr :for={entry <- @payload.running}>
+                  <%= for entry <- @payload.running do %>
+                    <tr>
                     <td>
                       <div class="issue-stack">
                         <span class="issue-id"><%= entry.issue_identifier %></span>
@@ -199,7 +200,22 @@ defmodule SymphonyElixirWeb.DashboardLive do
                         <span class="muted">In <%= format_int(entry.tokens.input_tokens) %> / Out <%= format_int(entry.tokens.output_tokens) %></span>
                       </div>
                     </td>
-                  </tr>
+                    </tr>
+                    <tr :if={recent_events_for_display(entry.recent_events) != []} class="event-history-row">
+                      <td colspan="6">
+                        <div class="event-history">
+                          <div class="event-history-title">Recent activity</div>
+                          <ol class="event-history-list">
+                            <li :for={event <- recent_events_for_display(entry.recent_events)}>
+                              <span class="event-history-time mono numeric"><%= event.at || "n/a" %></span>
+                              <span class="event-history-kind"><%= event.event || "event" %></span>
+                              <span class="event-history-message"><%= event.message || "n/a" %></span>
+                            </li>
+                          </ol>
+                        </div>
+                      </td>
+                    </tr>
+                  <% end %>
                 </tbody>
               </table>
             </div>
@@ -320,6 +336,9 @@ defmodule SymphonyElixirWeb.DashboardLive do
       true -> base
     end
   end
+
+  defp recent_events_for_display(events) when is_list(events), do: Enum.take(events, -6)
+  defp recent_events_for_display(_events), do: []
 
   defp schedule_runtime_tick do
     Process.send_after(self(), :runtime_tick, @runtime_tick_ms)
