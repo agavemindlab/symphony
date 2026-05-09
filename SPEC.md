@@ -235,6 +235,7 @@ Fields:
 - `last_codex_event` (string/enum or null)
 - `last_codex_timestamp` (timestamp or null)
 - `last_codex_message` (summarized payload)
+- `recent_codex_events` (bounded list of summarized payloads, oldest to newest)
 - `codex_input_tokens` (integer)
 - `codex_output_tokens` (integer)
 - `codex_total_tokens` (integer)
@@ -1377,6 +1378,11 @@ Enablement (extension):
   retry delays, token consumption, runtime totals, recent events, and health/error indicators).
 - It is up to the implementation whether this is server-generated HTML or a client-side app that
   consumes the JSON API below.
+- Operator-side tools such as `ccgrep`, `lazyagent`, `codexmonitor`, and macOS session browsers can
+  inspect local Codex rollout/session files, and are useful ad-hoc alternatives to raw `tail -f`.
+  They are not a direct replacement for this dashboard because they require separate local setup and
+  do not carry Symphony's tracker issue, retry, token, workspace, and run-state context in the same
+  view.
 
 #### 13.7.2 JSON REST API (`/api/v1/*`)
 
