@@ -36,9 +36,9 @@ Symphony stops the active agent for that issue and cleans up matching workspaces
    `workflows/agavemindlab/WORKFLOW.md` and `skills/` entries are inherited by
    project directories through symlinks; replace a symlink with a real file or
    directory only when that project needs an override.
-4. Source the selected project's `project.env` before starting Symphony. It must
-   provide `SYMPHONY_PROJECT_SLUG`; it may also provide project-specific settings
-   such as `SYMPHONY_BASE_BRANCH`.
+4. Start Symphony with the repository launcher for the selected project. It
+   loads `workflows/<project>/project.env` and the configured profile from
+   `~/.config/symphony/<profile>.env`.
 5. Follow the instructions below to install the required runtime dependencies and start the service.
 
 ## Prerequisites
@@ -59,7 +59,14 @@ mise trust
 mise install
 mise exec -- mix setup
 mise exec -- mix build
-source ../workflows/symphony/project.env
+../workflows/symphony-run symphony
+```
+
+For a manual run without the launcher, export variables while sourcing the
+project envfile:
+
+```bash
+set -a; source ../workflows/symphony/project.env; set +a
 mise exec -- ./bin/symphony ../workflows/symphony/WORKFLOW.md
 ```
 

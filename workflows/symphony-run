@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  printf 'Usage: %s <project>\n' "${0##*/}" >&2
+}
+
+die() {
+  printf 'symphony-run: %s\n' "$*" >&2
+  exit 1
+}
+
+if [ "$#" -ne 1 ]; then
+  usage
+  exit 64
+fi
+
+project="$1"
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+
+if [ -n "${SYMPHONY_REPO_ROOT:-}" ]; then
+  repo_root="$(cd -- "$SYMPHONY_REPO_ROOT" && pwd)"
+else
+  repo_root="$(cd -- "$script_dir/.." && pwd)"
+fi
+
+workflow_dir="$repo_root/workflows/$project"
+workflow_file="$workflow_dir/WORKFLOW.md"
+project_env="$workflow_dir/project.env"
+
+[ -f "$workflow_file" ] || die "workflow file not found: $workflow_file"
+[ -f "$project_env" ] || die "project env file not found: $project_env"
+
+caller_profile="${SYMPHONY_PROFILE:-}"
+
+set -a
+source "$project_env"
+set +a
+
+if [ -n "$caller_profile" ]; then
+  SYMPHONY_PROFILE="$caller_profile"
+else
+  SYMPHONY_PROFILE="${SYMPHONY_PROFILE:-grandline}"
+fi
+export SYMPHONY_PROFILE
+
+[ -n "${SYMPHONY_PROJECT_SLUG:-}" ] || die "SYMPHONY_PROJECT_SLUG is not set by $project_env"
+[ -n "${SYMPHONY_BASE_BRANCH:-}" ] || die "SYMPHONY_BASE_BRANCH is not set by $project_env"
+[ -n "${SYMPHONY_REPO:-}" ] || die "SYMPHONY_REPO is not set by $project_env"
+
+selected_profile="$SYMPHONY_PROFILE"
+profile_env="$HOME/.config/symphony/$SYMPHONY_PROFILE.env"
+[ -f "$profile_env" ] || die "profile env file not found: $profile_env"
+
+set -a
+source "$profile_env"
+set +a
+
+SYMPHONY_PROFILE="$selected_profile"
+
+[ -n "${LINEAR_API_KEY:-}" ] || die "LINEAR_API_KEY is not set by $profile_env"
+
+export GH_PROMPT_DISABLED="${GH_PROMPT_DISABLED:-true}"
+export SYMPHONY_WORKSPACE_ROOT="${SYMPHONY_WORKSPACE_ROOT:-$HOME/symphony-workspaces}"
+export SYMPHONY_PROFILE
+
+cd "$repo_root/elixir"
+exec mise exec -- ./bin/symphony --i-understand-that-this-will-be-running-without-the-usual-guardrails "$workflow_file"
