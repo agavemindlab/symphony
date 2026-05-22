@@ -22,7 +22,24 @@ hooks:
   after_create: |
     set -e
     : "${SYMPHONY_WORKFLOW_DIR:?SYMPHONY_WORKFLOW_DIR is not set}"
-    "$SYMPHONY_WORKFLOW_DIR/setup.sh"
+    : "${SYMPHONY_REPO:?SYMPHONY_REPO is not set}"
+
+    fork_owner="${GITHUB_FORK_OWNER:-$(gh api user -q .login)}"
+    fork_repo="$fork_owner/$SYMPHONY_REPO"
+    base_branch="${SYMPHONY_BASE_BRANCH:-main}"
+
+    gh repo clone "$fork_repo" .
+
+    if ! git remote get-url upstream >/dev/null 2>&1; then
+      git remote add upstream "https://github.com/agavemindlab/$SYMPHONY_REPO.git"
+    fi
+
+    git fetch upstream "$base_branch" --prune
+
+    if [ -f "$SYMPHONY_WORKFLOW_DIR/setup.sh" ]; then
+      "$SYMPHONY_WORKFLOW_DIR/setup.sh"
+    fi
+
     mkdir -p .agents/skills
     if [ -d "$SYMPHONY_WORKFLOW_DIR/skills" ]; then
       for skill in "$SYMPHONY_WORKFLOW_DIR"/skills/*; do
@@ -40,7 +57,11 @@ hooks:
       done
     fi
   before_remove: |
-    "$SYMPHONY_WORKFLOW_DIR/teardown.sh"
+    set -e
+    : "${SYMPHONY_WORKFLOW_DIR:?SYMPHONY_WORKFLOW_DIR is not set}"
+    if [ -f "$SYMPHONY_WORKFLOW_DIR/teardown.sh" ]; then
+      "$SYMPHONY_WORKFLOW_DIR/teardown.sh"
+    fi
 agent:
   max_concurrent_agents: 1
   max_turns: 20
