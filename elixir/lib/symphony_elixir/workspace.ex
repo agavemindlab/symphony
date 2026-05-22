@@ -4,7 +4,7 @@ defmodule SymphonyElixir.Workspace do
   """
 
   require Logger
-  alias SymphonyElixir.{Config, PathSafety, SSH}
+  alias SymphonyElixir.{Config, PathSafety, SSH, Workflow}
 
   @remote_workspace_marker "__SYMPHONY_WORKSPACE__"
 
@@ -298,7 +298,11 @@ defmodule SymphonyElixir.Workspace do
 
     task =
       Task.async(fn ->
-        System.cmd("sh", ["-lc", command], cd: workspace, stderr_to_stdout: true)
+        System.cmd("sh", ["-lc", command],
+          cd: workspace,
+          env: local_hook_env(),
+          stderr_to_stdout: true
+        )
       end)
 
     case Task.yield(task, timeout_ms) do
@@ -329,6 +333,10 @@ defmodule SymphonyElixir.Workspace do
       {:error, reason} ->
         {:error, reason}
     end
+  end
+
+  defp local_hook_env do
+    [{"SYMPHONY_WORKFLOW_DIR", Path.dirname(Workflow.workflow_file_path())}]
   end
 
   defp handle_hook_command_result({_output, 0}, _workspace, _issue_id, _hook_name) do

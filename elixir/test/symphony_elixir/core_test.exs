@@ -91,7 +91,7 @@ defmodule SymphonyElixir.CoreTest do
   test "current WORKFLOW.md file is valid and complete" do
     original_workflow_path = Workflow.workflow_file_path()
     on_exit(fn -> Workflow.set_workflow_file_path(original_workflow_path) end)
-    Workflow.clear_workflow_file_path()
+    Workflow.set_workflow_file_path(Path.expand("../workflows/symphony/WORKFLOW.md", File.cwd!()))
 
     assert {:ok, %{config: config, prompt: prompt}} = Workflow.load()
     assert is_map(config)
@@ -99,16 +99,16 @@ defmodule SymphonyElixir.CoreTest do
     tracker = Map.get(config, "tracker", %{})
     assert is_map(tracker)
     assert Map.get(tracker, "kind") == "linear"
-    assert is_binary(Map.get(tracker, "project_slug"))
+    assert Map.get(tracker, "project_slug") == "$SYMPHONY_PROJECT_SLUG"
     assert is_list(Map.get(tracker, "active_states"))
     assert is_list(Map.get(tracker, "terminal_states"))
 
     hooks = Map.get(config, "hooks", %{})
     assert is_map(hooks)
-    assert Map.get(hooks, "after_create") =~ "git clone --depth 1 https://github.com/openai/symphony ."
-    assert Map.get(hooks, "after_create") =~ "cd elixir && mise trust"
-    assert Map.get(hooks, "after_create") =~ "mise exec -- mix deps.get"
-    assert Map.get(hooks, "before_remove") =~ "cd elixir && mise exec -- mix workspace.before_remove"
+    assert Map.get(hooks, "after_create") =~ "\"$SYMPHONY_WORKFLOW_DIR/setup.sh\""
+    assert Map.get(hooks, "after_create") =~ "\"$SYMPHONY_WORKFLOW_DIR/skills\""
+    assert Map.get(hooks, "after_create") =~ ".git/info/exclude"
+    assert Map.get(hooks, "before_remove") =~ "\"$SYMPHONY_WORKFLOW_DIR/teardown.sh\""
 
     assert String.trim(prompt) != ""
     assert is_binary(Config.workflow_prompt())
@@ -980,7 +980,7 @@ defmodule SymphonyElixir.CoreTest do
 
   test "in-repo WORKFLOW.md renders correctly" do
     workflow_path = Workflow.workflow_file_path()
-    Workflow.set_workflow_file_path(Path.expand("WORKFLOW.md", File.cwd!()))
+    Workflow.set_workflow_file_path(Path.expand("../workflows/symphony/WORKFLOW.md", File.cwd!()))
 
     issue = %Issue{
       identifier: "MT-616",
@@ -1001,11 +1001,11 @@ defmodule SymphonyElixir.CoreTest do
     assert prompt =~ "Title: Use rich templates for WORKFLOW.md"
     assert prompt =~ "Current status: In Progress"
     assert prompt =~ "https://example.org/issues/MT-616/use-rich-templates-for-workflowmd"
-    assert prompt =~ "This is an unattended orchestration session."
-    assert prompt =~ "Only stop early for a true blocker"
-    assert prompt =~ "Do not include \"next steps for user\""
-    assert prompt =~ "open and follow `.codex/skills/land/SKILL.md`"
-    assert prompt =~ "Do not call `gh pr merge` directly"
+    assert prompt =~ "This is an unattended Symphony orchestration session."
+    assert prompt =~ "Stop early only for a true blocker"
+    assert prompt =~ "Do not include generic \"next steps for user\""
+    assert prompt =~ "execute the `land` skill flow"
+    assert prompt =~ ".agents/skills/phase-merge-and-confirm/SKILL.md"
     assert prompt =~ "Continuation context:"
     assert prompt =~ "retry attempt #2"
   end

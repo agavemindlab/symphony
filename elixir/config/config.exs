@@ -1,5 +1,8 @@
 import Config
 
+config :symphony_elixir,
+  workflow_file_path: Path.expand("../../workflows/symphony/WORKFLOW.md", __DIR__)
+
 config :phoenix, :json_library, Jason
 
 config :symphony_elixir, SymphonyElixirWeb.Endpoint,
