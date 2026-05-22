@@ -32,17 +32,14 @@ Symphony stops the active agent for that issue and cleans up matching workspaces
    [Harness engineering](https://openai.com/index/harness-engineering/).
 2. Get a new personal token in Linear via Settings → Security & access → Personal API keys, and
    set it as the `LINEAR_API_KEY` environment variable.
-3. Copy this directory's `WORKFLOW.md` to your repo.
-4. Optionally copy the `commit`, `push`, `pull`, `land`, and `linear` skills to your repo.
-   - The `linear` skill expects Symphony's `linear_graphql` app-server tool for raw Linear GraphQL
-     operations such as comment editing or upload flows.
-5. Customize the copied `WORKFLOW.md` file for your project.
-   - To get your project's slug, right-click the project and copy its URL. The slug is part of the
-     URL.
-   - When creating a workflow based on this repo, note that it depends on non-standard Linear
-     issue statuses: "Rework", "Human Review", and "Merging". You can customize them in
-     Team Settings → Workflow in Linear.
-6. Follow the instructions below to install the required runtime dependencies and start the service.
+3. Use a project workflow under [`../workflows/`](../workflows/). The shared
+   `workflows/agavemindlab/WORKFLOW.md` and `skills/` entries are inherited by
+   project directories through symlinks; replace a symlink with a real file or
+   directory only when that project needs an override.
+4. Source the selected project's `project.env` before starting Symphony. It must
+   provide `SYMPHONY_PROJECT_SLUG`; it may also provide project-specific settings
+   such as `SYMPHONY_BASE_BRANCH`.
+5. Follow the instructions below to install the required runtime dependencies and start the service.
 
 ## Prerequisites
 
@@ -62,7 +59,8 @@ mise trust
 mise install
 mise exec -- mix setup
 mise exec -- mix build
-mise exec -- ./bin/symphony ./WORKFLOW.md
+source ../workflows/symphony/project.env
+mise exec -- ./bin/symphony ../workflows/symphony/WORKFLOW.md
 ```
 
 ## Configuration
@@ -73,7 +71,10 @@ Pass a custom workflow file path to `./bin/symphony` when starting the service:
 ./bin/symphony /path/to/custom/WORKFLOW.md
 ```
 
-If no path is passed, Symphony defaults to `./WORKFLOW.md`.
+If no path is passed, Symphony defaults to `./WORKFLOW.md` in the current
+working directory. The repository workflows are centralized under
+[`../workflows/`](../workflows/), so normal project runs should pass an explicit
+workflow path.
 
 Optional flags:
 
@@ -89,7 +90,7 @@ Minimal example:
 ---
 tracker:
   kind: linear
-  project_slug: "..."
+  project_slug: $SYMPHONY_PROJECT_SLUG
 workspace:
   root: ~/code/workspaces
 hooks:
@@ -128,6 +129,8 @@ Notes:
 - If a hook needs `mise exec` inside a freshly cloned workspace, trust the repo config and fetch
   the project dependencies in `hooks.after_create` before invoking `mise` later from other hooks.
 - `tracker.api_key` reads from `LINEAR_API_KEY` when unset or when value is `$LINEAR_API_KEY`.
+- `tracker.project_slug` can read from an environment variable such as
+  `$SYMPHONY_PROJECT_SLUG`.
 - For path values, `~` is expanded to the home directory.
 - For env-backed path values, use `$VAR`. `workspace.root` resolves `$VAR` before path handling,
   while `codex.command` stays a shell command string and any `$VAR` expansion there happens in the
@@ -136,6 +139,7 @@ Notes:
 ```yaml
 tracker:
   api_key: $LINEAR_API_KEY
+  project_slug: $SYMPHONY_PROJECT_SLUG
 workspace:
   root: $SYMPHONY_WORKSPACE_ROOT
 hooks:
@@ -164,7 +168,8 @@ The observability UI now runs on a minimal Phoenix stack:
 
 - `lib/`: application code and Mix tasks
 - `test/`: ExUnit coverage for runtime behavior
-- `WORKFLOW.md`: in-repo workflow contract used by local runs
+- `../workflows/`: centralized workflow contracts, project setup scripts, and
+  shared workflow skills
 - `../.codex/`: repository-local Codex skills and setup helpers
 
 ## Testing

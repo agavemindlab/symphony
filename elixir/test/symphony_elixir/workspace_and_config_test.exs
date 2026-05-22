@@ -890,31 +890,150 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
   test "config resolves $VAR references for env-backed secret and path values" do
     workspace_env_var = "SYMP_WORKSPACE_ROOT_#{System.unique_integer([:positive])}"
     api_key_env_var = "SYMP_LINEAR_API_KEY_#{System.unique_integer([:positive])}"
+    project_slug_env_var = "SYMP_LINEAR_PROJECT_SLUG_#{System.unique_integer([:positive])}"
     workspace_root = Path.join("/tmp", "symphony-workspace-root")
     api_key = "resolved-secret"
+    project_slug = "resolved-project-slug"
     codex_bin = Path.join(["~", "bin", "codex"])
 
     previous_workspace_root = System.get_env(workspace_env_var)
     previous_api_key = System.get_env(api_key_env_var)
+    previous_project_slug = System.get_env(project_slug_env_var)
 
     System.put_env(workspace_env_var, workspace_root)
     System.put_env(api_key_env_var, api_key)
+    System.put_env(project_slug_env_var, project_slug)
 
     on_exit(fn ->
       restore_env(workspace_env_var, previous_workspace_root)
       restore_env(api_key_env_var, previous_api_key)
+      restore_env(project_slug_env_var, previous_project_slug)
     end)
 
     write_workflow_file!(Workflow.workflow_file_path(),
       tracker_api_token: "$#{api_key_env_var}",
+      tracker_project_slug: "$#{project_slug_env_var}",
       workspace_root: "$#{workspace_env_var}",
       codex_command: "#{codex_bin} app-server"
     )
 
     config = Config.settings!()
     assert config.tracker.api_key == api_key
+    assert config.tracker.project_slug == project_slug
     assert config.workspace.root == Path.expand(workspace_root)
     assert config.codex.command == "#{codex_bin} app-server"
+  end
+
+  test "local workspace hooks receive workflow directory from symlinked workflow path" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-workflow-dir-hook-#{System.unique_integer([:positive])}"
+      )
+
+    try do
+      canonical_dir = Path.join(test_root, "agavemindlab")
+      project_dir = Path.join(test_root, "symphony")
+      canonical_workflow = Path.join(canonical_dir, "WORKFLOW.md")
+      project_workflow = Path.join(project_dir, "WORKFLOW.md")
+      workspace_root = Path.join(test_root, "workspaces")
+      before_remove_marker = Path.join(test_root, "before-remove-workflow-dir.txt")
+
+      File.mkdir_p!(canonical_dir)
+      File.mkdir_p!(project_dir)
+
+      write_workflow_file!(canonical_workflow,
+        workspace_root: workspace_root,
+        hook_after_create: "printf '%s' \"$SYMPHONY_WORKFLOW_DIR\" > after-create-workflow-dir.txt",
+        hook_before_remove: "printf '%s' \"$SYMPHONY_WORKFLOW_DIR\" > #{before_remove_marker}"
+      )
+
+      File.ln_s!("../agavemindlab/WORKFLOW.md", project_workflow)
+      Workflow.set_workflow_file_path(Path.expand(project_workflow))
+
+      assert {:ok, workspace} = Workspace.create_for_issue("MT-WORKFLOW-DIR")
+
+      assert File.read!(Path.join(workspace, "after-create-workflow-dir.txt")) ==
+               Path.expand(project_dir)
+
+      assert {:ok, _removed} = Workspace.remove(workspace)
+      assert File.read!(before_remove_marker) == Path.expand(project_dir)
+    after
+      File.rm_rf(test_root)
+    end
+  end
+
+  test "canonical workflow installs missing skills and preserves repo-owned skills" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-workflow-skill-install-#{System.unique_integer([:positive])}"
+      )
+
+    workflow_root_env_var = "SYMPHONY_WORKSPACE_ROOT"
+    previous_workflow_root = System.get_env(workflow_root_env_var)
+    original_workflow_path = Workflow.workflow_file_path()
+
+    try do
+      canonical_workflow = Path.expand("../workflows/agavemindlab/WORKFLOW.md", File.cwd!())
+      canonical_skills = Path.expand("../workflows/agavemindlab/skills", File.cwd!())
+      canonical_dir = Path.join(test_root, "agavemindlab")
+      project_dir = Path.join(test_root, "symphony")
+      project_workflow = Path.join(project_dir, "WORKFLOW.md")
+      workspace_root = Path.join(test_root, "workspaces")
+      teardown_marker = Path.join(test_root, "teardown-workflow-dir.txt")
+
+      File.mkdir_p!(canonical_dir)
+      File.mkdir_p!(project_dir)
+      File.ln_s!(canonical_workflow, Path.join(canonical_dir, "WORKFLOW.md"))
+      File.ln_s!(canonical_skills, Path.join(canonical_dir, "skills"))
+      File.ln_s!("../agavemindlab/WORKFLOW.md", project_workflow)
+      File.ln_s!("../agavemindlab/skills", Path.join(project_dir, "skills"))
+
+      File.write!(Path.join(project_dir, "setup.sh"), """
+      #!/usr/bin/env bash
+      set -euo pipefail
+
+      git init -b main >/dev/null
+      git config user.name "Test User"
+      git config user.email "test@example.com"
+      mkdir -p .agents/skills/linear
+      printf 'repo version\\n' > .agents/skills/linear/SKILL.md
+      git add .agents/skills/linear/SKILL.md
+      git commit -m initial >/dev/null
+      """)
+
+      File.write!(Path.join(project_dir, "teardown.sh"), """
+      #!/usr/bin/env bash
+      set -euo pipefail
+
+      printf '%s' "$SYMPHONY_WORKFLOW_DIR" > #{teardown_marker}
+      """)
+
+      File.chmod!(Path.join(project_dir, "setup.sh"), 0o755)
+      File.chmod!(Path.join(project_dir, "teardown.sh"), 0o755)
+
+      System.put_env(workflow_root_env_var, workspace_root)
+      Workflow.set_workflow_file_path(Path.expand(project_workflow))
+
+      assert {:ok, workspace} = Workspace.create_for_issue("MT-SKILL-INSTALL")
+
+      assert File.exists?(Path.join([workspace, ".agents", "skills", "commit", "SKILL.md"]))
+      assert File.read!(Path.join([workspace, ".agents", "skills", "linear", "SKILL.md"])) == "repo version\n"
+
+      exclude = File.read!(Path.join([workspace, ".git", "info", "exclude"]))
+      assert exclude =~ ".agents/skills/commit/"
+      refute exclude =~ ".agents/skills/linear/"
+
+      assert {"", 0} = System.cmd("git", ["-C", workspace, "status", "--short"])
+
+      assert {:ok, _removed} = Workspace.remove(workspace)
+      assert File.read!(teardown_marker) == Path.expand(project_dir)
+    after
+      Workflow.set_workflow_file_path(original_workflow_path)
+      restore_env(workflow_root_env_var, previous_workflow_root)
+      File.rm_rf(test_root)
+    end
   end
 
   test "config no longer resolves legacy env: references" do
