@@ -59,7 +59,7 @@ mise trust
 mise install
 mise exec -- mix setup
 mise exec -- mix build
-../workflows/symphony-run symphony
+../bin/symphony-run symphony
 ```
 
 For a manual run without the launcher, export variables while sourcing the

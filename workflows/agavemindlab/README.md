@@ -7,8 +7,9 @@ override only the entries that need project-specific behavior.
 ## Layout
 
 ```text
-workflows/
+bin/
   symphony-run
+workflows/
   agavemindlab/
     WORKFLOW.md
     skills/
@@ -42,7 +43,7 @@ so the file can be parsed by dotenv-style tools and sourced by a shell.
 Operators should usually start Symphony through the repository launcher:
 
 ```sh
-workflows/symphony-run <project>
+bin/symphony-run <project>
 ```
 
 The launcher loads `workflows/<project>/project.env`, then loads
