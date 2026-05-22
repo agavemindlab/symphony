@@ -20,6 +20,8 @@ workspace:
   root: $SYMPHONY_WORKSPACE_ROOT
 hooks:
   after_create: |
+    set -e
+    : "${SYMPHONY_WORKFLOW_DIR:?SYMPHONY_WORKFLOW_DIR is not set}"
     "$SYMPHONY_WORKFLOW_DIR/setup.sh"
     mkdir -p .agents/skills
     if [ -d "$SYMPHONY_WORKFLOW_DIR/skills" ]; then

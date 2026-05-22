@@ -1036,6 +1036,105 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     end
   end
 
+  test "canonical workflow surfaces setup failures before installing shared skills" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-workflow-setup-failure-#{System.unique_integer([:positive])}"
+      )
+
+    workflow_root_env_var = "SYMPHONY_WORKSPACE_ROOT"
+    previous_workflow_root = System.get_env(workflow_root_env_var)
+    original_workflow_path = Workflow.workflow_file_path()
+
+    try do
+      canonical_workflow = Path.expand("../workflows/agavemindlab/WORKFLOW.md", File.cwd!())
+      canonical_skills = Path.expand("../workflows/agavemindlab/skills", File.cwd!())
+      canonical_dir = Path.join(test_root, "agavemindlab")
+      project_dir = Path.join(test_root, "symphony")
+      project_workflow = Path.join(project_dir, "WORKFLOW.md")
+      workspace_root = Path.join(test_root, "workspaces")
+      workspace = Path.join(workspace_root, "MT_SETUP_FAIL")
+
+      File.mkdir_p!(canonical_dir)
+      File.mkdir_p!(project_dir)
+      File.ln_s!(canonical_workflow, Path.join(canonical_dir, "WORKFLOW.md"))
+      File.ln_s!(canonical_skills, Path.join(canonical_dir, "skills"))
+      File.ln_s!("../agavemindlab/WORKFLOW.md", project_workflow)
+      File.ln_s!("../agavemindlab/skills", Path.join(project_dir, "skills"))
+
+      File.write!(Path.join(project_dir, "setup.sh"), """
+      #!/usr/bin/env bash
+      printf 'setup failed\\n' >&2
+      exit 42
+      """)
+
+      File.write!(Path.join(project_dir, "teardown.sh"), """
+      #!/usr/bin/env bash
+      exit 0
+      """)
+
+      File.chmod!(Path.join(project_dir, "setup.sh"), 0o755)
+      File.chmod!(Path.join(project_dir, "teardown.sh"), 0o755)
+
+      System.put_env(workflow_root_env_var, workspace_root)
+      Workflow.set_workflow_file_path(Path.expand(project_workflow))
+
+      assert {:error, {:workspace_hook_failed, "after_create", 42, output}} =
+               Workspace.create_for_issue("MT-SETUP-FAIL")
+
+      assert output =~ "setup failed"
+
+      refute File.exists?(Path.join([workspace, ".agents", "skills", "commit", "SKILL.md"]))
+    after
+      Workflow.set_workflow_file_path(original_workflow_path)
+      restore_env(workflow_root_env_var, previous_workflow_root)
+      File.rm_rf(test_root)
+    end
+  end
+
+  test "canonical workflow fails fast when workflow directory env is missing" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-workflow-dir-missing-#{System.unique_integer([:positive])}"
+      )
+
+    workflow_root_env_var = "SYMPHONY_WORKSPACE_ROOT"
+    project_slug_env_var = "SYMPHONY_PROJECT_SLUG"
+    previous_workflow_root = System.get_env(workflow_root_env_var)
+    previous_project_slug = System.get_env(project_slug_env_var)
+    original_workflow_path = Workflow.workflow_file_path()
+
+    try do
+      canonical_workflow = Path.expand("../workflows/agavemindlab/WORKFLOW.md", File.cwd!())
+      workspace = Path.join(test_root, "workspace")
+
+      File.mkdir_p!(workspace)
+      System.put_env(workflow_root_env_var, Path.join(test_root, "workspaces"))
+      System.put_env(project_slug_env_var, "symphony-test-project")
+      Workflow.set_workflow_file_path(canonical_workflow)
+
+      command = Config.settings!().hooks.after_create
+
+      assert {output, status} =
+               System.cmd("sh", ["-lc", command],
+                 cd: workspace,
+                 env: [{"SYMPHONY_WORKFLOW_DIR", nil}],
+                 stderr_to_stdout: true
+               )
+
+      assert status != 0
+      assert output =~ "SYMPHONY_WORKFLOW_DIR is not set"
+      refute File.exists?(Path.join([workspace, ".agents", "skills"]))
+    after
+      Workflow.set_workflow_file_path(original_workflow_path)
+      restore_env(workflow_root_env_var, previous_workflow_root)
+      restore_env(project_slug_env_var, previous_project_slug)
+      File.rm_rf(test_root)
+    end
+  end
+
   test "config no longer resolves legacy env: references" do
     workspace_env_var = "SYMP_WORKSPACE_ROOT_#{System.unique_integer([:positive])}"
     api_key_env_var = "SYMP_LINEAR_API_KEY_#{System.unique_integer([:positive])}"
