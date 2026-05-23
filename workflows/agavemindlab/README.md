@@ -13,6 +13,7 @@ workflows/
   agavemindlab/
     WORKFLOW.md
     skills/
+      cleanup/
     README.md
   <project>/
     WORKFLOW.md -> ../agavemindlab/WORKFLOW.md
@@ -78,6 +79,14 @@ repository version in place. Only newly installed skills are added to
 `.git/info/exclude`; the committed `.gitignore` is not modified.
 
 `hooks.before_remove` runs the project `teardown.sh` if it exists.
+
+## Shared Skills
+
+`workflows/agavemindlab/skills/` contains the shared workflow skills installed
+into each workspace. The `cleanup` skill is shared because it only uses Docker's
+`com.docker.compose.project` labels and the configured Symphony workspace root
+to identify resources left behind by removed workspaces; it does not depend on
+any project-specific Compose files or services.
 
 ## Project Commands
 
