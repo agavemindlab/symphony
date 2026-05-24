@@ -184,10 +184,15 @@ Before writing implementation code for any `Todo`, `In Progress`, or `Rework` ti
 - `Backlog` -> out of scope for this workflow; do not modify.
 - `Todo` -> queued; immediately transition to `In Progress` before active work.
 - `In Progress` -> implementation actively underway.
-- `Human Review` -> waiting on human action; do not actively implement while the issue is in this state.
-- `Merging` -> approved by human; execute the `land` skill flow.
+- `Human Review` -> waiting on human action. The agent must not code, change
+  ticket content, push to the branch, or poll for updates while in this state.
+- `Merging` -> approved by human; open and follow
+  `.agents/skills/phase-merge-and-confirm/SKILL.md`. The agent **never** moves
+  the issue to `Done` — the agent posts a `Waiting for completion confirmation`
+  handoff and returns the issue to `Human Review`; the human makes the final
+  `Done` transition.
 - `Rework` -> reviewer requested changes; planning and implementation required.
-- `Done` -> terminal state; no further action required.
+- `Done` -> terminal state; the agent does nothing and shuts down.
 
 ## Step 0: Determine Current Ticket State and Route
 
@@ -197,21 +202,35 @@ Before writing implementation code for any `Todo`, `In Progress`, or `Rework` ti
    - `Backlog` -> stop and wait for human to move it to `Todo`.
    - `Todo` -> move to `In Progress`, ensure the workpad exists, then start execution.
    - `In Progress` -> continue from the current workpad.
-   - `Human Review` -> wait for human action.
+   - `Human Review` -> wait for human action. Do not code, push, change ticket
+     content, or poll. The latest `## Review Handoff` status is the source of
+     truth for what action the human is expected to take.
    - `Merging` -> open and follow `.agents/skills/phase-merge-and-confirm/SKILL.md`.
-   - `Rework` -> run the rework flow.
+     The agent never moves the issue to `Done`; it creates a
+     `Waiting for completion confirmation` handoff and moves back to `Human Review`.
+   - `Rework` -> run the rework flow (Step 4).
    - `Done` -> do nothing and shut down.
 4. Check whether a PR already exists for the current branch and whether it is closed or merged. If it is closed or merged, create a fresh branch from `upstream/${SYMPHONY_BASE_BRANCH:-main}` and restart from reproduction/planning.
 
 ## Step 1: Start or Continue Execution
 
-1. Find or create the persistent active `## Codex Workpad` comment.
-2. Find the latest active `## Review Handoff` comment for context only.
-3. Reconcile the workpad before new edits: check off completed items, expand/fix the plan, and keep acceptance/validation current.
+1. Find or create the persistent active `## Codex Workpad` comment. Reuse the
+   existing comment; do not create a duplicate.
+2. Find the latest active `## Review Handoff` comment for context only. Do not
+   edit or reuse a prior handoff comment for a new `Human Review` transition.
+3. Reconcile the workpad before new edits: check off completed items, expand/fix
+   the plan, and keep acceptance/validation current. If returning from
+   `Human Review`, explicitly read recent human comments and incorporate each
+   material item into the workpad before writing code.
 4. Run the discovery and planning gates before implementation code.
 5. Record a concrete reproduction or current-behavior signal before changing code.
-6. Run the `pull` skill to sync with `upstream/${SYMPHONY_BASE_BRANCH:-main}` before edits and record merge source, result, and resulting short SHA.
-7. Proceed through implementation using `.agents/skills/phase-implementation/SKILL.md`.
+6. Create the feature branch from `upstream/${SYMPHONY_BASE_BRANCH:-main}`, not
+   from `origin/${SYMPHONY_BASE_BRANCH:-main}`; the fork's default branch may be
+   arbitrarily stale.
+7. Run the `pull` skill to sync with `upstream/${SYMPHONY_BASE_BRANCH:-main}`
+   before edits and record merge source, result, and resulting short SHA in the
+   workpad.
+8. Proceed through implementation using `.agents/skills/phase-implementation/SKILL.md`.
 
 ## Step 2: Implementation Phase
 
@@ -224,7 +243,55 @@ Before writing implementation code for any `Todo`, `In Progress`, or `Rework` ti
 7. Use the `commit` and `push` skills to publish a feature branch to `origin` and create/update the PR.
 8. Merge latest `upstream/${SYMPHONY_BASE_BRANCH:-main}` into the branch, resolve conflicts, and rerun checks before handoff.
 9. Run the PR feedback sweep protocol until no outstanding actionable comments remain or a review timeout/caveat is explicitly handed off.
-10. Create a fresh compact `## Review Handoff` comment last, then move the issue to `Human Review`.
+10. Before moving to `Human Review`, verify the completion bar:
+    - [ ] Workpad plan and acceptance criteria fully reflect completed work.
+    - [ ] All required validation from `AGENTS.md` is passing.
+    - [ ] PR checks are green and PR is linked on the issue.
+    - [ ] PR feedback sweep is complete; every actionable comment has a
+          code change or same-thread pushback response.
+    - [ ] If returning from `Human Review`, every human question or objection
+          since the last handoff is directly answered in the new handoff.
+11. Create a fresh **new** `## Review Handoff` comment last, then move the issue
+    to `Human Review`. Do not edit or reuse a prior handoff comment.
+
+## Step 3: Human Review and Merge Handling
+
+1. When the issue is in `Human Review`, do not code, push, change ticket
+   content, or poll for review updates.
+2. Use the latest `## Review Handoff` status as the source of truth for the
+   expected human action:
+   - `Waiting for requirement confirmation`: human leaves feedback and moves
+     back to `In Progress`.
+   - `Waiting for plan confirmation`: human leaves feedback and moves back to
+     `In Progress`.
+   - `Waiting for PR review`: human moves to `Rework` for changes or `Merging`
+     for approval.
+   - `Waiting for completion confirmation`: human moves to `Done` or `Rework`.
+   - `Blocked`: human resolves the blocker and moves to the appropriate active
+     state.
+3. When the issue enters `Rework`, follow Step 4.
+4. When the issue enters `Merging`, open and follow
+   `.agents/skills/phase-merge-and-confirm/SKILL.md`. The agent never moves the
+   issue to `Done`; after merge it creates a `Waiting for completion
+   confirmation` handoff and returns the issue to `Human Review`.
+
+## Step 4: Rework Handling
+
+1. Re-read the full issue body, latest `## Review Handoff`, PR comments and
+   reviews, and Linear comments. Explicitly identify what must be done differently.
+2. If the requested change is not explicit, infer it only when unambiguous;
+   otherwise use a requirement-confirmation handoff.
+3. If the existing PR is open and the branch is reusable, keep the PR and
+   branch, update the workpad plan with the requested changes, and continue
+   through Step 1/2.
+4. If the prior approach is invalid, the PR is closed/merged, the branch is
+   unusable, or the human explicitly requested a restart: close the existing PR
+   if still open, create a fresh branch from
+   `upstream/${SYMPHONY_BASE_BRANCH:-main}`, start a new `### Current Attempt`
+   section at the top of the workpad, and restart the kickoff flow.
+5. Do not delete or recreate the persistent `## Codex Workpad` on Rework;
+   preserve the comment and its ID. Preserve previous `## Review Handoff`
+   comments as historical snapshots.
 
 ## PR Feedback Sweep Protocol
 
@@ -236,6 +303,27 @@ When a ticket has an attached PR:
 4. Update the workpad plan/checklist with each feedback item and its resolution.
 5. Re-run validation after feedback-driven changes and push updates.
 6. Repeat until no outstanding actionable comments remain and checks are understood.
+
+## Review Handoff Lifecycle Invariants
+
+These rules apply to every handoff comment regardless of status:
+
+- **Marker header**: every handoff comment starts with the literal H2 line
+  `## Review Handoff` followed by a `Status: <enum>` line.
+- **Status enum** (one of): `Waiting for requirement confirmation`,
+  `Waiting for plan confirmation`, `Waiting for PR review`, `Blocked`,
+  `Waiting for completion confirmation`.
+- **One new comment per `Human Review` transition**: each transition creates a
+  fresh `## Review Handoff` comment. Do not edit, reuse, or persist a prior
+  handoff comment ID for a new transition, even if the status is the same.
+- **Last comment before transition**: update the workpad first, then post the
+  fresh handoff last. The handoff must be the latest visible Linear update
+  before the issue moves to `Human Review`.
+- **`Human action needed`** is required in every handoff (one verb-led Chinese
+  sentence with finite options, e.g. `OK → Merging；想改 X → Rework`).
+- **Before publishing**: re-read human comments since the last handoff. If a
+  human asked a question or raised an objection, the handoff must directly
+  answer it — do not make reviewers hunt through the workpad.
 
 ## Review Handoff Template
 
@@ -352,3 +440,27 @@ When including a Before/After comparison in a handoff, format it this way:
 
 - <short progress note with timestamp>
 ````
+
+## Guardrails
+
+- **Agent never moves to `Done`**: only humans move the issue to `Done`. After
+  merge, the agent creates a `Waiting for completion confirmation` handoff and
+  returns to `Human Review`.
+- **Do not move to `Human Review`** unless the completion bar in Step 2 is
+  satisfied. No premature handoffs.
+- **In `Human Review`**, do not code, push, change ticket content, or poll for
+  updates. Wait for the human to change the issue state.
+- **One persistent workpad**: use exactly one `## Codex Workpad` comment per
+  issue. Update it in place; never create a duplicate. Preserve the comment ID
+  across retries, rework rounds, and full resets.
+- **One new handoff per transition**: each `Human Review` transition creates a
+  fresh `## Review Handoff` comment; never edit or reuse a prior handoff.
+- **Feature branch from upstream**: create new branches from
+  `upstream/${SYMPHONY_BASE_BRANCH:-main}`, not `origin/${SYMPHONY_BASE_BRANCH:-main}`.
+- **Out-of-scope improvements**: file a separate Linear issue in `Backlog` with
+  a clear title, description, acceptance criteria, same-project assignment, and
+  a `related` link to the current issue. Do not expand current scope.
+- **No secrets in comments**: do not expose secrets, tokens, or credentials in
+  Linear comments, PR bodies, commit messages, workpad notes, or logs.
+- **Temporary proof edits**: allowed for local verification only; must be
+  reverted before commit and documented in the workpad `Notes`.
