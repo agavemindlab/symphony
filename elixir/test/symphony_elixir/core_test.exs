@@ -125,6 +125,24 @@ defmodule SymphonyElixir.CoreTest do
     assert prompt =~ "有限选项"
     assert prompt =~ "nit"
     assert prompt =~ "blocker"
+    assert prompt =~ "🚨 blocker"
+    assert prompt =~ "💡 nit"
+    assert prompt =~ "✅ 通过"
+    assert prompt =~ "⚠️ 部分通过"
+    assert prompt =~ "❌ 失败"
+    assert prompt =~ "➖ N/A"
+    assert prompt =~ "📝 变更摘要"
+    assert prompt =~ "📂 变更范围"
+    assert prompt =~ "🔎 审核重点"
+    assert prompt =~ "⚠️ 风险/注意"
+    assert prompt =~ "✅ 验证"
+    assert prompt =~ "📌 后续事项"
+    assert prompt =~ "> 👉 **Human action needed**"
+    assert prompt =~ "<details>"
+    assert prompt =~ "<summary>"
+    assert prompt =~ "> [!WARNING]"
+    assert prompt =~ "> [!IMPORTANT]"
+    assert length(String.split(prompt, "---")) >= 4
   end
 
   test "linear api token resolves from LINEAR_API_KEY env var" do
