@@ -26,6 +26,23 @@ skills can make raw Linear GraphQL calls.
 If a claimed issue moves to a terminal state (`Done`, `Closed`, `Cancelled`, or `Duplicate`),
 Symphony stops the active agent for that issue and cleans up matching workspaces.
 
+## Maestro review decisions
+
+`SymphonyElixir.Maestro.run_once/1` is a deterministic reviewer for issues in
+`Human Review`. It fetches each issue's latest `## Review Handoff` comment,
+extracts its `Status:` value, writes a `## Maestro Decision` audit comment, and
+then applies the resulting state transition through the tracker adapter.
+
+Maestro intentionally fails closed. For `Waiting for PR review`, it only moves
+an issue to `Merging` when the handoff has validation evidence, PR evidence, and
+no failure, partial-pass, blocker, or unresolved clarification markers. Missing
+or negative evidence moves the issue to `Rework` with concrete feedback. For
+`Waiting for completion confirmation`, it only moves an issue to `Done` when the
+handoff has clean merge/completion evidence; otherwise it moves to `Rework`.
+Requirement and plan confirmations accept an explicit recommended option and
+return the issue to `In Progress`; blocked handoffs receive an audit comment and
+no automatic state change.
+
 ## How to use it
 
 1. Make sure your codebase is set up to work well with agents: see

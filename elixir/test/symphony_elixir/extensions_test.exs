@@ -5,6 +5,7 @@ defmodule SymphonyElixir.ExtensionsTest do
   import Phoenix.LiveViewTest
 
   alias SymphonyElixir.Linear.Adapter
+  alias SymphonyElixir.Maestro
   alias SymphonyElixir.Tracker.Memory
 
   @endpoint SymphonyElixirWeb.Endpoint
@@ -23,6 +24,11 @@ defmodule SymphonyElixir.ExtensionsTest do
     def fetch_issue_states_by_ids(issue_ids) do
       send(self(), {:fetch_issue_states_by_ids_called, issue_ids})
       {:ok, issue_ids}
+    end
+
+    def fetch_review_contexts_by_states(states) do
+      send(self(), {:fetch_review_contexts_by_states_called, states})
+      {:ok, states}
     end
 
     def graphql(query, variables) do
@@ -194,8 +200,28 @@ defmodule SymphonyElixir.ExtensionsTest do
     assert {:ok, [^issue]} = SymphonyElixir.Tracker.fetch_issue_states_by_ids(["issue-1"])
     assert :ok = SymphonyElixir.Tracker.create_comment("issue-1", "comment")
     assert :ok = SymphonyElixir.Tracker.update_issue_state("issue-1", "Done")
+    assert {:ok, []} = SymphonyElixir.Tracker.fetch_review_contexts_by_states(["Human Review"])
     assert_receive {:memory_tracker_comment, "issue-1", "comment"}
     assert_receive {:memory_tracker_state_update, "issue-1", "Done"}
+
+    review_issue = %Issue{id: "issue-review", identifier: "MT-REVIEW", state: "Human Review"}
+
+    review_context = %Maestro.ReviewContext{
+      issue: review_issue,
+      comments: [
+        %Maestro.ReviewComment{
+          id: "comment-1",
+          body: "## Review Handoff\n\nStatus: Waiting for PR review",
+          created_at: ~U[2026-05-24 12:00:00Z],
+          updated_at: ~U[2026-05-24 12:00:00Z]
+        }
+      ]
+    }
+
+    invalid_context = %Maestro.ReviewContext{issue: %{state: "Human Review"}}
+
+    Application.put_env(:symphony_elixir, :memory_tracker_review_contexts, [review_context, invalid_context])
+    assert {:ok, [^review_context]} = SymphonyElixir.Tracker.fetch_review_contexts_by_states(["Human Review"])
 
     Application.delete_env(:symphony_elixir, :memory_tracker_recipient)
     assert :ok = Memory.create_comment("issue-1", "quiet")
@@ -216,6 +242,9 @@ defmodule SymphonyElixir.ExtensionsTest do
 
     assert {:ok, ["issue-1"]} = Adapter.fetch_issue_states_by_ids(["issue-1"])
     assert_receive {:fetch_issue_states_by_ids_called, ["issue-1"]}
+
+    assert {:ok, ["Human Review"]} = Adapter.fetch_review_contexts_by_states(["Human Review"])
+    assert_receive {:fetch_review_contexts_by_states_called, ["Human Review"]}
 
     Process.put(
       {FakeLinearClient, :graphql_result},
@@ -317,6 +346,89 @@ defmodule SymphonyElixir.ExtensionsTest do
     )
 
     assert {:error, :issue_update_failed} = Adapter.update_issue_state("issue-1", "Odd")
+  end
+
+  test "linear client normalizes review contexts with comments and attachments" do
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_project_slug: "project",
+      codex_command: "/bin/sh app-server"
+    )
+
+    response = %{
+      "data" => %{
+        "issues" => %{
+          "nodes" => [
+            %{
+              "id" => "issue-1",
+              "identifier" => "DEV-1",
+              "title" => "Review me",
+              "description" => "Needs Maestro",
+              "priority" => 2,
+              "state" => %{"name" => "Human Review"},
+              "branchName" => "feature/review-me",
+              "url" => "https://linear.app/example/issue/DEV-1",
+              "assignee" => %{"id" => "user-1"},
+              "labels" => %{"nodes" => [%{"name" => "Type:Feature"}]},
+              "inverseRelations" => %{"nodes" => []},
+              "comments" => %{
+                "nodes" => [
+                  %{
+                    "id" => "comment-1",
+                    "body" => "## Review Handoff\n\nStatus: Waiting for PR review",
+                    "createdAt" => "2026-05-24T12:00:00Z",
+                    "updatedAt" => "2026-05-24T12:05:00Z"
+                  }
+                ]
+              },
+              "attachments" => %{
+                "nodes" => [
+                  %{
+                    "id" => "attachment-1",
+                    "title" => "PR #123",
+                    "url" => "https://github.com/acme/repo/pull/123",
+                    "sourceType" => "github"
+                  }
+                ]
+              },
+              "createdAt" => "2026-05-24T11:00:00Z",
+              "updatedAt" => "2026-05-24T12:10:00Z"
+            }
+          ],
+          "pageInfo" => %{"hasNextPage" => false, "endCursor" => nil}
+        }
+      }
+    }
+
+    assert {:ok, [context]} =
+             Client.fetch_review_contexts_by_states_for_test(["Human Review"], fn query, variables ->
+               send(self(), {:review_context_graphql, query, variables})
+               {:ok, response}
+             end)
+
+    assert_receive {:review_context_graphql, query, variables}
+    assert query =~ "comments"
+    assert query =~ "attachments"
+    assert variables.stateNames == ["Human Review"]
+
+    assert %Maestro.ReviewContext{
+             issue: %Issue{identifier: "DEV-1", state: "Human Review"},
+             comments: [
+               %Maestro.ReviewComment{
+                 id: "comment-1",
+                 body: "## Review Handoff\n\nStatus: Waiting for PR review",
+                 created_at: ~U[2026-05-24 12:00:00Z],
+                 updated_at: ~U[2026-05-24 12:05:00Z]
+               }
+             ],
+             attachments: [
+               %Maestro.ReviewAttachment{
+                 id: "attachment-1",
+                 title: "PR #123",
+                 url: "https://github.com/acme/repo/pull/123",
+                 source_type: "github"
+               }
+             ]
+           } = context
   end
 
   test "phoenix observability api preserves state, issue, and refresh responses" do
