@@ -118,6 +118,13 @@ defmodule SymphonyElixir.CoreTest do
     assert prompt =~ "风险/注意（risks）"
     assert prompt =~ "审核重点（review focus）"
     assert prompt =~ "后续事项（follow-ups）"
+    assert prompt =~ "一句话陈述意图或结果"
+    assert prompt =~ "（新增）/（修改）/（语义变化: X→Y）/（顺序调整）"
+    assert prompt =~ "映射回 acceptance criteria"
+    assert prompt =~ "| 验收项 | 状态 | 证据 |"
+    assert prompt =~ "有限选项"
+    assert prompt =~ "nit"
+    assert prompt =~ "blocker"
   end
 
   test "linear api token resolves from LINEAR_API_KEY env var" do

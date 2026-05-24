@@ -242,7 +242,13 @@ When a ticket has an attached PR:
 Use this structure for every separate handoff comment. Create a new comment last before moving to `Human Review`.
 
 - For PR review handoffs, include the summary, changed areas, review focus, risks, validation, and follow-ups sections in that order. Write `无` for risks or follow-ups when there is nothing to call out.
+- In summary, make the first bullet a one-sentence synthesis of intent or result, not a label list; use later bullets for concrete details.
+- In changed areas, mark deltas inline with `（新增）/（修改）/（语义变化: X→Y）/（顺序调整）` so reviewers do not need to diff the old template mentally.
+- In validation, map evidence back to acceptance criteria. Prefer a table such as `| 验收项 | 状态 | 证据 |`; if an acceptance criterion has no measurable check, say so explicitly.
+- In review focus and risks, mark each item as `blocker` or `nit` so reviewers can distinguish required fixes from non-blocking observations.
+- In `Human action needed`, give finite options such as `OK → Merging；想改 X → Rework` instead of only asking for review.
 - Keep bullets short and scannable in Discord/Linear. Start changed-area bullets with a file path, module, command, or workflow area when possible.
+- Use parentheses or dash side notes for compact context, for example `（由“可省略”改为“无内容写 无”）`, instead of splitting every detail into separate bullets.
 - For requirement, plan, or blocker handoffs, omit PR-only sections and include only the decision/blocker sections that apply.
 
 ```md
@@ -251,19 +257,19 @@ Use this structure for every separate handoff comment. Create a new comment last
 Status: Waiting for PR review
 
 变更摘要（summary）:
-- <1-3 条，概括最终结果、主要决策或用户可见变化>
+- <第一条用一句话陈述意图或结果；后续 bullet 补主要决策或用户可见变化>
 
 变更范围（changed areas）:
-- `<关键文件/模块/流程>`: <做了什么，为什么 reviewer 需要知道>
+- `<关键文件/模块/流程>`: <用 `（新增）/（修改）/（语义变化: X→Y）/（顺序调整）` 标注 delta，并说明 reviewer 需要知道什么>
 
 审核重点（review focus）:
-- <1-3 条，说明需要人工重点查看的文件、流程、边界条件或决策点>
+- <1-3 条，用 `[blocker]` 或 `[nit]` 标注需要人工重点查看的文件、流程、边界条件或决策点>
 
 风险/注意（risks）:
-- <风险、回归面、验证 caveat；没有则写“无”>
+- <用 `[blocker]` 或 `[nit]` 标注风险、回归面、验证 caveat；没有则写“无”>
 
 验证（仅 PR review；否则省略）:
-- `<命令/检查>`: <结果，包含必要 caveat>
+- <推荐用 `| 验收项 | 状态 | 证据 |` 映射回 acceptance criteria；没有对应可测项时显式说明>
 
 后续事项（follow-ups）:
 - <未完成事项、已拆出的 follow-up、非阻塞观察；没有则写“无”>
@@ -277,7 +283,7 @@ Status: Waiting for PR review
 阻塞（仅 Blocked；否则省略）:
 - <blocker、影响、已尝试事项、精确 unblock action>
 
-Human action needed: <一句明确的中文行动请求>
+Human action needed: <给出有限选项，例如 `OK → Merging；想改 X → Rework`>
 ```
 
 ## Workpad Template
