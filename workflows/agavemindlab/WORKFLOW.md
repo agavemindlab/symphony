@@ -239,33 +239,43 @@ When a ticket has an attached PR:
 
 ## Review Handoff Template
 
-Use this structure for every separate handoff comment. Create a new comment last before moving to `Human Review`; omit sections that do not apply.
+Use this structure for every separate handoff comment. Create a new comment last before moving to `Human Review`.
+
+- For PR review handoffs, include the summary, changed areas, review focus, risks, validation, and follow-ups sections in that order. Write `无` for risks or follow-ups when there is nothing to call out.
+- Keep bullets short and scannable in Discord/Linear. Start changed-area bullets with a file path, module, command, or workflow area when possible.
+- For requirement, plan, or blocker handoffs, omit PR-only sections and include only the decision/blocker sections that apply.
 
 ```md
 ## Review Handoff
 
 Status: Waiting for PR review
 
-审核重点（仅 PR review；否则省略）:
-- <1-3 条，说明需要人工重点查看的文件、流程或决策点>
+变更摘要（summary）:
+- <1-3 条，概括最终结果、主要决策或用户可见变化>
+
+变更范围（changed areas）:
+- `<关键文件/模块/流程>`: <做了什么，为什么 reviewer 需要知道>
+
+审核重点（review focus）:
+- <1-3 条，说明需要人工重点查看的文件、流程、边界条件或决策点>
+
+风险/注意（risks）:
+- <风险、回归面、验证 caveat；没有则写“无”>
+
+验证（仅 PR review；否则省略）:
+- `<命令/检查>`: <结果，包含必要 caveat>
+
+后续事项（follow-ups）:
+- <未完成事项、已拆出的 follow-up、非阻塞观察；没有则写“无”>
 
 已回应的问题（如上一轮 human review 提问/质疑/要求证据；否则省略）:
 - <直接回答问题，并说明对应证据或修复结果>
-
-变更摘要（仅 PR review；否则省略）:
-- <1-3 条，概括最终结果或待确认决策>
-
-验证（仅 PR review；否则省略）:
-- <命令/检查及结果，包含必要 caveat>
 
 问题/选项（仅 requirement/plan confirmation；否则省略）:
 - <阻塞决策、选项、推荐默认值、接受默认值后会怎么做>
 
 阻塞（仅 Blocked；否则省略）:
 - <blocker、影响、已尝试事项、精确 unblock action>
-
-风险/注意（无内容时可省略）:
-- 无
 
 Human action needed: <一句明确的中文行动请求>
 ```

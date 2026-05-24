@@ -113,6 +113,11 @@ defmodule SymphonyElixir.CoreTest do
     assert String.trim(prompt) != ""
     assert is_binary(Config.workflow_prompt())
     assert Config.workflow_prompt() == prompt
+    assert prompt =~ "变更摘要（summary）"
+    assert prompt =~ "变更范围（changed areas）"
+    assert prompt =~ "风险/注意（risks）"
+    assert prompt =~ "审核重点（review focus）"
+    assert prompt =~ "后续事项（follow-ups）"
   end
 
   test "linear api token resolves from LINEAR_API_KEY env var" do
