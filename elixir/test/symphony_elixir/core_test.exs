@@ -122,6 +122,8 @@ defmodule SymphonyElixir.CoreTest do
     assert prompt =~ "（新增）/（修改）/（语义变化: X→Y）/（顺序调整）"
     assert prompt =~ "映射回 acceptance criteria"
     assert prompt =~ "| 验收项 | 状态 | 证据 |"
+    assert prompt =~ "validation 表格只列"
+    assert prompt =~ "当前 acceptance criterion 的状态"
     assert prompt =~ "有限选项"
     assert prompt =~ "nit"
     assert prompt =~ "blocker"
