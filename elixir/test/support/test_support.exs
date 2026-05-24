@@ -35,6 +35,8 @@ defmodule SymphonyElixir.TestSupport do
         workflow_file = Path.join(workflow_root, "WORKFLOW.md")
         write_workflow_file!(workflow_file)
         Workflow.set_workflow_file_path(workflow_file)
+        {:ok, _apps} = Application.ensure_all_started(:symphony_elixir)
+        SymphonyElixir.TestSupport.ensure_core_children_started()
         if Process.whereis(SymphonyElixir.WorkflowStore), do: SymphonyElixir.WorkflowStore.force_reload()
         stop_default_http_server()
 
@@ -69,7 +71,36 @@ defmodule SymphonyElixir.TestSupport do
   def restore_env(key, nil), do: System.delete_env(key)
   def restore_env(key, value), do: System.put_env(key, value)
 
+  def ensure_core_children_started do
+    [
+      Phoenix.PubSub.Supervisor,
+      SymphonyElixir.TaskSupervisor,
+      SymphonyElixir.WorkflowStore,
+      SymphonyElixir.Orchestrator,
+      SymphonyElixir.StatusDashboard
+    ]
+    |> Enum.each(&ensure_supervisor_child_started/1)
+  end
+
+  defp ensure_supervisor_child_started(child_id) do
+    case Supervisor.restart_child(SymphonyElixir.Supervisor, child_id) do
+      {:ok, _pid} -> :ok
+      {:ok, _pid, _info} -> :ok
+      {:error, :running} -> :ok
+      {:error, :restarting} -> :ok
+      {:error, {:already_started, _pid}} -> :ok
+    end
+  end
+
   def stop_default_http_server do
+    if is_nil(Process.whereis(SymphonyElixir.Supervisor)) do
+      :ok
+    else
+      stop_default_http_server_child()
+    end
+  end
+
+  defp stop_default_http_server_child do
     case Enum.find(Supervisor.which_children(SymphonyElixir.Supervisor), fn
            {SymphonyElixir.HttpServer, _pid, _type, _modules} -> true
            _child -> false
