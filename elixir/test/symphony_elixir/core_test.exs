@@ -113,6 +113,38 @@ defmodule SymphonyElixir.CoreTest do
     assert String.trim(prompt) != ""
     assert is_binary(Config.workflow_prompt())
     assert Config.workflow_prompt() == prompt
+    assert prompt =~ "变更摘要（summary）"
+    assert prompt =~ "变更范围（changed areas）"
+    assert prompt =~ "风险/注意（risks）"
+    assert prompt =~ "审核重点（review focus）"
+    assert prompt =~ "后续事项（follow-ups）"
+    assert prompt =~ "一句话陈述意图或结果"
+    assert prompt =~ "（新增）/（修改）/（语义变化: X→Y）/（顺序调整）"
+    assert prompt =~ "映射回 acceptance criteria"
+    assert prompt =~ "| 验收项 | 状态 | 证据 |"
+    assert prompt =~ "validation 表格只列"
+    assert prompt =~ "当前 acceptance criterion 的状态"
+    assert prompt =~ "有限选项"
+    assert prompt =~ "nit"
+    assert prompt =~ "blocker"
+    assert prompt =~ "🚨 blocker"
+    assert prompt =~ "💡 nit"
+    assert prompt =~ "✅ 通过"
+    assert prompt =~ "⚠️ 部分通过"
+    assert prompt =~ "❌ 失败"
+    assert prompt =~ "➖ N/A"
+    assert prompt =~ "📝 变更摘要"
+    assert prompt =~ "📂 变更范围"
+    assert prompt =~ "🔎 审核重点"
+    assert prompt =~ "⚠️ 风险/注意"
+    assert prompt =~ "✅ 验证"
+    assert prompt =~ "📌 后续事项"
+    assert prompt =~ "> 👉 **Human action needed**"
+    assert prompt =~ "<details>"
+    assert prompt =~ "<summary>"
+    assert prompt =~ "> [!WARNING]"
+    assert prompt =~ "> [!IMPORTANT]"
+    assert length(String.split(prompt, "---")) >= 4
   end
 
   test "linear api token resolves from LINEAR_API_KEY env var" do

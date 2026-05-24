@@ -239,24 +239,65 @@ When a ticket has an attached PR:
 
 ## Review Handoff Template
 
-Use this structure for every separate handoff comment. Create a new comment last before moving to `Human Review`; omit sections that do not apply.
+Use this structure for every separate handoff comment. Create a new comment last before moving to `Human Review`.
+
+- Keep the `## Review Handoff` heading and `Status:` field as plain top-level text. Do not wrap them in callouts, blockquotes, or `<details>` blocks because workflow routing depends on them.
+- For PR review handoffs, include the summary, changed areas, review focus, risks, validation, and follow-ups sections in that order. Prefix section headings with these emoji labels: `📝 变更摘要（summary）`, `📂 变更范围（changed areas）`, `🔎 审核重点（review focus）`, `⚠️ 风险/注意（risks）`, `✅ 验证`, and `📌 后续事项（follow-ups）`. Write `无` for risks or follow-ups when there is nothing to call out.
+- In summary, make the first bullet a one-sentence synthesis of intent or result, not a label list; use later bullets for concrete details.
+- In changed areas, mark deltas inline with `（新增）/（修改）/（语义变化: X→Y）/（顺序调整）` so reviewers do not need to diff the old template mentally.
+- In validation, map evidence back to acceptance criteria（映射回 acceptance criteria）. Prefer a table such as `| 验收项 | 状态 | 证据 |`; use exactly these status-column conventions: `✅ 通过`, `⚠️ 部分通过`, `➖ N/A`, and `❌ 失败`. The validation 表格只列当前 acceptance criterion 的状态; do not put TDD RED→GREEN observations, historical failures, or debugging process notes in the status column. `❌ 失败` must mean that the criterion is still unmet at handoff time. If an acceptance criterion has no measurable check, say so explicitly with `➖ N/A`.
+- In review focus and risks, mark each item as `🚨 blocker` or `💡 nit` so reviewers can distinguish required fixes from non-blocking observations. Do not stack the previous square-bracket plain labels with the emoji labels.
+- When risks contain a `🚨 blocker`, wrap the blocker item or risk block in a Linear warning callout using `> [!WARNING]`.
+- In `Human action needed`, use a Linear callout or blockquote and give finite options such as `OK → Merging；想改 X → Rework` instead of only asking for review. Prefer `> [!IMPORTANT]` followed by `> 👉 **Human action needed**: ...`.
+- Separate major PR handoff sections with horizontal rules (`---`) so Linear renders clear visual breaks.
+- When a Review Handoff includes a Before/After comparison, wrap the Before content in `<details>` with a `<summary>` line, and keep After expanded as the visual focus.
+- Keep bullets short and scannable in Linear comments. Start changed-area bullets with a file path, module, command, or workflow area when possible.
+- Use parentheses or dash side notes for compact context, for example `（由“可省略”改为“无内容写 无”）`, instead of splitting every detail into separate bullets.
+- For requirement, plan, or blocker handoffs, omit PR-only sections and include only the decision/blocker sections that apply.
 
 ```md
 ## Review Handoff
 
 Status: Waiting for PR review
 
-审核重点（仅 PR review；否则省略）:
-- <1-3 条，说明需要人工重点查看的文件、流程或决策点>
+📝 变更摘要（summary）:
+- <第一条用一句话陈述意图或结果；后续 bullet 补主要决策或用户可见变化>
+
+---
+
+📂 变更范围（changed areas）:
+- `<关键文件/模块/流程>`: <用 `（新增）/（修改）/（语义变化: X→Y）/（顺序调整）` 标注 delta，并说明 reviewer 需要知道什么>
+
+---
+
+🔎 审核重点（review focus）:
+- 🚨 blocker <需要人工重点查看的文件、流程、边界条件或决策点>
+- 💡 nit <非阻塞的措辞、展示或偏好检查>
+
+---
+
+⚠️ 风险/注意（risks）:
+> [!WARNING]
+> - 🚨 blocker <阻塞风险、回归面或验证 caveat>
+- 💡 nit <非阻塞风险或观察；没有则写“无”>
+
+---
+
+✅ 验证:
+| 验收项 | 状态 | 证据 |
+|---|---|---|
+| <acceptance criterion> | ✅ 通过 | <命令或检查结果> |
+| <acceptance criterion> | ⚠️ 部分通过 | <已验证范围与需要人工判断的 caveat> |
+| <acceptance criterion> | ➖ N/A | <无对应可测项的原因> |
+| <acceptance criterion> | ❌ 失败 | <命令、影响和后续处理> |
+
+---
+
+📌 后续事项（follow-ups）:
+- <未完成事项、已拆出的 follow-up、非阻塞观察；没有则写“无”>
 
 已回应的问题（如上一轮 human review 提问/质疑/要求证据；否则省略）:
 - <直接回答问题，并说明对应证据或修复结果>
-
-变更摘要（仅 PR review；否则省略）:
-- <1-3 条，概括最终结果或待确认决策>
-
-验证（仅 PR review；否则省略）:
-- <命令/检查及结果，包含必要 caveat>
 
 问题/选项（仅 requirement/plan confirmation；否则省略）:
 - <阻塞决策、选项、推荐默认值、接受默认值后会怎么做>
@@ -264,10 +305,23 @@ Status: Waiting for PR review
 阻塞（仅 Blocked；否则省略）:
 - <blocker、影响、已尝试事项、精确 unblock action>
 
-风险/注意（无内容时可省略）:
-- 无
+> [!IMPORTANT]
+> 👉 **Human action needed**: <给出有限选项，例如 `OK → Merging；想改 X → Rework`>
+```
 
-Human action needed: <一句明确的中文行动请求>
+When including a Before/After comparison in a handoff, format it this way:
+
+```md
+<details>
+<summary>📜 展开旧模板下的 handoff（仅供对比，可跳过）</summary>
+
+<Before 内容>
+
+</details>
+
+### After（当前模板）
+
+<After 内容>
 ```
 
 ## Workpad Template
