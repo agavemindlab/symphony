@@ -858,22 +858,6 @@ defmodule SymphonyElixir.CoreTest do
     assert prompt =~ "attempt=3"
   end
 
-  test "prompt builder accepts an explicit prompt template override" do
-    write_workflow_file!(Workflow.workflow_file_path(), prompt: "Default {{ issue.identifier }}")
-
-    issue = %Issue{
-      identifier: "MT-OVERRIDE",
-      title: "Use a specialized workflow",
-      description: "Prompt should come from opts",
-      state: "Human Review",
-      url: "https://example.org/issues/MT-OVERRIDE",
-      labels: []
-    }
-
-    assert PromptBuilder.build_prompt(issue, prompt_template: "Override {{ issue.identifier }}") ==
-             "Override MT-OVERRIDE"
-  end
-
   test "prompt builder renders issue datetime fields without crashing" do
     workflow_prompt = "Ticket {{ issue.identifier }} created={{ issue.created_at }} updated={{ issue.updated_at }}"
 
@@ -1060,6 +1044,8 @@ defmodule SymphonyElixir.CoreTest do
     assert prompt =~ ".agents/skills/phase-merge-and-confirm/SKILL.md"
     assert prompt =~ "Continuation context:"
     assert prompt =~ "retry attempt #2"
+
+    assert "Human Review" in Config.settings!().tracker.active_states
   end
 
   test "prompt builder adds continuation guidance for retries" do

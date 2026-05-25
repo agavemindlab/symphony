@@ -51,7 +51,6 @@ defmodule SymphonyElixir.TestSupport do
 
           Application.delete_env(:symphony_elixir, :server_port_override)
           Application.delete_env(:symphony_elixir, :memory_tracker_issues)
-          Application.delete_env(:symphony_elixir, :memory_tracker_review_contexts)
           Application.delete_env(:symphony_elixir, :memory_tracker_recipient)
           File.rm_rf(workflow_root)
         end)

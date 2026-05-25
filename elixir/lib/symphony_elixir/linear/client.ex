@@ -4,7 +4,7 @@ defmodule SymphonyElixir.Linear.Client do
   """
 
   require Logger
-  alias SymphonyElixir.{Config, Linear.Issue, Maestro}
+  alias SymphonyElixir.{Config, Linear.Issue}
 
   @issue_page_size 50
   @max_error_body_log_bytes 1_000
@@ -95,67 +95,6 @@ defmodule SymphonyElixir.Linear.Client do
   }
   """
 
-  @review_context_query """
-  query SymphonyLinearReviewContexts($projectSlug: String!, $stateNames: [String!]!, $first: Int!, $relationFirst: Int!, $commentFirst: Int!, $attachmentFirst: Int!, $after: String) {
-    issues(filter: {project: {slugId: {eq: $projectSlug}}, state: {name: {in: $stateNames}}}, first: $first, after: $after) {
-      nodes {
-        id
-        identifier
-        title
-        description
-        priority
-        state {
-          name
-        }
-        branchName
-        url
-        assignee {
-          id
-        }
-        labels {
-          nodes {
-            name
-          }
-        }
-        inverseRelations(first: $relationFirst) {
-          nodes {
-            type
-            issue {
-              id
-              identifier
-              state {
-                name
-              }
-            }
-          }
-        }
-        comments(first: $commentFirst) {
-          nodes {
-            id
-            body
-            createdAt
-            updatedAt
-          }
-        }
-        attachments(first: $attachmentFirst) {
-          nodes {
-            id
-            title
-            url
-            sourceType
-          }
-        }
-        createdAt
-        updatedAt
-      }
-      pageInfo {
-        hasNextPage
-        endCursor
-      }
-    }
-  }
-  """
-
   @viewer_query """
   query SymphonyLinearViewer {
     viewer {
@@ -219,14 +158,6 @@ defmodule SymphonyElixir.Linear.Client do
           do_fetch_issue_states(ids, assignee_filter)
         end
     end
-  end
-
-  @spec fetch_review_contexts_by_states([String.t()]) :: {:ok, [term()]} | {:error, term()}
-  def fetch_review_contexts_by_states(state_names) when is_list(state_names) do
-    state_names
-    |> Enum.map(&to_string/1)
-    |> Enum.uniq()
-    |> fetch_review_contexts_for_states()
   end
 
   @spec graphql(String.t(), map(), keyword()) :: {:ok, map()} | {:error, term()}
@@ -305,35 +236,9 @@ defmodule SymphonyElixir.Linear.Client do
     end
   end
 
-  @doc false
-  @spec fetch_review_contexts_by_states_for_test(
-          [String.t()],
-          (String.t(), map() -> {:ok, map()} | {:error, term()})
-        ) ::
-          {:ok, [term()]} | {:error, term()}
-  def fetch_review_contexts_by_states_for_test(state_names, graphql_fun)
-      when is_list(state_names) and is_function(graphql_fun, 2) do
-    do_fetch_review_contexts("project", Enum.uniq(state_names), nil, graphql_fun)
-  end
-
   defp do_fetch_by_states(project_slug, state_names, assignee_filter) do
     do_fetch_by_states_page(project_slug, state_names, assignee_filter, nil, [])
   end
-
-  defp fetch_review_contexts_for_states([]), do: {:ok, []}
-
-  defp fetch_review_contexts_for_states(state_names) do
-    tracker = Config.settings!()
-
-    with {:ok, project_slug} <- review_context_project_slug(tracker.tracker),
-         {:ok, assignee_filter} <- routing_assignee_filter() do
-      do_fetch_review_contexts(project_slug, state_names, assignee_filter, &graphql/2)
-    end
-  end
-
-  defp review_context_project_slug(%{api_key: nil}), do: {:error, :missing_linear_api_token}
-  defp review_context_project_slug(%{project_slug: nil}), do: {:error, :missing_linear_project_slug}
-  defp review_context_project_slug(%{project_slug: project_slug}), do: {:ok, project_slug}
 
   defp do_fetch_by_states_page(project_slug, state_names, assignee_filter, after_cursor, acc_issues) do
     with {:ok, body} <-
@@ -357,48 +262,6 @@ defmodule SymphonyElixir.Linear.Client do
         {:error, reason} ->
           {:error, reason}
       end
-    end
-  end
-
-  defp do_fetch_review_contexts(project_slug, state_names, assignee_filter, graphql_fun) do
-    do_fetch_review_contexts_page(project_slug, state_names, assignee_filter, graphql_fun, nil, [])
-  end
-
-  defp do_fetch_review_contexts_page(project_slug, state_names, assignee_filter, graphql_fun, after_cursor, acc_contexts) do
-    variables = %{
-      projectSlug: project_slug,
-      stateNames: state_names,
-      first: @issue_page_size,
-      relationFirst: @issue_page_size,
-      commentFirst: @issue_page_size,
-      attachmentFirst: @issue_page_size,
-      after: after_cursor
-    }
-
-    with {:ok, body} <- graphql_fun.(@review_context_query, variables),
-         {:ok, contexts, page_info} <- decode_review_context_page_response(body, assignee_filter) do
-      updated_acc = prepend_page_issues(contexts, acc_contexts)
-      continue_review_context_page(project_slug, state_names, assignee_filter, graphql_fun, page_info, updated_acc)
-    end
-  end
-
-  defp continue_review_context_page(project_slug, state_names, assignee_filter, graphql_fun, page_info, acc_contexts) do
-    case next_page_cursor(page_info) do
-      {:ok, next_cursor} ->
-        do_fetch_review_contexts_page(
-          project_slug,
-          state_names,
-          assignee_filter,
-          graphql_fun,
-          next_cursor,
-          acc_contexts
-        )
-
-      :done ->
-        {:ok, finalize_paginated_issues(acc_contexts)}
-
-      {:error, reason} ->
-        {:error, reason}
     end
   end
 
@@ -574,34 +437,6 @@ defmodule SymphonyElixir.Linear.Client do
 
   defp decode_linear_page_response(response, assignee_filter), do: decode_linear_response(response, assignee_filter)
 
-  defp decode_review_context_page_response(
-         %{
-           "data" => %{
-             "issues" => %{
-               "nodes" => nodes,
-               "pageInfo" => %{"hasNextPage" => has_next_page, "endCursor" => end_cursor}
-             }
-           }
-         },
-         assignee_filter
-       )
-       when is_list(nodes) do
-    contexts =
-      nodes
-      |> Enum.map(&normalize_review_context(&1, assignee_filter))
-      |> Enum.reject(&is_nil/1)
-
-    {:ok, contexts, %{has_next_page: has_next_page == true, end_cursor: end_cursor}}
-  end
-
-  defp decode_review_context_page_response(%{"errors" => errors}, _assignee_filter) do
-    {:error, {:linear_graphql_errors, errors}}
-  end
-
-  defp decode_review_context_page_response(_unknown, _assignee_filter) do
-    {:error, :linear_unknown_payload}
-  end
-
   defp next_page_cursor(%{has_next_page: true, end_cursor: end_cursor})
        when is_binary(end_cursor) and byte_size(end_cursor) > 0 do
     {:ok, end_cursor}
@@ -632,22 +467,6 @@ defmodule SymphonyElixir.Linear.Client do
   end
 
   defp normalize_issue(_issue, _assignee_filter), do: nil
-
-  defp normalize_review_context(issue, assignee_filter) when is_map(issue) do
-    case normalize_issue(issue, assignee_filter) do
-      %Issue{} = normalized_issue ->
-        %Maestro.ReviewContext{
-          issue: normalized_issue,
-          comments: extract_review_comments(issue),
-          attachments: extract_review_attachments(issue)
-        }
-
-      _ ->
-        nil
-    end
-  end
-
-  defp normalize_review_context(_issue, _assignee_filter), do: nil
 
   defp assignee_field(%{} = assignee, field) when is_binary(field), do: assignee[field]
   defp assignee_field(_assignee, _field), do: nil
@@ -752,44 +571,6 @@ defmodule SymphonyElixir.Linear.Client do
   end
 
   defp extract_blockers(_), do: []
-
-  defp extract_review_comments(%{"comments" => %{"nodes" => comments}}) when is_list(comments) do
-    comments
-    |> Enum.map(fn
-      comment when is_map(comment) ->
-        %Maestro.ReviewComment{
-          id: comment["id"],
-          body: comment["body"] || "",
-          created_at: parse_datetime(comment["createdAt"]),
-          updated_at: parse_datetime(comment["updatedAt"])
-        }
-
-      _ ->
-        nil
-    end)
-    |> Enum.reject(&is_nil/1)
-  end
-
-  defp extract_review_comments(_issue), do: []
-
-  defp extract_review_attachments(%{"attachments" => %{"nodes" => attachments}}) when is_list(attachments) do
-    attachments
-    |> Enum.map(fn
-      attachment when is_map(attachment) ->
-        %Maestro.ReviewAttachment{
-          id: attachment["id"],
-          title: attachment["title"],
-          url: attachment["url"],
-          source_type: attachment["sourceType"]
-        }
-
-      _ ->
-        nil
-    end)
-    |> Enum.reject(&is_nil/1)
-  end
-
-  defp extract_review_attachments(_issue), do: []
 
   defp parse_datetime(nil), do: nil
 

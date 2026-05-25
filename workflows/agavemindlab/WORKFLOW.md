@@ -6,6 +6,7 @@ tracker:
   active_states:
     - Todo
     - In Progress
+    - Human Review
     - Merging
     - Rework
   terminal_states:
@@ -253,8 +254,12 @@ Before writing implementation code for any `Todo`, `In Progress`, or `Rework` ti
 - `Backlog` -> out of scope for this workflow; do not modify.
 - `Todo` -> queued; immediately transition to `In Progress` before active work.
 - `In Progress` -> implementation actively underway.
-- `Human Review` -> waiting on human action. The agent must not code, change
-  ticket content, push to the branch, or poll for updates while in this state.
+- `Human Review` -> Phase 1 Maestro dry-run lane. If the latest visible comment
+  starts with `## Review Handoff`, open and follow
+  `.agents/skills/maestro/SKILL.md` in dry-run mode: write one
+  `## Maestro Decision【试运行 · 不修改状态】` audit comment, do not update Linear
+  state, do not code, do not push, and stop. If no handoff exists, wait for
+  human action.
 - `Merging` -> approved by human; open and follow
   `.agents/skills/phase-merge-and-confirm/SKILL.md`. The agent **never** moves
   the issue to `Done` — the agent posts a `Waiting for completion confirmation`
@@ -271,9 +276,12 @@ Before writing implementation code for any `Todo`, `In Progress`, or `Rework` ti
    - `Backlog` -> stop and wait for human to move it to `Todo`.
    - `Todo` -> move to `In Progress`, ensure the workpad exists, then start execution.
    - `In Progress` -> continue from the current workpad.
-   - `Human Review` -> wait for human action. Do not code, push, change ticket
-     content, or poll. The latest `## Review Handoff` status is the source of
-     truth for what action the human is expected to take.
+   - `Human Review` -> if the latest visible comment starts with
+     `## Review Handoff`, run the Phase 1 Maestro dry-run lane:
+     open and follow `.agents/skills/maestro/SKILL.md`, create exactly one
+     `## Maestro Decision【试运行 · 不修改状态】` audit comment, do not update
+     Linear state, do not code, do not push, and stop. If no handoff exists,
+     wait for human action.
    - `Merging` -> open and follow `.agents/skills/phase-merge-and-confirm/SKILL.md`.
      The agent never moves the issue to `Done`; it creates a
      `Waiting for completion confirmation` handoff and moves back to `Human Review`.
@@ -347,8 +355,11 @@ Before writing implementation code for any `Todo`, `In Progress`, or `Rework` ti
 
 ## Step 3: Human Review and Merge Handling
 
-1. When the issue is in `Human Review`, do not code, push, change ticket
-   content, or poll for review updates.
+1. When the issue is in `Human Review`, do not code, push, edit the PR, or poll
+   for review updates. Phase 1 exception: if the latest visible comment starts
+   with `## Review Handoff`, Maestro may write exactly one dry-run audit comment
+   with `## Maestro Decision【试运行 · 不修改状态】` and must leave the issue state
+   unchanged.
 2. Use the latest `## Review Handoff` status as the source of truth for the
    expected human action:
    - `Waiting for requirement confirmation`: human leaves feedback and moves
