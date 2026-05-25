@@ -26,21 +26,60 @@ skills can make raw Linear GraphQL calls.
 If a claimed issue moves to a terminal state (`Done`, `Closed`, `Cancelled`, or `Duplicate`),
 Symphony stops the active agent for that issue and cleans up matching workspaces.
 
+## Maestro review decisions
+
+`SymphonyElixir.Maestro.run_once/1` launches Maestro agent sessions for issues
+in `Human Review`. Elixir stays intentionally small: it asks the tracker for
+review contexts, extracts the issue identity, and starts the existing
+`AgentRunner`/Codex app-server path with a one-turn Maestro prompt. It does not
+collect PR diffs, call an LLM directly, parse JSON decisions, or update Linear
+state itself.
+
+The Maestro agent workflow owns the review judgment. The session uses
+`.agents/skills/maestro/SKILL.md` as its instruction set, reads the Linear
+issue, `## Spec`, latest `## Review Handoff`, recent human comments,
+attachments/links, and GitHub PR evidence. For PR handoffs the agent uses
+`gh pr view`, `gh pr diff`, checks, reviews, and comments to compare the actual
+diff and validation evidence with the handoff before deciding.
+
+Maestro intentionally fails closed. The skill only allows these routes: PR
+review can move to `Merging` or `Rework`, completion confirmation can move to
+`Done` or `Rework`, requirement/plan confirmation can move to `In Progress` or
+`Rework`, and `Blocked` must produce an unblock/escalation decision instead of
+silently approving. Every decision is recorded with a `## Maestro Decision`
+Linear audit comment before any normal-mode state update.
+
+Use `dry_run: true` before granting Maestro state-change authority:
+
+```elixir
+Maestro.run_once(dry_run: true)
+```
+
+Dry-run mode still writes `## Maestro Decision【试运行 · 不修改状态】` comments
+from the Maestro agent session and records the target state it would choose, but
+the prompt forbids a state update. `Maestro.run_once/1` returns launched session
+metadata with `dry_run: true`. The default `Maestro.run_once()` launches a
+normal-mode session that writes the same audit trail and then applies the valid
+state transition from inside the agent workflow.
+
 ## How to use it
 
 1. Make sure your codebase is set up to work well with agents: see
    [Harness engineering](https://openai.com/index/harness-engineering/).
 2. Get a new personal token in Linear via Settings → Security & access → Personal API keys, and
    set it as the `LINEAR_API_KEY` environment variable.
-3. Use a project workflow under [`../workflows/`](../workflows/). The shared
+3. For Maestro runs, make sure the Codex app-server runtime has Linear tool
+   access and `gh auth status` succeeds in the workspace when PR evidence is
+   required.
+4. Use a project workflow under [`../workflows/`](../workflows/). The shared
    `workflows/agavemindlab/WORKFLOW.md` and `skills/` entries are inherited by
    project directories through symlinks; replace a symlink with a real file or
    directory only when that project needs an override.
-4. Start Symphony with the repository launcher for the selected project. It
+5. Start Symphony with the repository launcher for the selected project. It
    loads shared Agavemindlab defaults, the configured profile from
    `~/.config/symphony/<profile>.env`, and `workflows/<project>/project.env`
    last so project settings override operator profile defaults.
-5. Follow the instructions below to install the required runtime dependencies and start the service.
+6. Follow the instructions below to install the required runtime dependencies and start the service.
 
 ## Prerequisites
 

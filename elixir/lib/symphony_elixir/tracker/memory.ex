@@ -35,6 +35,23 @@ defmodule SymphonyElixir.Tracker.Memory do
      end)}
   end
 
+  @spec fetch_review_contexts_by_states([String.t()]) :: {:ok, [term()]} | {:error, term()}
+  def fetch_review_contexts_by_states(state_names) when is_list(state_names) do
+    normalized_states =
+      state_names
+      |> Enum.map(&normalize_state/1)
+      |> MapSet.new()
+
+    contexts =
+      review_context_entries()
+      |> Enum.filter(fn
+        %{issue: %Issue{state: state}} -> MapSet.member?(normalized_states, normalize_state(state))
+        _ -> false
+      end)
+
+    {:ok, contexts}
+  end
+
   @spec create_comment(String.t(), String.t()) :: :ok | {:error, term()}
   def create_comment(issue_id, body) do
     send_event({:memory_tracker_comment, issue_id, body})
@@ -53,6 +70,12 @@ defmodule SymphonyElixir.Tracker.Memory do
 
   defp issue_entries do
     Enum.filter(configured_issues(), &match?(%Issue{}, &1))
+  end
+
+  defp review_context_entries do
+    :symphony_elixir
+    |> Application.get_env(:memory_tracker_review_contexts, [])
+    |> Enum.filter(&match?(%SymphonyElixir.Maestro.ReviewContext{}, &1))
   end
 
   defp send_event(message) do

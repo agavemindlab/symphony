@@ -33,6 +33,8 @@ defmodule SymphonyElixir.TestSupport do
 
         File.mkdir_p!(workflow_root)
         workflow_file = Path.join(workflow_root, "WORKFLOW.md")
+        previous_workflow_file_path = Application.get_env(:symphony_elixir, :workflow_file_path)
+
         write_workflow_file!(workflow_file)
         Workflow.set_workflow_file_path(workflow_file)
         {:ok, _apps} = Application.ensure_all_started(:symphony_elixir)
@@ -41,9 +43,15 @@ defmodule SymphonyElixir.TestSupport do
         stop_default_http_server()
 
         on_exit(fn ->
-          Application.delete_env(:symphony_elixir, :workflow_file_path)
+          if is_nil(previous_workflow_file_path) do
+            Application.delete_env(:symphony_elixir, :workflow_file_path)
+          else
+            Application.put_env(:symphony_elixir, :workflow_file_path, previous_workflow_file_path)
+          end
+
           Application.delete_env(:symphony_elixir, :server_port_override)
           Application.delete_env(:symphony_elixir, :memory_tracker_issues)
+          Application.delete_env(:symphony_elixir, :memory_tracker_review_contexts)
           Application.delete_env(:symphony_elixir, :memory_tracker_recipient)
           File.rm_rf(workflow_root)
         end)
@@ -93,18 +101,30 @@ defmodule SymphonyElixir.TestSupport do
   end
 
   def stop_default_http_server do
-    if is_nil(Process.whereis(SymphonyElixir.Supervisor)) do
-      :ok
+    with supervisor when is_pid(supervisor) <- Process.whereis(SymphonyElixir.Supervisor),
+         children when is_list(children) <- supervisor_children(supervisor),
+         child when not is_nil(child) <- find_http_server_child(children) do
+      stop_http_server_child(child)
     else
-      stop_default_http_server_child()
+      _ -> :ok
     end
   end
 
-  defp stop_default_http_server_child do
-    case Enum.find(Supervisor.which_children(SymphonyElixir.Supervisor), fn
-           {SymphonyElixir.HttpServer, _pid, _type, _modules} -> true
-           _child -> false
-         end) do
+  defp supervisor_children(supervisor) when is_pid(supervisor) do
+    Supervisor.which_children(supervisor)
+  catch
+    :exit, _reason -> :unavailable
+  end
+
+  defp find_http_server_child(children) when is_list(children) do
+    Enum.find(children, fn
+      {SymphonyElixir.HttpServer, _pid, _type, _modules} -> true
+      _child -> false
+    end)
+  end
+
+  defp stop_http_server_child(child) do
+    case child do
       {SymphonyElixir.HttpServer, pid, _type, _modules} when is_pid(pid) ->
         :ok = Supervisor.terminate_child(SymphonyElixir.Supervisor, SymphonyElixir.HttpServer)
 
