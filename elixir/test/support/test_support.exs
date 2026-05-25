@@ -25,8 +25,6 @@ defmodule SymphonyElixir.TestSupport do
         only: [write_workflow_file!: 1, write_workflow_file!: 2, restore_env: 2, stop_default_http_server: 0]
 
       setup do
-        {:ok, _started_apps} = Application.ensure_all_started(:symphony_elixir)
-
         workflow_root =
           Path.join(
             System.tmp_dir!(),
@@ -39,6 +37,8 @@ defmodule SymphonyElixir.TestSupport do
 
         write_workflow_file!(workflow_file)
         Workflow.set_workflow_file_path(workflow_file)
+        {:ok, _apps} = Application.ensure_all_started(:symphony_elixir)
+        SymphonyElixir.TestSupport.ensure_core_children_started()
         if Process.whereis(SymphonyElixir.WorkflowStore), do: SymphonyElixir.WorkflowStore.force_reload()
         stop_default_http_server()
 
@@ -78,6 +78,27 @@ defmodule SymphonyElixir.TestSupport do
 
   def restore_env(key, nil), do: System.delete_env(key)
   def restore_env(key, value), do: System.put_env(key, value)
+
+  def ensure_core_children_started do
+    [
+      Phoenix.PubSub.Supervisor,
+      SymphonyElixir.TaskSupervisor,
+      SymphonyElixir.WorkflowStore,
+      SymphonyElixir.Orchestrator,
+      SymphonyElixir.StatusDashboard
+    ]
+    |> Enum.each(&ensure_supervisor_child_started/1)
+  end
+
+  defp ensure_supervisor_child_started(child_id) do
+    case Supervisor.restart_child(SymphonyElixir.Supervisor, child_id) do
+      {:ok, _pid} -> :ok
+      {:ok, _pid, _info} -> :ok
+      {:error, :running} -> :ok
+      {:error, :restarting} -> :ok
+      {:error, {:already_started, _pid}} -> :ok
+    end
+  end
 
   def stop_default_http_server do
     with supervisor when is_pid(supervisor) <- Process.whereis(SymphonyElixir.Supervisor),

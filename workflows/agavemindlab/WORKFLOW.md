@@ -121,15 +121,17 @@ The agent must be able to talk to Linear, either via a configured Linear MCP ser
 ## Project Setup
 
 - This workflow is shared by all projects under `workflows/`.
-- Project identity comes from `$SYMPHONY_WORKFLOW_DIR/project.env`; operators start Symphony with:
+- Project identity comes from `$SYMPHONY_WORKFLOW_DIR/project.env`. Operators
+  normally start Symphony with:
 
 ```sh
-source workflows/<project>/project.env
-./bin/symphony workflows/<project>/WORKFLOW.md
+bin/symphony-run <project>
 ```
 
 - `SYMPHONY_PROJECT_SLUG` selects the Linear project.
 - `SYMPHONY_BASE_BRANCH` may override the default base branch; use `main` when unset.
+- `AUTOMATED_REVIEWER` may name the automated reviewer account to request
+  after PR create/update.
 - The project repository's own `AGENTS.md` is the source of truth for build, test, validation, migration, and runtime commands.
 
 ## Default Posture

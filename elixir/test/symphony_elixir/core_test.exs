@@ -1056,7 +1056,7 @@ defmodule SymphonyElixir.CoreTest do
     assert prompt =~ "This is an unattended Symphony orchestration session."
     assert prompt =~ "Stop early only for a true blocker"
     assert prompt =~ "Do not include generic \"next steps for user\""
-    assert prompt =~ "open and follow"
+    assert prompt =~ "When the issue enters `Merging`, open and follow"
     assert prompt =~ ".agents/skills/phase-merge-and-confirm/SKILL.md"
     assert prompt =~ "Continuation context:"
     assert prompt =~ "retry attempt #2"

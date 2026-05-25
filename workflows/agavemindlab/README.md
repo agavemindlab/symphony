@@ -12,6 +12,7 @@ bin/
 workflows/
   agavemindlab/
     WORKFLOW.md
+    project.env.defaults
     skills/
       cleanup/
     README.md
@@ -38,8 +39,10 @@ overrides.
 
 ## Project Environment
 
-Each project has a real `project.env` file in envfile format. Values are quoted
-so the file can be parsed by dotenv-style tools and sourced by a shell.
+`workflows/agavemindlab/project.env.defaults` contains shared defaults for all
+Agavemindlab projects. Each project also has a real `project.env` file in
+envfile format. Values are quoted so the files can be parsed by dotenv-style
+tools and sourced by a shell.
 
 Operators should usually start Symphony through the repository launcher:
 
@@ -47,21 +50,41 @@ Operators should usually start Symphony through the repository launcher:
 bin/symphony-run <project>
 ```
 
-The launcher loads `workflows/<project>/project.env`, then loads
-`~/.config/symphony/<profile>.env`. The profile is selected in this order:
-caller-provided `SYMPHONY_PROFILE`, project `SYMPHONY_PROFILE`, then
-`grandline`.
+The launcher loads environment files in this order:
+
+1. `workflows/agavemindlab/project.env.defaults`
+2. `~/.config/symphony/<profile>.env`
+3. `workflows/<project>/project.env`
+
+Later files override earlier files, so project-maintained `project.env` has the
+final say over operator profile defaults. To select the profile before the final
+project override, `bin/symphony-run` reads `project.env` once for bootstrap
+values, sources the profile, then sources `project.env` again. The profile is
+selected in this order: caller-provided `SYMPHONY_PROFILE`, project
+`SYMPHONY_PROFILE`, then `grandline`.
 
 For manual runs, export variables while sourcing the envfile:
 
 ```sh
-set -a; source workflows/<project>/project.env; set +a
+set -a
+source workflows/agavemindlab/project.env.defaults
+source workflows/<project>/project.env
+profile="${SYMPHONY_PROFILE:-grandline}"
+source "$HOME/.config/symphony/$profile.env"
+source workflows/<project>/project.env
+set +a
 ./bin/symphony workflows/<project>/WORKFLOW.md
 ```
 
 `project.env` must define `SYMPHONY_PROJECT_SLUG`, `SYMPHONY_BASE_BRANCH`,
 `SYMPHONY_REPO`, and `SYMPHONY_PROFILE`. It may also define project-specific
 runtime settings consumed by that project's `setup.sh`.
+
+`project.env.defaults` currently defines `AUTOMATED_REVIEWER="gl-swe"`, the
+shared Agavemindlab automated reviewer used by the `push` skill. Keep common
+workflow values there instead of duplicating them in every project env file.
+Profile env files may fill local defaults, and project env files may override
+them when needed.
 
 ## Hooks
 
