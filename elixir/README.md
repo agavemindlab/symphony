@@ -28,20 +28,38 @@ Symphony stops the active agent for that issue and cleans up matching workspaces
 
 ## Maestro review decisions
 
-`SymphonyElixir.Maestro.run_once/1` is a deterministic reviewer for issues in
+`SymphonyElixir.Maestro.run_once/1` is an LLM-backed reviewer for issues in
 `Human Review`. It fetches each issue's latest `## Review Handoff` comment,
-extracts its `Status:` value, writes a `## Maestro Decision` audit comment, and
+extracts its `Status:` value, gathers the issue description, `## Spec`, recent
+Linear comments, attachments, and GitHub PR context, asks Claude for a
+constrained JSON decision, writes a `## Maestro Decision` audit comment, and
 then applies the resulting state transition through the tracker adapter.
 
-Maestro intentionally fails closed. For `Waiting for PR review`, it only moves
-an issue to `Merging` when the handoff has validation evidence, PR evidence, and
-no failure, partial-pass, blocker, or unresolved clarification markers. Missing
-or negative evidence moves the issue to `Rework` with concrete feedback. For
-`Waiting for completion confirmation`, it only moves an issue to `Done` when the
-handoff has clean merge/completion evidence; otherwise it moves to `Rework`.
-Requirement and plan confirmations accept an explicit recommended option and
-return the issue to `In Progress`; blocked handoffs receive an audit comment and
-no automatic state change.
+Elixir owns the infrastructure; Claude owns the quality judgment. For GitHub PR
+handoffs, Maestro collects metadata and diff context with `gh pr view` and
+`gh pr diff` when it finds a GitHub PR URL in the handoff or attachments. The
+Claude prompt asks it to compare the original requirements, Spec, handoff,
+actual PR diff, tests, and CI/check evidence instead of approving from Markdown
+markers alone.
+
+Maestro intentionally fails closed. It only accepts Claude target states that
+are valid for the matched handoff status: PR review can move to `Merging` or
+`Rework`, completion confirmation can move to `Done` or `Rework`,
+requirement/plan confirmation can move to `In Progress` or `Rework`, and
+`Blocked` can keep the current state or move to `Rework`. Missing handoffs,
+unknown statuses, Claude failures, invalid JSON, or illegal target states become
+auditable fail-closed decisions.
+
+Use `dry_run: true` before granting Maestro state-change authority:
+
+```elixir
+Maestro.run_once(dry_run: true)
+```
+
+Dry-run mode still writes `## Maestro Decision【试运行 · 不修改状态】` comments
+and returns `Decision.dry_run == true`, but it skips
+`tracker.update_issue_state/2`. The default `Maestro.run_once()` writes the same
+audit trail and then applies the valid state transition.
 
 ## How to use it
 
@@ -49,11 +67,14 @@ no automatic state change.
    [Harness engineering](https://openai.com/index/harness-engineering/).
 2. Get a new personal token in Linear via Settings → Security & access → Personal API keys, and
    set it as the `LINEAR_API_KEY` environment variable.
-3. Use a project workflow under [`../workflows/`](../workflows/). The shared
+3. For Maestro runs, make sure `claude` is authenticated and `gh auth status`
+   succeeds in the runtime environment so Claude judgment and GitHub PR context
+   collection are available.
+4. Use a project workflow under [`../workflows/`](../workflows/). The shared
    `workflows/agavemindlab/WORKFLOW.md` and `skills/` entries are inherited by
    project directories through symlinks; replace a symlink with a real file or
    directory only when that project needs an override.
-4. Start Symphony with the repository launcher for the selected project. It
+5. Start Symphony with the repository launcher for the selected project. It
    loads `workflows/<project>/project.env` and the configured profile from
    `~/.config/symphony/<profile>.env`.
 5. Follow the instructions below to install the required runtime dependencies and start the service.
