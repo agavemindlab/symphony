@@ -37,8 +37,9 @@ Symphony stops the active agent for that issue and cleans up matching workspaces
    project directories through symlinks; replace a symlink with a real file or
    directory only when that project needs an override.
 4. Start Symphony with the repository launcher for the selected project. It
-   loads `workflows/<project>/project.env` and the configured profile from
-   `~/.config/symphony/<profile>.env`.
+   loads shared Agavemindlab defaults, the configured profile from
+   `~/.config/symphony/<profile>.env`, and `workflows/<project>/project.env`
+   last so project settings override operator profile defaults.
 5. Follow the instructions below to install the required runtime dependencies and start the service.
 
 ## Prerequisites
@@ -66,7 +67,13 @@ For a manual run without the launcher, export variables while sourcing the
 project envfile:
 
 ```bash
-set -a; source ../workflows/symphony/project.env; set +a
+set -a
+source ../workflows/agavemindlab/project.env.defaults
+source ../workflows/symphony/project.env
+profile="${SYMPHONY_PROFILE:-grandline}"
+source "$HOME/.config/symphony/$profile.env"
+source ../workflows/symphony/project.env
+set +a
 mise exec -- ./bin/symphony ../workflows/symphony/WORKFLOW.md
 ```
 
