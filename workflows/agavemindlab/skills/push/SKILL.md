@@ -26,12 +26,10 @@ description:
 
 Check `AGENTS.md` or the project's workflow configuration for the
 designated automated reviewer (e.g., a bot or CI-driven review account).
-For Agavemindlab workflows launched through `bin/symphony-run`, the shared
-default comes from `workflows/agavemindlab/project.env.defaults` and sets
-`AUTOMATED_REVIEWER=gl-swe`. If a reviewer is configured, request review
-from that account after every PR create/update with a code, test, or
-documentation diff. If no reviewer is configured, skip the automated review
-request step and proceed directly to human handoff.
+If a reviewer is configured, request review from that account after every PR
+create/update with a code, test, or documentation diff. If no reviewer is
+configured, skip the automated review request step and proceed directly to
+human handoff.
 
 ## Related Skills
 
@@ -151,7 +149,6 @@ review_requested_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
 # Request review from the project's configured automated reviewer.
 # Check AGENTS.md or the workflow env for the reviewer account name.
-# Agavemindlab's shared default is AUTOMATED_REVIEWER=gl-swe.
 # If no reviewer is configured, skip this block.
 # If a human reviewer is already requested, preserve it and skip.
 automated_reviewer="${AUTOMATED_REVIEWER:-}"

@@ -53,18 +53,24 @@ bin/symphony-run <project>
 The launcher loads environment files in this order:
 
 1. `workflows/agavemindlab/project.env.defaults`
-2. `workflows/<project>/project.env`
-3. `~/.config/symphony/<profile>.env`
+2. `~/.config/symphony/<profile>.env`
+3. `workflows/<project>/project.env`
 
-Later files override earlier files. The profile is selected in this order:
-caller-provided `SYMPHONY_PROFILE`, project `SYMPHONY_PROFILE`, then
-`grandline`.
+Later files override earlier files, so project-maintained `project.env` has the
+final say over operator profile defaults. To select the profile before the final
+project override, `bin/symphony-run` reads `project.env` once for bootstrap
+values, sources the profile, then sources `project.env` again. The profile is
+selected in this order: caller-provided `SYMPHONY_PROFILE`, project
+`SYMPHONY_PROFILE`, then `grandline`.
 
 For manual runs, export variables while sourcing the envfile:
 
 ```sh
 set -a
 source workflows/agavemindlab/project.env.defaults
+source workflows/<project>/project.env
+profile="${SYMPHONY_PROFILE:-grandline}"
+source "$HOME/.config/symphony/$profile.env"
 source workflows/<project>/project.env
 set +a
 ./bin/symphony workflows/<project>/WORKFLOW.md
@@ -77,7 +83,8 @@ runtime settings consumed by that project's `setup.sh`.
 `project.env.defaults` currently defines `AUTOMATED_REVIEWER="gl-swe"`, the
 shared Agavemindlab automated reviewer used by the `push` skill. Keep common
 workflow values there instead of duplicating them in every project env file.
-Project env files or profile env files may override the value when needed.
+Profile env files may fill local defaults, and project env files may override
+them when needed.
 
 ## Hooks
 

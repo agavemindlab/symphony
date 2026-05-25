@@ -10,16 +10,19 @@ defmodule SymphonyElixir.SymphonyRunTest do
     assert capture["AUTOMATED_REVIEWER"] == "gl-swe"
   end
 
-  test "lets the profile env override the Agavemindlab reviewer default" do
+  test "lets the project env override the profile env" do
     capture =
       run_launcher!("symphony",
+        project_env_extra: """
+        AUTOMATED_REVIEWER="project-reviewer"
+        """,
         profile_env: """
         LINEAR_API_KEY="test-token"
         AUTOMATED_REVIEWER="profile-reviewer"
         """
       )
 
-    assert capture["AUTOMATED_REVIEWER"] == "profile-reviewer"
+    assert capture["AUTOMATED_REVIEWER"] == "project-reviewer"
   end
 
   defp run_launcher!(project, opts \\ []) do
@@ -27,10 +30,27 @@ defmodule SymphonyElixir.SymphonyRunTest do
     tmp_root = Path.join(System.tmp_dir!(), "symphony-run-test-#{run_id}")
     home = Path.join(tmp_root, "home")
     fake_bin = Path.join(tmp_root, "bin")
+    fake_repo_root = Path.join(tmp_root, "repo")
     capture_path = Path.join(tmp_root, "capture.env")
 
     File.mkdir_p!(Path.join(home, ".config/symphony"))
     File.mkdir_p!(fake_bin)
+    File.mkdir_p!(Path.join(fake_repo_root, "elixir"))
+    File.mkdir_p!(Path.join(fake_repo_root, "workflows/agavemindlab"))
+    File.mkdir_p!(Path.join(fake_repo_root, "workflows/#{project}"))
+
+    File.write!(
+      Path.join(fake_repo_root, "workflows/agavemindlab/project.env.defaults"),
+      File.read!(Path.join(@repo_root, "workflows/agavemindlab/project.env.defaults"))
+    )
+
+    project_env =
+      Path.join(@repo_root, "workflows/#{project}/project.env")
+      |> File.read!()
+      |> Kernel.<>(Keyword.get(opts, :project_env_extra, ""))
+
+    File.write!(Path.join(fake_repo_root, "workflows/#{project}/project.env"), project_env)
+    File.write!(Path.join(fake_repo_root, "workflows/#{project}/WORKFLOW.md"), "# Test workflow\n")
 
     File.write!(
       Path.join(home, ".config/symphony/grandline.env"),
@@ -43,7 +63,7 @@ defmodule SymphonyElixir.SymphonyRunTest do
     env = [
       {"HOME", home},
       {"PATH", fake_bin <> ":" <> System.get_env("PATH", "")},
-      {"SYMPHONY_REPO_ROOT", @repo_root},
+      {"SYMPHONY_REPO_ROOT", fake_repo_root},
       {"SYMPHONY_RUN_CAPTURE", capture_path},
       {"SYMPHONY_PROFILE", nil},
       {"AUTOMATED_REVIEWER", nil}

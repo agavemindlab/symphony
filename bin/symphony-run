@@ -56,6 +56,7 @@ profile_env="$HOME/.config/symphony/$SYMPHONY_PROFILE.env"
 
 set -a
 source "$profile_env"
+source "$project_env"
 set +a
 
 SYMPHONY_PROFILE="$selected_profile"
