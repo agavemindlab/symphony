@@ -6,7 +6,6 @@ tracker:
   active_states:
     - Todo
     - In Progress
-    - Human Review
     - Merging
     - Rework
   terminal_states:
@@ -254,7 +253,9 @@ Before writing implementation code for any `Todo`, `In Progress`, or `Rework` ti
 - `Backlog` -> out of scope for this workflow; do not modify.
 - `Todo` -> queued; immediately transition to `In Progress` before active work.
 - `In Progress` -> implementation actively underway.
-- `Human Review` -> Phase 1 Maestro dry-run lane. If the latest visible comment
+- `Human Review` -> wait for human action by default. In Phase 1, a human or
+  external scheduler may explicitly launch a Maestro dry-run session for this
+  state; only in that explicit Maestro lane, if the latest visible comment
   starts with `## Review Handoff`, open and follow
   `.agents/skills/maestro/SKILL.md` in dry-run mode: write one
   `## Maestro Decision【试运行 · 不修改状态】` audit comment, do not update Linear
@@ -276,9 +277,11 @@ Before writing implementation code for any `Todo`, `In Progress`, or `Rework` ti
    - `Backlog` -> stop and wait for human to move it to `Todo`.
    - `Todo` -> move to `In Progress`, ensure the workpad exists, then start execution.
    - `In Progress` -> continue from the current workpad.
-   - `Human Review` -> if the latest visible comment starts with
-     `## Review Handoff`, run the Phase 1 Maestro dry-run lane:
-     open and follow `.agents/skills/maestro/SKILL.md`, create exactly one
+   - `Human Review` -> wait for human action unless this session was
+     explicitly launched as a Phase 1 Maestro dry-run by a human or external
+     scheduler. In that explicit Maestro lane, if the latest visible comment
+     starts with `## Review Handoff`, open and follow
+     `.agents/skills/maestro/SKILL.md`, create exactly one
      `## Maestro Decision【试运行 · 不修改状态】` audit comment, do not update
      Linear state, do not code, do not push, and stop. If no handoff exists,
      wait for human action.

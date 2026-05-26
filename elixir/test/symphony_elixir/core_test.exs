@@ -1045,7 +1045,7 @@ defmodule SymphonyElixir.CoreTest do
     assert prompt =~ "Continuation context:"
     assert prompt =~ "retry attempt #2"
 
-    assert "Human Review" in Config.settings!().tracker.active_states
+    refute "Human Review" in Config.settings!().tracker.active_states
   end
 
   test "prompt builder adds continuation guidance for retries" do
