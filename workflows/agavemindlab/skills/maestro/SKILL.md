@@ -2,8 +2,9 @@
 name: maestro
 description:
   Dry-run AI reviewer for Symphony Human Review handoffs. Use when the workflow
-  routes a Human Review issue with a latest `## Review Handoff` comment to
-  Maestro Phase 1; the agent reads Linear and GitHub evidence, writes a Chinese
+  explicitly routes a Human Review issue with a latest active
+  `## Review Handoff` comment/status to Maestro Phase 1; the agent reads that
+  handoff, later human comments, Linear and GitHub evidence, writes a Chinese
   audit decision comment, and does not update Linear state.
 ---
 
