@@ -253,8 +253,14 @@ Before writing implementation code for any `Todo`, `In Progress`, or `Rework` ti
 - `Backlog` -> out of scope for this workflow; do not modify.
 - `Todo` -> queued; immediately transition to `In Progress` before active work.
 - `In Progress` -> implementation actively underway.
-- `Human Review` -> waiting on human action. The agent must not code, change
-  ticket content, push to the branch, or poll for updates while in this state.
+- `Human Review` -> wait for human action by default. In Phase 1, a human or
+  external scheduler may explicitly launch a Maestro dry-run session for this
+  state; only in that explicit Maestro lane, if there is a latest active
+  `## Review Handoff` comment/status, read that handoff plus human comments
+  after that handoff, then open and follow `.agents/skills/maestro/SKILL.md` in
+  dry-run mode: write one `## Maestro Decision【试运行 · 不修改状态】` audit comment,
+  do not update Linear state, do not code, do not push, and stop. If no handoff
+  exists, wait for human action.
 - `Merging` -> approved by human; open and follow
   `.agents/skills/phase-merge-and-confirm/SKILL.md`. The agent **never** moves
   the issue to `Done` — the agent posts a `Waiting for completion confirmation`
@@ -271,9 +277,14 @@ Before writing implementation code for any `Todo`, `In Progress`, or `Rework` ti
    - `Backlog` -> stop and wait for human to move it to `Todo`.
    - `Todo` -> move to `In Progress`, ensure the workpad exists, then start execution.
    - `In Progress` -> continue from the current workpad.
-   - `Human Review` -> wait for human action. Do not code, push, change ticket
-     content, or poll. The latest `## Review Handoff` status is the source of
-     truth for what action the human is expected to take.
+   - `Human Review` -> wait for human action unless this session was
+     explicitly launched as a Phase 1 Maestro dry-run by a human or external
+     scheduler. In that explicit Maestro lane, if there is a latest active
+     `## Review Handoff` comment/status, read that handoff plus human comments
+     after that handoff, open and follow `.agents/skills/maestro/SKILL.md`,
+     create exactly one `## Maestro Decision【试运行 · 不修改状态】` audit comment,
+     do not update Linear state, do not code, do not push, and stop. If no
+     handoff exists, wait for human action.
    - `Merging` -> open and follow `.agents/skills/phase-merge-and-confirm/SKILL.md`.
      The agent never moves the issue to `Done`; it creates a
      `Waiting for completion confirmation` handoff and moves back to `Human Review`.
@@ -347,8 +358,12 @@ Before writing implementation code for any `Todo`, `In Progress`, or `Rework` ti
 
 ## Step 3: Human Review and Merge Handling
 
-1. When the issue is in `Human Review`, do not code, push, change ticket
-   content, or poll for review updates.
+1. When the issue is in `Human Review`, do not code, push, edit the PR, or poll
+   for review updates. Phase 1 exception: if there is a latest active
+   `## Review Handoff` comment/status, Maestro may read that handoff plus human
+   comments after that handoff, write exactly one dry-run audit comment with
+   `## Maestro Decision【试运行 · 不修改状态】`, and must leave the issue state
+   unchanged.
 2. Use the latest `## Review Handoff` status as the source of truth for the
    expected human action:
    - `Waiting for requirement confirmation`: human leaves feedback and moves
@@ -540,7 +555,12 @@ When including a Before/After comparison in a handoff, format it this way:
 - **Do not move to `Human Review`** unless the completion bar in Step 2 is
   satisfied. No premature handoffs.
 - **In `Human Review`**, do not code, push, change ticket content, or poll for
-  updates. Wait for the human to change the issue state.
+  updates. Wait for the human to change the issue state. This `Human Review`
+  guardrail has one Phase 1 exception: a human or external scheduler may
+  explicitly launch Maestro to read the latest active `## Review Handoff`
+  comment/status plus human comments after that handoff and write exactly one
+  `## Maestro Decision【试运行 · 不修改状态】` audit comment without changing issue
+  state.
 - **One persistent workpad**: use exactly one `## Codex Workpad` comment per
   issue. Update it in place; never create a duplicate. Preserve the comment ID
   across retries, rework rounds, and full resets.
