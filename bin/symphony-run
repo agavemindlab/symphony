@@ -28,6 +28,7 @@ workflow_dir="$repo_root/workflows/$project"
 workflow_file="$workflow_dir/WORKFLOW.md"
 defaults_env="$repo_root/workflows/agavemindlab/project.env.defaults"
 project_env="$workflow_dir/project.env"
+local_env="$workflow_dir/project.env.local"
 
 [ -f "$workflow_file" ] || die "workflow file not found: $workflow_file"
 [ -f "$project_env" ] || die "project env file not found: $project_env"
@@ -57,6 +58,7 @@ profile_env="$HOME/.config/symphony/$SYMPHONY_PROFILE.env"
 set -a
 source "$profile_env"
 source "$project_env"
+[ ! -f "$local_env" ] || source "$local_env"
 set +a
 
 SYMPHONY_PROFILE="$selected_profile"
