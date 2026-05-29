@@ -301,6 +301,13 @@ needed`. All H3 sections are optional and default to omitted.
   section is fully omitted. Exception: production-only-repro issues
   must include real post-merge entries (see WORKFLOW.md `Completion
   bar before Human Review`).
+- **Don't use event counts as proof for persistent outputs.** When the
+  Spec involves persistent output (MEMORY.md writes, file generation,
+  database records), the handoff must include a readable content
+  summary—direct quotes, per-item summaries, or key excerpts. A count
+  like `promotion.applied=3` is not sufficient; the reviewer must be
+  able to judge whether the output content is correct without SSHing
+  into a machine.
 - **Don't restate Spec content in TL;DR.** TL;DR carries this round's
   incremental story (especially for multi-PR iterations); the Spec
   link tells the long story.

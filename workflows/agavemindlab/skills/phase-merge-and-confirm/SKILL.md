@@ -55,6 +55,10 @@ Status: Waiting for completion confirmation
 - Map every acceptance criterion from the workpad 1:1 in the 目标验证 section.
   Use ✅ for verified with evidence, ❓ for items still pending human or runtime
   confirmation. Do not omit ❓ items.
+- For acceptance criteria involving persistent outputs (MEMORY.md writes, file
+  generation, database records), evidence must include a readable content
+  summary—direct quotes, per-item summaries, or key excerpts. A count like
+  `promotion.applied=3` is not sufficient evidence for a ✅.
 - Keep the handoff compact. Do not paste the full workpad, full logs, or
   environment troubleshooting steps.
 - Body in Chinese except status enum values, commands, identifiers, and file
