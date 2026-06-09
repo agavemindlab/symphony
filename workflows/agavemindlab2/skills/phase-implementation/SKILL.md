@@ -17,10 +17,13 @@ artifact.
 
 ## At phase start
 
-Main Flow has already detected approval, written the approval reply on
-`## Design`, and set `current_phase: Implementation` before opening this
-skill. Read `## Requirements` (for `S<N>` IDs) and `## Design` (for
-approach) to anchor the implementation plan.
+Main Flow has already closed `## Design` (a `✅` human approval or a `⏩`
+agent auto-advance reply) and set `current_phase: Implementation` before
+opening this skill. Read `## Requirements` (for `S<N>` IDs) and `## Design`
+(for approach) to anchor the implementation plan.
+
+Implementation never auto-advances: it always ends at `Human Review` with
+the PR up, and Deployment is reachable only via the `Merging` state.
 
 If the workpad (`.symphony/workpad.md`) does not exist, create it with the
 template from WORKFLOW.md. If this run is a rework of `## Implementation`

@@ -3,8 +3,9 @@ name: phase-design
 description:
   Run the Design phase of the Symphony workflow. Produce the `## Design`
   Linear artifact with the chosen approach, rationale, and a diagram for
-  non-trivial designs. Use after the human approves `## Requirements`.
-  Exit by posting the artifact and moving to Human Review.
+  non-trivial designs. Use after `## Requirements` is accepted (human
+  approval or agent auto-advance). Exit by posting the artifact; Main Flow
+  then auto-advances to Implementation or stops for human review.
 ---
 
 # Phase: Design
@@ -21,9 +22,9 @@ Post (or update) the `## Design` artifact on the Linear issue with:
 
 ## At phase start
 
-Main Flow has already detected approval, written the approval reply on
-`## Requirements`, and set `current_phase: Design` before opening this
-skill. Just read the `## Requirements` artifact to extract `Primary:`,
+Main Flow has already closed `## Requirements` (a `✅` human approval or a
+`⏩` agent auto-advance reply) and set `current_phase: Design` before opening
+this skill. Just read the `## Requirements` artifact to extract `Primary:`,
 `验收标准 S<N>`, and `关键假设` before designing the approach.
 
 If this run is a rework of `## Design` (the artifact has unresolved human
@@ -144,16 +145,47 @@ update workpad `current_phase: Requirements`, and open `phase-requirements`.
 
 ## Exit
 
-When all exit conditions are met:
+### Completeness bar (required to post the artifact)
+
+The artifact is complete enough to post when all of these hold — this is
+about form, not correctness:
 
 - `方案（approach）` is complete (no placeholder text).
 - Diagram included for non-trivial designs.
 - Type-specific approach emphasis satisfied for `Primary:`.
 - No unresolved `[NEEDS CLARIFICATION]` markers.
 
-Post or update the `## Design` artifact. Update workpad
-`current_phase: Design`. Move the issue to `Human Review` and stop.
+Post or update the `## Design` artifact and set the workpad
+`current_phase: Design`. Do **not** move the issue yourself on a clean exit —
+hand back one of two outcomes (`advance` / `stop`) for Main Flow to execute.
+The decision is yours; Main Flow only carries it out.
 
-The human approves by moving the issue back to an active state. On the next
-session, Main Flow detects the approval, writes the approval reply on this
-artifact, and advances to Implementation.
+### Exit decision: advance or stop
+
+Choose **`advance`** only when **all** of these hold:
+
+- **Fresh run** — not a rework, and the artifact carries no prior human reply.
+- **State `In Progress`** — not `Rework`.
+- **Confident** — answer honestly: *Will this approach actually solve the
+  problem, and is it clearly the right direction, such that a human reviewer
+  would very likely approve it as-is?* Yes only if this is the standard or
+  clearly-best approach, with no contentious architectural fork, no risky
+  bet, and no non-obvious risk a reviewer would balk at.
+
+On `advance`, record `confidence: advance` in the workpad notes; Main Flow
+writes the `⏩` reply and opens `phase-implementation` in the same session.
+
+Otherwise choose **`stop`** — Main Flow moves the issue to `Human Review`.
+This is the right outcome for a rework, for a human already in the thread,
+for the `Rework` state, and for the **complete-but-not-confident** case:
+there is a real architectural fork a reasonable reviewer might decide
+differently, an uncertain bet, or a non-obvious risk worth a human's eyes
+before you build on it. Before stopping for low confidence, surface the
+specific point in `风险/注意` and record `confidence: review` in the notes.
+**When in doubt, stop** — auto-advance is for the clearly-right design. After
+a stop, the human approves by moving the issue back to an active state and
+the next session advances to Implementation.
+
+(The "When blocked" path above is the harder stop: an unresolved
+`[NEEDS CLARIFICATION]` means the artifact is not even safe to build on, so
+it moves to `Human Review` directly.)

@@ -4,8 +4,8 @@ description:
   Run the Requirements phase of the Symphony workflow. Turn an issue into
   a `## Requirements` Linear artifact with problem statement, motivation,
   and acceptance criteria locked down. Use at the start of any Todo /
-  In Progress / Rework ticket. Exit by posting the artifact and moving to
-  Human Review.
+  In Progress / Rework ticket. Exit by posting the artifact; Main Flow then
+  auto-advances to Design or stops for human review.
 ---
 
 # Phase: Requirements
@@ -138,15 +138,46 @@ defaults), then proceed to exit.
 
 ## Exit
 
-When all exit conditions are met:
+### Completeness bar (required to post the artifact)
+
+The artifact is complete enough to post when all of these hold — this is
+about form, not correctness:
 
 - `Primary:`, `要解决的问题`, `为什么解决`, `验收标准` all filled.
 - Every `S<N>` satisfies the 5 rules.
 - No unresolved `[NEEDS CLARIFICATION]` markers.
 
-Post or update the `## Requirements` artifact. Update the workpad:
-`current_phase: Requirements`. Move the issue to `Human Review` and stop.
+Post or update the `## Requirements` artifact and set the workpad
+`current_phase: Requirements`. Do **not** move the issue yourself on a clean
+exit — hand back one of two outcomes (`advance` / `stop`) for Main Flow to
+execute. The decision is yours; Main Flow only carries it out.
 
-The human approves by moving the issue back to an active state. On the next
-session, Main Flow detects the approval, writes the approval reply on this
-artifact, and advances to Design.
+### Exit decision: advance or stop
+
+Choose **`advance`** only when **all** of these hold:
+
+- **Fresh run** — not a rework, and the artifact carries no prior human reply.
+- **State `In Progress`** — not `Rework`.
+- **Confident** — answer honestly: *Did I actually understand the intent? Is
+  this the only reasonable reading of the issue, such that a human reviewer
+  would very likely approve it as-is?* Yes only if the problem statement and
+  acceptance criteria follow directly from the issue, with no material
+  ambiguity resolved by guessing.
+
+On `advance`, record `confidence: advance` in the workpad notes; Main Flow
+writes the `⏩` reply and opens `phase-design` in the same session.
+
+Otherwise choose **`stop`** — Main Flow moves the issue to `Human Review`.
+This is the right outcome for a rework, for a human already in the thread,
+for the `Rework` state, and for the **complete-but-not-confident** case: a
+key interpretation could reasonably go another way, or you resolved a
+material ambiguity with a judgment call a human might overturn. Before
+stopping for low confidence, surface the specific uncertain point in
+`关键假设` / `风险/注意` and record `confidence: review` in the notes.
+**When in doubt, stop** — auto-advance is for the unambiguous case. After a
+stop, the human approves by moving the issue back to an active state and the
+next session advances to Design.
+
+(The "When blocked" path above is the harder stop: an unresolved
+`[NEEDS CLARIFICATION]` means the artifact is not even safe to build on, so
+it moves to `Human Review` directly.)
