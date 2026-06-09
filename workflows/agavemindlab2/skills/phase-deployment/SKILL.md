@@ -52,7 +52,9 @@ After the merge and deploy pipeline confirms success:
    after deploy (e.g., smoke tests, endpoint health, error-rate baseline).
 2. Record evidence for each `S<N>` from `## Requirements`.
 3. Note any `S<N>` items that require a longer observation window or
-   human confirmation.
+   human confirmation. Spin off any genuine follow-up work as a separate
+   ticket via the `symphony-issue` skill (autonomous `follow-up`) and list
+   its `#ID` in 后续事项 — do not expand this issue.
 
 ## `## Deployment` artifact template
 

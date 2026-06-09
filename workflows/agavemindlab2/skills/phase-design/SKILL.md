@@ -62,8 +62,10 @@ Required content:
 - Key trade-off and why the chosen path was picked over the alternative
   (1-2 alternatives named).
 - Diagram inline (per the rule above) for non-trivial designs.
-- Intentionally uncovered scope with follow-up issue ID (tag as
-  `blocking-related` or `optional-related`).
+- Intentionally uncovered scope, spun off as a separate ticket via the
+  `symphony-issue` skill (autonomous `follow-up`/`related`, or a proposed
+  `blocking`/`sub-issue` when it changes this issue's plan); cite the
+  resulting `#ID` (or proposal) in 未覆盖范围.
 
 ## Type-specific writing emphasis
 
@@ -72,7 +74,8 @@ Apply the emphasis matching `Primary:` from the Requirements artifact.
 - **Type:Bug** — approach must answer: causal link between fix and root
   cause; sibling code path survey (grep evidence); 治标 vs 治本; data-
   integrity risk. If 治标 or 根因 unknown, explicitly mark as symptomatic
-  fix, file an investigative follow-up issue, and list risks.
+  fix, spin off an investigative follow-up issue via `symphony-issue`, and
+  list risks.
 - **Type:Feature** — enumerate the edge case matrix (empty / loading /
   error / permission denied / concurrency / large data) and call out
   intentionally uncovered cases.

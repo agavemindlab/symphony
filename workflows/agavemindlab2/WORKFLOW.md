@@ -162,8 +162,9 @@ Symphony only starts the agent when the issue is in an active state (`Todo`, `In
    - `In Progress`, `Rework` → determine the target phase via steps 4–5.
 
 4. Gather the signals:
+   - **Proposal-consent channel (run first, orthogonal to phase intent).** Scan unresolved `## 建议新建 issue` proposal comments for a new human reply in *their* thread, and fulfill via the `symphony-issue` skill's fulfill mode (consent → create the proposed issue + reply `已创建 #ID` + resolve the proposal comment; rejection → resolve as `已放弃`). This lives in a different comment thread than the phase artifacts, so it never collides with phase approval; fulfilling spawns here first keeps a single "approve phase + consent to a sub-issue" reply pair well-ordered. See the Spawning related issues section.
    - Identify the phase awaiting review = the most recent artifact with no closing reply (neither `✅` human approval nor `⏩` auto-advance). The workpad `current_phase` should already name it; if the workpad is absent (brand-new branch), infer it as the most recent phase whose artifact exists. No artifacts at all → target phase is Requirements, go to step 6.
-   - Gather new human feedback from two places: (a) replies in each unresolved Phase artifact's thread, and (b) standalone top-level comments on the issue that are not replies to any artifact. Scan **every** unresolved artifact, not just the awaiting-review one — humans request cross-phase rework by commenting on the artifact they want changed (e.g. feedback on `## Design` while `## Implementation` awaits review). "New" = newer than the agent's last closing reply on that artifact (or, for standalone comments, newer than the agent's last action). Attribute each standalone comment to the phase it discusses; if unclear, assume the awaiting-review phase. If a comment refers back to an earlier round ("上次"/"之前提到的"), pull the specific resolved comment it points to per the `symphony-linear` skill's back-reference exception.
+   - Gather new human feedback from two places: (a) replies in each unresolved Phase artifact's thread, and (b) standalone top-level **human** comments on the issue that are not replies to any artifact. Exclude agent-authored `## 建议新建 issue` proposal comments — those are the consent channel handled by the first bullet, not feedback. Scan **every** unresolved artifact, not just the awaiting-review one — humans request cross-phase rework by commenting on the artifact they want changed (e.g. feedback on `## Design` while `## Implementation` awaits review). "New" = newer than the agent's last closing reply on that artifact (or, for standalone comments, newer than the agent's last action). Attribute each standalone comment to the phase it discusses; if unclear, assume the awaiting-review phase. If a comment refers back to an earlier round ("上次"/"之前提到的"), pull the specific resolved comment it points to per the `symphony-linear` skill's back-reference exception.
    - When the awaiting-review phase is Implementation, the **PR is also a feedback channel** — but only for **human** reviewers. Humans often leave change requests as GitHub PR review comments instead of repeating them on Linear; gather new human PR review comments / inline threads / review states and treat them as feedback targeting Implementation. Bot / automated reviews (e.g. the configured `AUTOMATED_REVIEWER`) are **not** human intent: a bot approval never counts as a human approval, and a bot's comments are addressed by the Implementation PR feedback sweep, not by this intent check. Identify the author of each PR review/comment and drop bot ones before judging intent.
    - Note the Linear state (`In Progress` vs `Rework`).
 
@@ -236,6 +237,26 @@ When the human feedback requires revisiting an earlier phase (e.g., a design fla
 
 The approval chain restarts from the target phase. All artifacts from target onward will be re-posted as those phases complete again.
 
+## Spawning related issues
+
+When a phase discovers work that needs its **own** Linear ticket (not a
+workpad Plan item), it invokes the `symphony-issue` skill. Two tiers:
+
+- **Autonomous create** — `follow-up`, `related`, downstream `blocked`
+  (current blocks the new issue). The agent creates them directly.
+- **Consent-gated** — `blocking` (current is blocked by the new issue) and
+  `sub-issue` decomposition. The agent posts a `## 建议新建 issue` proposal
+  comment and creates nothing until a human replies consent in that comment's
+  thread; Main Flow step 4 fulfills the consent.
+
+Safety invariants for every spawned issue: it lands in the team's **intake
+state** (resolved by `type` — `triage` else `backlog`, never by name), is
+**assigned to the current issue's `creator`**, never to Symphony, and is
+therefore **never auto-worked** (the intake state is outside `active_states`).
+A `blocking` discovery additionally parks the current issue at `Human Review`
+with a 🚧 callout — creating the blocker does not unblock it. Full mechanics,
+dedup, and the workpad record live in `symphony-issue`.
+
 ## Workpad
 
 Agent execution state lives in `.symphony/workpad.md` on the feature branch, committed to git. Machine-read fields (`current_phase`, `cleanup`) go in the YAML frontmatter; the rest is markdown. It is excluded from the final merge via the `cleanup` field.
@@ -260,6 +281,11 @@ cleanup:
 ## Notes
 - <short progress note with timestamp>
 - Skills invoked: <comma-separated names>
+
+## Spawned Issues
+- 已创建 #ID — <title> · related/blocks/parent · <one-line why>
+- 待同意 <proposal-comment-id> — <title> · blocking/sub-issue
+- 已放弃 <proposal-comment-id> — <title> · <reason>
 ```
 
 ### Persistence
@@ -274,4 +300,4 @@ Commit and push the workpad so origin always holds the latest agent state — th
 - **Agent never moves to `Done`**: only humans close the issue. After Deployment concludes, the agent posts a completion summary in the `## Deployment` artifact thread and returns the issue to `Human Review`.
 - **No phase advances without its artifact**: each phase must post or update its artifact before moving to `Human Review`.
 - **`Human Review` is not an agent state**: Symphony does not start the agent there. Do not design any phase skill to act while the issue is in `Human Review`.
-- **Out-of-scope improvements**: file a separate Linear issue instead of expanding the current issue.
+- **Out-of-scope improvements**: do not expand the current issue — spin off a separate ticket via the `symphony-issue` skill (see Spawning related issues). Every spawned issue lands in the team intake state, is assigned to the current issue's `creator` (never Symphony), and is never auto-worked. Flow-changing kinds (`blocking`, `sub-issue`) are only proposed and wait for human consent.

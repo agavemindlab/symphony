@@ -130,7 +130,9 @@ When `[NEEDS CLARIFICATION]` markers remain after honest analysis:
 4. Stop.
 
 Cap at five blocking questions per round. More signals the issue needs
-scope reduction or splitting.
+scope reduction or splitting — when a split is warranted, propose `sub-issue`
+decomposition via the `symphony-issue` skill (consent-gated: it posts a
+`## 建议新建 issue` proposal and creates nothing until a human consents).
 
 On resume: read human replies in the artifact thread, replace each marker
 with the answered value (or `Brief 假设: <value>` for recommended

@@ -44,6 +44,9 @@ same-phase Rework cycle in WORKFLOW.md when re-posting the artifact.
   review per the project's reviewer configuration.
 - `symphony-pull` (.agents/skills) — keep the branch current with
   `upstream/${SYMPHONY_BASE_BRANCH:-main}` before handoff.
+- `symphony-issue` (.agents/skills) — spin off a separate ticket for any
+  out-of-scope / deferred / blocking work discovered during implementation,
+  instead of expanding this issue.
 - `verification-before-completion` (superpowers, if available) — gate
   before claiming work is done.
 
@@ -104,7 +107,9 @@ Run this loop before posting the artifact:
 4. Treat every substantive reviewer comment as requiring a same-thread
    reply in GitHub:
    - Addressed with code: reply with what changed + commit SHA.
-   - Correct but deferred: reply with deferral reason + follow-up issue.
+   - Correct but deferred: reply with deferral reason + a follow-up issue
+     spun off via the `symphony-issue` skill (autonomous `follow-up` kind);
+     cite the new `#ID` in the reply.
    - Not applied: reply with explicit technical pushback.
 5. Update the workpad `plan` / `acceptance_criteria` with each feedback
    item and its resolution.

@@ -376,6 +376,90 @@ mutation AttachURL($issueId: String!, $url: String!, $title: String) {
 }
 ```
 
+### Spawn a related issue (create + link)
+
+Used by the `symphony-issue` skill. Three reads to gather ids, then create,
+then link.
+
+**1. Read the fields needed to spawn from the current issue** — its
+`creator`, `team`, and `project`:
+
+```graphql
+query SpawnContext($id: String!) {
+  issue(id: $id) {
+    id
+    identifier
+    url
+    creator { id }
+    team { id }
+    project { id }
+  }
+}
+```
+
+**2. Resolve the intake `stateId` by `type`, never by name.** Reuse the
+`IssueTeamStates` query above; from `team.states.nodes`, pick the state with
+`type == "triage"` if one exists, else `type == "backlog"`. Teams rename
+states, so matching the literal name "Backlog" is wrong — match on `type`.
+
+**3. Resolve the `Type:Xxx` `labelId`** from the team's labels:
+
+```graphql
+query TeamLabels($id: String!) {
+  issue(id: $id) {
+    team {
+      id
+      labels(first: 100) {
+        nodes { id name }
+      }
+    }
+  }
+}
+```
+
+**4. Create the issue.** `parentId` only for sub-issues; omit otherwise.
+
+```graphql
+mutation CreateIssue($input: IssueCreateInput!) {
+  issueCreate(input: $input) {
+    success
+    issue {
+      id
+      identifier
+      url
+    }
+  }
+}
+```
+
+`input`: `{ teamId, title, description, stateId, assigneeId, labelIds, parentId? }`.
+
+**5. Link the issue** (skip for sub-issues — parent-child is set via
+`parentId` above, not a relation):
+
+```graphql
+mutation CreateIssueRelation($input: IssueRelationCreateInput!) {
+  issueRelationCreate(input: $input) {
+    success
+    issueRelation { id type }
+  }
+}
+```
+
+`input`: `{ issueId, relatedIssueId, type }`. `type` is an `IssueRelationType`
+— `related` for follow-up/related; `blocks` for "current blocks new"
+(downstream blocked, with `issueId` = current, `relatedIssueId` = new).
+"Blocked-by" is the reverse `blocks`. If the exact enum values are unclear,
+introspect them:
+
+```graphql
+query IssueRelationTypeValues {
+  __type(name: "IssueRelationType") {
+    enumValues { name }
+  }
+}
+```
+
 ### Introspection patterns used during schema discovery
 
 Use these when the exact field or mutation shape is unclear:
