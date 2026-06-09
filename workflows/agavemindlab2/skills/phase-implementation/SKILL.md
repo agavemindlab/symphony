@@ -1,0 +1,190 @@
+---
+name: phase-implementation
+description:
+  Run the Implementation phase of the Symphony workflow. Turn approved
+  Requirements and Design into working code, tests, and a PR. Post the
+  `## Implementation` artifact when the work is ready for human review.
+  Workpad lives in `.symphony/workpad.md` on the feature branch.
+---
+
+# Phase: Implementation
+
+## Goal
+
+Produce working code + tests + a PR that the reviewer can approve or
+request changes on within 30 seconds of reading the `## Implementation`
+artifact.
+
+## At phase start
+
+Main Flow has already detected approval, written the approval reply on
+`## Design`, and set `current_phase: Implementation` before opening this
+skill. Read `## Requirements` (for `S<N>` IDs) and `## Design` (for
+approach) to anchor the implementation plan.
+
+If the workpad (`.symphony/workpad.md`) does not exist, create it with the
+template from WORKFLOW.md. If this run is a rework of `## Implementation`
+(the artifact has unresolved human feedback in its thread), reconcile the
+workpad plan with that feedback before writing code, and follow the
+same-phase Rework cycle in WORKFLOW.md when re-posting the artifact.
+
+## Skills to invoke
+
+- `writing-plans` (superpowers, if available) — produce the hierarchical
+  plan. If unavailable, construct the plan manually in the workpad.
+- `subagent-driven-development` (superpowers, if available and tasks are
+  parallelizable) — delegate independent plan items to subagents.
+- `test-driven-development` (superpowers, if available) — write failing
+  tests first for any new behavior.
+- `symphony-commit` (.agents/skills) — clean, logical commits.
+- `symphony-pr` (.agents/skills) — push to `origin`, publish PR, request code
+  review per the project's reviewer configuration.
+- `symphony-pull` (.agents/skills) — keep the branch current with
+  `upstream/${SYMPHONY_BASE_BRANCH:-main}` before handoff.
+- `verification-before-completion` (superpowers, if available) — gate
+  before claiming work is done.
+
+If any skill is skipped, record `Skipped <skill>: <reason>` in workpad
+`notes`.
+
+## Workpad (`.symphony/workpad.md`)
+
+The workpad is the agent's execution record and continuation state. Keep
+it accurate so a fresh session can resume without losing state. See the
+WORKFLOW.md Workpad template for the exact layout (YAML frontmatter +
+markdown sections).
+
+Frontmatter fields:
+- `current_phase`: must be `Implementation`.
+- `cleanup`: list all files that must not be merged into main (at minimum
+  `.symphony/workpad.md` and any plan docs from brainstorming).
+
+Markdown sections:
+- `## Plan`: hierarchical checklist mirroring the implementation plan.
+- `## Acceptance Criteria`: mirror every Requirements `S<N>` as an
+  executable checkbox. Do not restate criterion text.
+- `## Validation`: targeted test commands.
+- `## Notes`: progress notes with timestamps; skills invoked.
+
+## Implementation flow
+
+1. **Plan** — invoke `writing-plans` (or construct manually) to produce
+   the hierarchical plan; write it to the workpad. Mirror `S<N>` IDs in
+   `acceptance_criteria`.
+2. **Delegate** — if `subagent-driven-development` is available and the
+   plan has independent subtasks, invoke it.
+3. **Implement with TDD** — for new behavior: failing test → minimal code
+   → green → refactor.
+4. **Commit** — invoke `symphony-commit` skill for each logical change.
+5. **Push** — invoke `symphony-pr` skill to publish to `origin` and request code
+   review.
+6. **Local runtime acceptance** — for app-behavior changes, exercise the
+   feature against the running service per `AGENTS.md`. If local
+   acceptance is impossible, record the reason and closest safe
+   alternative proof; surface the caveat in the artifact `风险/注意`.
+7. **Verify** — invoke `verification-before-completion` if available.
+8. **PR feedback sweep** — see protocol below.
+9. **Post artifact** — write the `## Implementation` artifact and move to
+   `Human Review`.
+
+## PR feedback sweep protocol
+
+Run this loop before posting the artifact:
+
+1. Identify the PR number from issue attachments / links.
+2. Ensure a code review is requested per the project's reviewer
+   configuration after every push (`symphony-pr` skill handles this).
+3. Gather feedback from all channels:
+   - Top-level PR comments (`gh pr view --comments`).
+   - Inline review comments (`gh api repos/<owner>/<repo>/pulls/<pr>/comments`).
+   - Review summaries / states (`gh pr view --json reviews`).
+4. Treat every substantive reviewer comment as requiring a same-thread
+   reply in GitHub:
+   - Addressed with code: reply with what changed + commit SHA.
+   - Correct but deferred: reply with deferral reason + follow-up issue.
+   - Not applied: reply with explicit technical pushback.
+5. Update the workpad `plan` / `acceptance_criteria` with each feedback
+   item and its resolution.
+6. Re-run validation after feedback changes and push updates.
+7. Repeat until no outstanding actionable comments remain.
+
+When responding to review feedback, follow `receiving-code-review`
+discipline if available: verify before implementing, technical correctness
+over social comfort.
+
+## `## Implementation` artifact template
+
+```md
+## Implementation
+
+**PR**: [#NNNN](URL) · **CI**: [green|red](URL) · `<short-sha>`
+
+### 实现摘要
+<3-5 句中文 prose。回答：解决了什么；选定方案是什么；为什么改是对的
+（含关键数字 inline）；是否有 reviewer 需要知道的不放心点。
+读完 reviewer 应能 30 秒内决定是否批准。>
+
+### 验收对照（acceptance criteria）
+| 验收项 | 状态 | 证据 |
+|--------|------|------|
+| S1: <criterion> | ✅ 通过 | <命令或检查结果> |
+| S2: <criterion> | ⚠️ 部分通过 | <caveat> |
+| S3: <criterion> | ➖ N/A | <原因> |
+
+### 看哪里（optional: non-obvious diff areas only）
+- [`path/file` L120-L145](URL) — <one sentence why reviewer should look here>
+
+### 风险/注意（optional）
+- <one sentence per item; omit if none>
+
+### Merge 后验证（optional: only for production-only acceptance criteria）
+- S<N>: <metric ID / dashboard URL + observation window>
+
+> [!IMPORTANT]
+> 👉 **Human action needed**: 审查 PR，批准后将 issue 移至 `Merging`；需要修改则移至 `Rework`。
+```
+
+Status column conventions: `✅ 通过`, `⚠️ 部分通过`, `➖ N/A`, `❌ 失败`.
+`❌ 失败` means the criterion is still unmet at handoff time.
+
+## Blocked-access escape hatch
+
+Use only when completion is blocked by missing required tools or
+auth/permissions that cannot be resolved in-session.
+
+Write a blocker description in the workpad `notes` covering: what is
+missing; why it blocks acceptance; exact human action to unblock.
+
+Reflect this in the artifact's `风险/注意` and include:
+```
+> [!WARNING]
+> 🚨 Blocked: <one sentence>
+```
+
+## Cross-phase rework
+
+If `Rework` feedback requires revisiting an earlier phase rather than fixing
+the implementation:
+
+- **Design flaw** (approach needs to change) → target `phase-design`
+- **Requirements flaw** (problem statement or acceptance criteria wrong) → target `phase-requirements`
+
+Follow the cross-phase rework protocol in WORKFLOW.md: resolve intermediate
+artifacts in reverse order (Implementation first, then any phases between
+target and Implementation), update workpad `current_phase` to the target
+phase, and open the target phase skill.
+
+## Exit conditions
+
+- Workpad `plan` and `acceptance_criteria` complete; every agent-owned
+  checkbox checked.
+- For app-behavior changes, local runtime acceptance has produced concrete
+  evidence, or the substitution path is documented.
+- Validation/tests green for the latest commit.
+- PR pushed; PR checks green; PR linked on the issue.
+- PR feedback sweep complete: every substantive comment has a reply.
+- `## Implementation` artifact posted.
+- Issue moved to `Human Review`.
+
+The human approves by moving the issue to `Merging`. On the next session,
+Main Flow writes the approval reply on this artifact and runs Deployment.
