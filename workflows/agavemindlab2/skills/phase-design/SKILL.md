@@ -30,6 +30,14 @@ this skill. Just read the `## Requirements` artifact to extract `Primary:`,
 If this run is a rework of `## Design` (the artifact has unresolved human
 feedback in its thread), follow the same-phase Rework cycle in WORKFLOW.md.
 
+## Sub-issue: fit the parent's design
+
+If this issue has a **parent** (it was created as a sub-issue), read the
+parent's `## Design` first. Adopt its architecture and already-settled
+tradeoffs for this slice — do **not** re-decide them. Scope the approach to the
+child's slice; raise a `[NEEDS CLARIFICATION]` only if the slice genuinely
+cannot fit the parent's design.
+
 ## Discovery / design review
 
 **Invoke the `plan-eng-review` skill** to adversarially review the chosen
