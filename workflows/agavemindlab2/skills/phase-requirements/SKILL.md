@@ -43,6 +43,24 @@ problem statement. If none is available, read all issue context
 (description, comments, attachments, linked issues, labels) and surface
 ambiguities explicitly before writing the artifact.
 
+This workflow is unattended, so you cannot interview a human turn by turn:
+collect every uncertainty here and resolve it through the **Batched
+clarification** protocol below (assume-and-record the immaterial ones; batch
+the material ones with a recommended answer), rather than stopping to ask one
+question at a time.
+
+**Seed question bank (borrow with judgment).** For product- / user-facing
+issues (most `Type:Feature`, some `Type:Bug`), interrogate intent with the
+`office-hours` **Six Forcing Questions**, adapted to a ticket: (1) demand
+reality — strongest evidence someone actually wants this; (2) status quo — what
+users do today and what the workaround costs; (3) desperate specificity — name
+the actual user/role and the consequence they face; (4) narrowest wedge — the
+smallest version worth shipping; (5) observation & surprise — what real usage
+contradicted; (6) future-fit — does this stay essential as the world changes.
+Push each past the comfortable answer to something specific and evidence-based.
+Skip the ones that don't apply (they rarely fit `Refactor` / `Chore` /
+`Migration`). Borrow the questions; do not invoke the skill.
+
 ## Sub-issue: inherit the parent's scope
 
 If this issue has a **parent** (it was created as a sub-issue), its
@@ -131,14 +149,49 @@ investigation the agent can actually perform (only a human can answer), do not
 run the pipeline: state this in the `## Requirements` artifact, `@`-mention the
 issue's `creator`, move the issue to `Human Review`, and stop.
 
-## `[NEEDS CLARIFICATION]` markers
+## Batched clarification (`[NEEDS CLARIFICATION]`)
 
-Use `[NEEDS CLARIFICATION: <question>]` inline in the artifact for
-ambiguities that block correct implementation and cannot be resolved with
-a safe default. Record safe-default resolutions in `关键假设` as
-`<value>（假设）`.
+Because the agent cannot interview the human turn by turn, ambiguities are
+resolved in **one batch** with a recommended answer per question, so the human
+can approve the whole set with a single reply or push back only on the items
+they disagree with.
 
-While any marker is unresolved, product implementation code must not start.
+**What becomes a question — and what doesn't.** Walk the decision tree along
+your **own recommended answers** and collect every uncertainty you hit on that
+path. Then sort each one:
+
+- **Immaterial** (a safe default exists and a wrong guess costs little) → do
+  **not** ask. Take the default, record it in `关键假设` as `<value>（假设）`,
+  and move on.
+- **Material** (your recommendation could be wrong in a way that changes the
+  problem, the acceptance criteria, or the build) → make it a batched question.
+- **High-impact** (schema/data migration, irreversible data op, security/
+  privacy behavior, public API contract, dependency breaking change, major UX
+  fork) → batched question tagged `〔影响：高 · 需明确回答〕`; it is **not**
+  covered by a blanket approval (see the consent convention).
+
+**Batched format** — one block at the foot of the `## Requirements` artifact:
+
+```md
+### 待确认（一次性审阅：认可全部推荐请回复「同意默认」，否则逐条说明）
+[NEEDS CLARIFICATION]
+Q1. <question> 〔影响：低〕
+  - A（推荐）: <answer> — <one-line why>
+  - B: <answer>
+Q2. <question> 〔影响：高 · 需明确回答〕
+  - A（推荐）: <answer> — <one-line why>
+  - B: <answer>
+  - C: <answer>
+```
+
+Keep each question's options to 2–4 concrete branches, exactly one marked
+`（推荐）` with a one-line rationale. **Cap at five questions per round** — more
+signals the issue needs scope reduction or splitting (propose a `sub-issue`
+split via `symphony-issue`, which posts a `## 建议新建 issue` proposal and
+creates nothing until a human consents).
+
+While any batched question is unresolved, product implementation code must not
+start.
 
 ## `本地验收不可达` declaration
 
@@ -169,33 +222,52 @@ Primary: Type:<Bug|Feature|Refactor|Performance|Migration|Chore|Spike|Other>
 
 风险/注意（secondary concerns; omit if none）:
 - <one sentence per item>
+
+### 待确认（omit if none; the batched [NEEDS CLARIFICATION] block — see Batched clarification）
 ```
 
 ## When blocked
 
-When `[NEEDS CLARIFICATION]` markers remain after honest analysis:
+When a batched `[NEEDS CLARIFICATION]` block remains after honest analysis:
 
-1. Write them inline in the `## Requirements` artifact.
+1. Write the batched block at the foot of the `## Requirements` artifact.
 2. Post or update the artifact comment.
 3. Move the issue to `Human Review`.
 4. Stop.
 
-Cap at five blocking questions per round. More signals the issue needs
-scope reduction or splitting — when a split is warranted, propose `sub-issue`
-decomposition via the `symphony-issue` skill (consent-gated: it posts a
-`## 建议新建 issue` proposal and creates nothing until a human consents).
+### Consent convention (how the human replies)
 
-On resume: read human replies in the artifact thread. For each marker, if the
-reply resolves it, replace the marker with the answered value (or record a
-recommended default in `关键假设` as `<value>（假设）`) and proceed to exit. If the
-reply is too vague or off-point to resolve it, do **not** guess: keep the
-marker, refine its question to name exactly what is still missing, bump that
-marker's unresolved-round count in the workpad `notes`, and stop again via
-"When blocked". After a marker has gone two rounds unresolved, stop re-asking
-the same way — `@`-mention the issue's `creator` in the artifact, state the
-blocking point and the decision you need, and (when the deadlock is really
-scope being too large) propose a `sub-issue` split via `symphony-issue`.
-Remain at `Human Review`.
+- **`同意默认`** (or 认可 / 都按推荐) → accept every `（推荐）` option, **except**
+  any question tagged `〔影响：高 · 需明确回答〕`, which a blanket approval never
+  covers.
+- **Per-question override** (e.g. `Q2 选 B；其余默认`, or a prose answer naming
+  the question) → take the named choice for those questions, the recommendation
+  for the rest.
+- A high-impact question is resolved **only** by an explicit answer to it; if a
+  reply says `同意默认` but leaves a high-impact question untouched, that
+  question stays open and you stop again for it.
+
+### On resume
+
+Read the human's reply in the artifact thread and apply the consent convention:
+
+- For each **resolved** question, fold the chosen answer into the artifact
+  (into `要解决的问题` / `为什么解决` / `验收标准` / `关键假设` as fitting) and
+  drop it from the batch. An accepted recommendation that is a default
+  assumption lands in `关键假设` as `<value>（假设）`.
+- If accepting an **early/high-fanout** answer's *non-recommended* branch
+  invalidates a later question's recommendation, **re-walk only that affected
+  subtree** and surface the updated questions in the next batch; questions on
+  unaffected branches stay resolved.
+- If a reply is too vague or off-point to resolve a question, do **not** guess:
+  keep it, refine its wording to name exactly what is still missing, bump its
+  unresolved-round count in the workpad `notes`, and stop again.
+- After a question has gone **two rounds** unresolved, stop re-asking the same
+  way — `@`-mention the issue's `creator`, state the decision you need, and
+  (when the deadlock is really scope being too large) propose a `sub-issue`
+  split via `symphony-issue`. Remain at `Human Review`.
+
+Once no batched question remains, proceed to Exit.
 
 ## Exit
 
@@ -239,12 +311,14 @@ Otherwise choose **`stop`** — Main Flow moves the issue to `Human Review`.
 This is the right outcome for a rework, for a human already in the thread,
 for the `Rework` state, and for the **complete-but-not-confident** case: a
 key interpretation could reasonably go another way, or you resolved a
-material ambiguity with a judgment call a human might overturn. Before
-stopping for low confidence, surface the specific uncertain point in
-`关键假设` / `风险/注意` and record `confidence: review` in the notes.
-**When in doubt, stop** — auto-advance is for the unambiguous case. After a
-stop, the human approves by moving the issue back to an active state and the
-next session advances to Design.
+material ambiguity with a judgment call a human might overturn. When you stop
+for a specific uncertain interpretation, prefer surfacing it as a batched
+`[NEEDS CLARIFICATION]` question carrying your recommended reading (so the
+human can one-click `同意默认`) rather than only a passive `风险/注意` note;
+record `confidence: review` in the notes. Because a stop now costs the human a
+single approval, **when in doubt, stop** — auto-advance is for the unambiguous
+case. After a stop, the human approves by moving the issue back to an active
+state and the next session advances to Design.
 
 (The "When blocked" path above is the harder stop: an unresolved
 `[NEEDS CLARIFICATION]` means the artifact is not even safe to build on, so

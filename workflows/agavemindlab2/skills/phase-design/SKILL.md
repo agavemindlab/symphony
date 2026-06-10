@@ -38,6 +38,12 @@ across architecture / code quality / tests / performance. If none is
 available, enumerate alternatives, consider edge cases and failure modes,
 and record analysis in the workpad before writing the approach.
 
+This workflow is unattended: if such a tool would ask the human to approve a
+finding one at a time, do not stall on it. Resolve what you can unilaterally
+(the safe-default tradeoffs), and route every finding that genuinely needs a
+human decision into the **Batched clarification** block below — one batch, each
+with your recommended resolution.
+
 ## Diagram requirement
 
 The `## Design` artifact must include a diagram inline when the design has
@@ -100,8 +106,10 @@ Apply the emphasis matching `Primary:` from the Requirements artifact.
 ## High-impact decision protocol
 
 If the approach has a **high-impact unresolved decision**, do not pick
-unilaterally — mark it as `[NEEDS CLARIFICATION: <question>]` in the
-artifact and move to Human Review.
+unilaterally — surface it as a batched `[NEEDS CLARIFICATION]` question tagged
+`〔影响：高 · 需明确回答〕` (see Batched clarification below) and move to Human
+Review. The tag means a blanket `同意默认` never resolves it — the human must
+answer it explicitly.
 
 High-impact categories: schema/data migrations; dependency changes with
 breaking changes; production/shared infrastructure; security/privacy
@@ -109,7 +117,10 @@ behavior; public API contracts; irreversible data operations; major UX
 tradeoffs.
 
 For ordinary tradeoffs with a safe default, pick the simplest option,
-record the decision in the workpad notes, and continue.
+record the decision in the workpad notes, and continue — do not ask. A
+material-but-not-high-impact approach fork (a real architectural choice a
+reviewer might decide differently, no safe default) becomes an ordinary
+batched question with your recommended direction.
 
 ## Artifact template
 
@@ -129,29 +140,92 @@ record the decision in the workpad notes, and continue.
 
 ### 风险/注意（risks; omit if none）
 - <one sentence per item>
+
+### 待确认（omit if none; the batched [NEEDS CLARIFICATION] block — see Batched clarification）
 ```
+
+## Batched clarification (`[NEEDS CLARIFICATION]`)
+
+Because the agent cannot interview the human turn by turn, design ambiguities
+are resolved in **one batch** with a recommended answer per question, so the
+human can approve the whole set with a single reply or push back only on the
+items they disagree with.
+
+**What becomes a question — and what doesn't.** Walk the design decision tree
+along your **own recommended answers** and collect every uncertainty you hit on
+that path. Then sort each one:
+
+- **Immaterial** (a safe default exists and a wrong guess costs little) → do
+  **not** ask. Take the default, record it in the workpad notes (or `风险/注意`
+  if a reviewer should see it), and move on.
+- **Material** (your recommendation could be wrong in a way that changes the
+  approach or what gets built) → make it a batched question. For Design this is
+  most often an **approach fork**: two reasonable architectures with no safe
+  default.
+- **High-impact** (the categories in "High-impact decision protocol" above) →
+  batched question tagged `〔影响：高 · 需明确回答〕`, which a blanket approval
+  never covers (see the consent convention).
+
+**Batched format** — one block at the foot of the `## Design` artifact:
+
+```md
+### 待确认（一次性审阅：认可全部推荐请回复「同意默认」，否则逐条说明）
+[NEEDS CLARIFICATION]
+Q1. <question> 〔影响：低〕
+  - A（推荐）: <answer> — <one-line why>
+  - B: <answer>
+Q2. <question> 〔影响：高 · 需明确回答〕
+  - A（推荐）: <answer> — <one-line why>
+  - B: <answer>
+  - C: <answer>
+```
+
+Keep each question's options to 2–4 concrete branches, exactly one marked
+`（推荐）` with a one-line rationale. **Cap at five questions per round** — more
+signals the issue needs scope reduction or splitting (propose a `sub-issue`
+split via `symphony-issue`).
 
 ## When blocked
 
-When `[NEEDS CLARIFICATION]` markers remain after analysis:
+When a batched `[NEEDS CLARIFICATION]` block remains after analysis:
 
-1. Write them inline in the `## Design` artifact.
+1. Write the batched block at the foot of the `## Design` artifact.
 2. Post or update the artifact comment.
 3. Move the issue to `Human Review`.
 4. Stop.
 
-Cap at five blocking questions per round.
+### Consent convention (how the human replies)
 
-On resume: read human replies in the artifact thread. For each marker, if the
-reply resolves it, replace the marker with the answered value and proceed to
-exit. If the reply is too vague or off-point to resolve it, do **not** guess:
-keep the marker, refine its question to name exactly what is still missing,
-bump that marker's unresolved-round count in the workpad `notes`, and stop
-again via "When blocked". After a marker has gone two rounds unresolved, stop
-re-asking the same way — `@`-mention the issue's `creator` in the artifact,
-state the blocking point and the decision you need, and (when the deadlock is
-really scope being too large) propose a `sub-issue` split via `symphony-issue`.
-Remain at `Human Review`.
+- **`同意默认`** (or 认可 / 都按推荐) → accept every `（推荐）` option, **except**
+  any question tagged `〔影响：高 · 需明确回答〕`, which a blanket approval never
+  covers.
+- **Per-question override** (e.g. `Q2 选 B；其余默认`, or a prose answer naming
+  the question) → take the named choice for those questions, the recommendation
+  for the rest.
+- A high-impact question is resolved **only** by an explicit answer to it; if a
+  reply says `同意默认` but leaves a high-impact question untouched, that
+  question stays open and you stop again for it.
+
+### On resume
+
+Read the human's reply in the artifact thread and apply the consent convention:
+
+- For each **resolved** question, fold the chosen answer into the artifact
+  (the `方案（approach）` / `选择理由` / `风险/注意` as fitting) and drop it from
+  the batch.
+- If accepting an **early/high-fanout** answer's *non-recommended* branch
+  invalidates a later question's recommendation, **re-walk only that affected
+  subtree** and surface the updated questions in the next batch; questions on
+  unaffected branches stay resolved.
+- If a reply is too vague or off-point to resolve a question, do **not** guess:
+  keep it, refine its wording to name exactly what is still missing, bump its
+  unresolved-round count in the workpad `notes`, and stop again.
+- After a question has gone **two rounds** unresolved, stop re-asking the same
+  way — `@`-mention the issue's `creator`, state the decision you need, and
+  (when the deadlock is really scope being too large) propose a `sub-issue`
+  split via `symphony-issue`. Remain at `Human Review`.
+
+Once no batched question remains, proceed to Exit.
 
 ## Cross-phase rework
 
@@ -198,11 +272,13 @@ This is the right outcome for a rework, for a human already in the thread,
 for the `Rework` state, and for the **complete-but-not-confident** case:
 there is a real architectural fork a reasonable reviewer might decide
 differently, an uncertain bet, or a non-obvious risk worth a human's eyes
-before you build on it. Before stopping for low confidence, surface the
-specific point in `风险/注意` and record `confidence: review` in the notes.
-**When in doubt, stop** — auto-advance is for the clearly-right design. After
-a stop, the human approves by moving the issue back to an active state and
-the next session advances to Implementation.
+before you build on it. When you stop for a specific fork, prefer surfacing it
+as a batched `[NEEDS CLARIFICATION]` question carrying your recommended
+direction (so the human can one-click `同意默认`) rather than only a passive
+`风险/注意` note; record `confidence: review` in the notes. Because a stop now
+costs the human a single approval, **when in doubt, stop** — auto-advance is
+for the clearly-right design. After a stop, the human approves by moving the
+issue back to an active state and the next session advances to Implementation.
 
 (The "When blocked" path above is the harder stop: an unresolved
 `[NEEDS CLARIFICATION]` means the artifact is not even safe to build on, so
