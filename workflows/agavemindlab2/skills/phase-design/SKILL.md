@@ -172,9 +172,13 @@ are resolved in **one batch** with a recommended answer per question, so the
 human can approve the whole set with a single reply or push back only on the
 items they disagree with.
 
-**What becomes a question — and what doesn't.** Walk the design decision tree
-along your **own recommended answers** and collect every uncertainty you hit on
-that path. Then sort each one:
+**What becomes a question — and what doesn't.** plan-eng-review is natively
+interactive; the batch is how you run it unattended. Simulate its review:
+answer each design question it would raise with your **own recommended
+answer**, walk on down the decision tree, and keep going until it reaches its
+natural stopping point. Collect every uncertainty you hit along that full path
+— do not stop early to keep the list short; a batch is cheapest when it is
+complete, because the human answers it in one pass. Then sort each one:
 
 - **Immaterial** (a safe default exists and a wrong guess costs little) → do
   **not** ask. Take the default, record it in the workpad notes (or `风险/注意`
@@ -210,11 +214,14 @@ Q2. <question> 🔴 〔影响：高 · 需明确回答〕
   - C: <answer> — <后果>
 ```
 
-Keep each question's options to 2–4 concrete branches, exactly one marked
-`（推荐）`. Every option states its consequence; the recommended one's doubles
-as the rationale. **Cap at five questions per round** — more
-signals the issue needs scope reduction or splitting (propose a `sub-issue`
-split via `symphony-issue`).
+Give each question as many concrete branches as the decision genuinely has
+(plan-eng-review's framing decides this, not a fixed number), exactly one
+marked `（推荐）`. Every option states its consequence; the recommended one's
+doubles as the rationale. There is **no cap** on questions per round — surface
+every material fork the walk reached; that one complete batch is the efficient
+ask. If the material set comes out so large that the issue is clearly
+mis-scoped, that is a signal to propose a `sub-issue` split via `symphony-issue`
+— split because the work is too big, never to hit a question quota.
 
 ## When blocked
 

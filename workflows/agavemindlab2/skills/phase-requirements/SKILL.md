@@ -167,9 +167,13 @@ resolved in **one batch** with a recommended answer per question, so the human
 can approve the whole set with a single reply or push back only on the items
 they disagree with.
 
-**What becomes a question — and what doesn't.** Walk the decision tree along
-your **own recommended answers** and collect every uncertainty you hit on that
-path. Then sort each one:
+**What becomes a question — and what doesn't.** office-hours is natively
+one-at-a-time; the batch is how you run it unattended. Simulate its
+interrogation: answer each question it would put to you with your **own
+recommended answer**, walk on down its tree, and keep going until it reaches
+its natural stopping point. Collect every uncertainty you hit along that full
+path — do not stop early to keep the list short; a batch is cheapest when it is
+complete, because the human answers it in one pass. Then sort each one:
 
 - **Immaterial** (a safe default exists and a wrong guess costs little) → do
   **not** ask. Take the default, record it in `关键假设` as `<value>（假设）`,
@@ -204,12 +208,20 @@ Q2. <question> 🔴 〔影响：高 · 需明确回答〕
   - C: <answer> — <后果>
 ```
 
-Keep each question's options to 2–4 concrete branches, exactly one marked
+Give each question as many concrete branches as the decision genuinely has
+(office-hours' framing decides this, not a fixed number), exactly one marked
 `（推荐）`. Every option states its consequence; the recommended one's doubles
-as the rationale. **Cap at five questions per round** — more
-signals the issue needs scope reduction or splitting (propose a `sub-issue`
-split via `symphony-issue`, which posts a `## 建议新建 issue` proposal and
-creates nothing until a human consents).
+as the rationale. There is **no cap** on questions per round — surface every
+material uncertainty the walk reached; that one complete batch is the efficient
+ask.
+
+Do **not** propose or create sub-issues here. Requirements settles *what* and
+*why*, not *how*, so the work cannot be decomposed yet — that is a Design
+decision. The one related move at this phase: if the ticket reads as **several
+distinct problems** rather than one (separate goals, separate acceptance
+criteria), raise that as a batched clarification question — `要拆成几个 ticket
+吗？` with your recommended split — and let the human decide. Create nothing
+either way.
 
 While any batched question is unresolved, product implementation code must not
 start.
@@ -284,9 +296,10 @@ Read the human's reply in the artifact thread and apply the consent convention:
   keep it, refine its wording to name exactly what is still missing, bump its
   unresolved-round count in the workpad `notes`, and stop again.
 - After a question has gone **two rounds** unresolved, stop re-asking the same
-  way — `@`-mention the issue's `creator`, state the decision you need, and
-  (when the deadlock is really scope being too large) propose a `sub-issue`
-  split via `symphony-issue`. Remain at `Human Review`.
+  way — `@`-mention the issue's `creator` and state the decision you need. When
+  the deadlock is really scope being too large, **flag** that the ticket looks
+  too broad and ask whether to split it — but create nothing here; the actual
+  sub-issue decomposition is a Design decision. Remain at `Human Review`.
 
 Once no batched question remains, proceed to Exit.
 
