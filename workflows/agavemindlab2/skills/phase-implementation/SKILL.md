@@ -157,14 +157,24 @@ comfort.
 ### 风险/注意（optional）
 - <one sentence per item; omit if none>
 
-### Merge 后验证（optional: only for production-only acceptance criteria）
-- S<N>: <metric ID / dashboard URL + observation window>
+### Merge 后验证（optional: one entry per `延迟验收` S<N> — see below）
+- S<N>: **查询** `<exact runnable query/command against the prod log / error tracker>` · **通过判据** `<pass/fail predicate, e.g. 匹配条数 == 0>` · **观察窗口** `<length, e.g. 7 天>`
 
 > 👉 **需要人工处理**：审查 PR，批准后将 issue 移至 `Merging`；需要修改则移至 `Rework`。
 ```
 
 Status column conventions: `✅ 通过`, `⚠️ 部分通过`, `➖ N/A`, `❌ 失败`.
 `❌ 失败` means the criterion is still unmet at handoff time.
+
+For any `S<N>` classified `延迟验收` in Requirements' `关键假设`, `Merge 后验证`
+must carry a **self-contained, runnable** spec — the exact query, the pass/fail
+predicate, and the window length — not a vague "monitor the dashboard" note.
+It has to survive branch cleanup and be runnable months later by a fresh
+session that only has production-log access, because Deployment carries it into
+`待验证项` and re-runs it verbatim (re-entered via `In Progress`) once the window
+closes. Do not record a `延迟验收` criterion's status as `✅ 通过` here — at
+handoff its window has not even started; it stays pending until Deployment
+verifies it.
 
 ## Blocked-access escape hatch
 

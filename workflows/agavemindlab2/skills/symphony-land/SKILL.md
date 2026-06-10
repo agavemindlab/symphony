@@ -38,8 +38,9 @@ description:
      crash services, corrupt/lose data, break background jobs, or only affect
      a bounded path.
    - A post-merge verification plan: the `Merge 后验证` section lists the
-     exact checks to run after merge (required when any acceptance criterion
-     is production-only).
+     exact runnable checks to run after merge (required when any acceptance
+     criterion is `延迟验收` — see phase-requirements' Verifiability
+     classification).
    If either element is missing, do not merge; note the gap in the
    `## Implementation` thread and return the issue to `Human Review`.
 3. Confirm the relevant `AGENTS.md` validation is green locally before any push.

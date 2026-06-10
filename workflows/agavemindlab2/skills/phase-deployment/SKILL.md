@@ -1,30 +1,43 @@
 ---
 name: phase-deployment
 description:
-  Run the Deployment phase of the Symphony workflow. Merge the approved PR,
-  verify the deploy, clean up agent scaffolding files, and post the
-  `## Deployment` artifact. Triggered by the `Merging` Linear state.
-  The agent never moves the issue to Done.
+  Run the Deployment phase of the Symphony workflow. Land the approved PR,
+  verify the deploy, clean up agent scaffolding, and post the `## Deployment`
+  artifact. Entered via `Merging` (the merge) and re-entered via `In Progress`
+  to finish verification that could not complete at deploy time. The agent
+  never moves the issue to Done.
 ---
 
 # Phase: Deployment
 
 ## Goal
 
-Land the approved PR safely, confirm the deploy succeeded, do immediate
-post-deploy verification, and hand back to the human for final sign-off.
+Land the approved PR safely, confirm the deploy succeeded, **verify the
+acceptance criteria**, and hand back to the human for final sign-off.
 
-The agent **never** moves the issue to `Done`. That is the human's final
+Verification is Deployment's core job — a deploy is not done until its
+acceptance criteria are checked. Some criteria cannot be confirmed in the
+moment of deploy (a `延迟验收` window has not elapsed, an external signal is not
+yet readable); those stay pending and Deployment is re-entered later to finish
+them. The agent **never** moves the issue to `Done` — that is the human's final
 action after reading the `## Deployment` artifact.
 
-## At phase start
+## At phase start — two entry modes
 
-Main Flow has already detected the merge approval, written the approval
-reply on `## Implementation`, and set `current_phase: Deployment` before
-opening this skill. Confirm the issue is in `Merging` and read the
-`## Implementation` artifact and PR before landing.
+- **Merge entry** (issue in `Merging`). Main Flow detected the merge approval,
+  wrote the approval reply on `## Implementation`, and set
+  `current_phase: Deployment`. Read the `## Implementation` artifact and PR,
+  then run the full path below: cleanup → land → verify → post artifact.
+- **Verification re-entry** (issue in `In Progress`, a concluded `## Deployment`
+  artifact already exists with unresolved `⚠️ 待观察` items). The PR has long
+  since merged. **Skip cleanup and land entirely** — do not touch the working
+  tree; this run only reads the existing `## Deployment` 的 `待验证项` block and
+  `## Requirements` and runs checks against production logs. Go straight to
+  **Verification** to finish the pending items. This is what
+  Deployment-in-`In Progress` means: continue verifying what could not be
+  confirmed at deploy time.
 
-## Cleanup before merge
+## Cleanup before merge (merge entry only)
 
 Before landing the PR, remove all files listed in the workpad `cleanup`
 field. At minimum this includes `.symphony/workpad.md` and any plan docs
@@ -40,21 +53,39 @@ git commit -m "chore: remove agent scaffolding before merge"
 Do not remove files that belong in the repository. Only remove files
 explicitly listed in the `cleanup` field.
 
-## Land
+## Land (merge entry only)
 
 Open and follow `.agents/skills/symphony-land/SKILL.md` to merge the PR.
 
-## Post-deploy verification
+## Verification
 
-After the merge and deploy pipeline confirms success:
+Drive every acceptance `S<N>` from `## Requirements` to a resolved status
+(`✅ 通过` / `❌ 失败` / `➖ N/A`); the `验收对照` table is the running ledger.
+On a re-entry the still-`⚠️ 待观察` items are the main work — but also re-confirm
+any earlier `✅` you judge was only a point-in-time proxy for a criterion whose
+real intent is sustained or needs fresh confirmation; do not mechanically trust
+a prior pass.
 
-1. Verify the immediate acceptance criteria that can be checked right
-   after deploy (e.g., smoke tests, endpoint health, error-rate baseline).
-2. Record evidence for each `S<N>` from `## Requirements`.
-3. Note any `S<N>` items that require a longer observation window or
-   human confirmation. Spin off any genuine follow-up work as a separate
-   ticket via the `symphony-issue` skill (autonomous `follow-up`) and list
-   its identifier (e.g. `ENG-123`) in 后续事项; do not expand this issue.
+1. **Verify what is checkable now.** For each unresolved `S<N>`, run its check
+   and record evidence: immediate signals at deploy (smoke tests, endpoint
+   health, error-rate baseline), and any `延迟验收` whose window has already
+   elapsed (run its recorded `待验证项` query against the production log and
+   judge it against the predicate — never weaken the predicate to pass it).
+2. **Leave genuinely-pending items `⚠️ 待观察`** with a concrete reason:
+   - `延迟验收` whose window is still open — on **merge entry** the deploy
+     **starts** the window: carry the runnable spec forward from
+     `## Implementation` 的 `Merge 后验证`, stamp the **window-end date**
+     (deploy date + window length), and record it in `待验证项`. On a re-entry,
+     if the window still has not elapsed, note `窗口未满，剩余 <N> 天`.
+   - any other check not yet runnable (an external signal not yet readable).
+3. **Hand off `需人工判定` `S<N>`** (only a human can confirm). Note it in
+   后续事项; spin off genuine follow-up work as a separate ticket via the
+   `symphony-issue` skill (autonomous `follow-up`) and cite its identifier
+   (e.g. `ENG-123`); do not expand this issue.
+
+A `❌ 失败` means the shipped change did not meet its criterion — a real
+regression. Do not auto-fix it from here: state it plainly, `@`-mention the
+issue's `creator`, and leave it for the human to route to `Rework`.
 
 ## `## Deployment` artifact template
 
@@ -70,18 +101,26 @@ After the merge and deploy pipeline confirms success:
 | 验收项 | 状态 | 证据 |
 |--------|------|------|
 | S1: <criterion> | ✅ 通过 | <命令或观测结果> |
-| S2: <criterion> | ⚠️ 待观察 | <观察窗口和方式> |
+| S2: <criterion> | ⚠️ 待观察 | 见待验证项 |
+
+### 待验证项（omit when none pending; one per still-`⚠️ 待观察` S<N>）
+- S<N>: **查询** `<runnable query>` · **通过判据** `<predicate>` · **何时可验** `窗口末 <YYYY-MM-DD>` / `<其它前置条件>`
 
 ### 后续事项（optional）
-- <follow-up issues, monitoring windows, rollback path; omit if none>
+- <follow-up issues, rollback path; omit if none>
 
-> 👉 **需要人工处理**：确认部署结果符合预期，将 issue 置为 `Done`；如有问题置为 `Rework`。
+> 👉 **需要人工处理**：确认部署结果符合预期。
+> - 若仍有「待验证项」：把 issue 留在 `Human Review`（或任何 Symphony 不处理的状态）直到「何时可验」满足，然后将其移回 `In Progress` —— Deployment 会重入、把剩余验收跑完并回报；全部 `✅` 后由你置 `Done`。
+> - 若验收已全部完成：直接将 issue 置为 `Done`；如有问题置为 `Rework`。
 ```
 
 Status conventions: `✅ 通过`, `⚠️ 待观察`, `➖ N/A`, `❌ 失败`.
 
-Use `⚠️ 待观察` (not `❌ 失败`) for acceptance criteria that need a
-longer observation window — they are not yet failed, just pending.
+Use `⚠️ 待观察` (not `❌ 失败`) for acceptance criteria that are simply not yet
+checkable (window still open, external signal not yet readable) — they are not
+failed, just pending. Each pending item carries a runnable spec in `待验证项`
+so a later Deployment re-entry (with no branch) can finish it from the artifact
+and production-log access alone.
 
 ## Cross-phase rework
 
@@ -92,10 +131,11 @@ WORKFLOW.md: resolve `## Deployment`, update workpad
 
 ## Exit
 
-After posting the `## Deployment` artifact:
+After posting or updating the `## Deployment` artifact:
 
 1. Move the issue back to `Human Review`.
 2. Stop. Do **not** move the issue to `Done`.
 
-The human confirms completion by moving the issue to `Done`, or requests
-further work by moving to `Rework`.
+The posted `> 👉` callout tells the human how to proceed: close on all-resolved,
+move back to `In Progress` to re-enter verification while items remain
+`⚠️ 待观察`, or `Rework` on failure.

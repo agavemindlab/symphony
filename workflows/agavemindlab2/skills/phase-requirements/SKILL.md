@@ -252,12 +252,39 @@ either way.
 While any batched question is unresolved, product implementation code must not
 start.
 
-## `本地验收不可达` declaration
+## Verifiability of each `S<N>`
 
-When the acceptance criteria cannot be verified locally (requires
-production scale, real customer data, sustained alert windows), declare
-`本地验收不可达：<具体原因>` in `关键假设`. Design and Implementation will
-set up substitution paths.
+A close-worthy `S<N>` is often not checkable on the agent's dev machine at
+handoff time — that does **not** make it unverifiable, and you must never weaken
+the criterion just to make it checkable now (that reintroduces the "tests pass"
+failure). What matters is **who produces the proof, and when**. For a
+production-only signal the deciding factor is whether the agent actually has the
+access to observe *that specific signal* in production — it has production-log
+read access, but a given criterion may need data / dashboards it cannot reach.
+Classify by that, not by where the signal lives:
+
+- **当场可验** — provable at handoff / deploy time: either locally reproducible,
+  **or** production-observable with the agent's access (e.g. a post-deploy log /
+  metric query the agent can run right after deploy). The agent runs it and
+  records real evidence; no special handling.
+- **延迟验收** — a production signal the agent *can* observe, but which only
+  exists over a post-merge observation window (e.g. "zero error events for 7
+  days"). Verifiable, just later: the agent owns it as a deferred check that
+  Deployment runs once the window closes (it re-enters Deployment via
+  `In Progress`).
+- **需人工判定** — the agent genuinely cannot produce the real proof: it lacks
+  the access to observe that production signal, or the criterion needs a human
+  judgment call. This is the **only** case that hands off. Record the closest
+  safe local **substitution path** as interim evidence, and route the real
+  confirmation to the human (or a follow-up issue).
+
+Most `S<N>` are `当场可验` and need no note. For every criterion that is not,
+record the classification in `关键假设` as
+`S<N> 验证：<延迟验收 | 需人工判定> — <原因>`. The pipeline acts on it:
+Implementation writes the executable deferred-verification spec into
+`Merge 后验证` for each `延迟验收`, which Deployment carries into its `待验证项`
+and runs once checkable (re-entered via `In Progress` — see WORKFLOW.md); a
+`需人工判定` gets the substitution path plus a human/follow-up route.
 
 ## Artifact template
 
@@ -276,7 +303,7 @@ Primary: Type:<Bug|Feature|Refactor|Performance|Migration|Chore|Spike|Other>
 - S1: <observable, measurable, falsifiable, time-bounded signal>
 - S2: <...>
 
-关键假设（omit if none; required when 本地验收不可达）:
+关键假设（omit if none; include an `S<N> 验证：…` line for any criterion not verifiable at handoff）:
 - <one sentence per assumption>
 
 风险/注意（secondary concerns; omit if none）:
@@ -361,10 +388,11 @@ Choose **`advance`** only when **all** of these hold:
   acceptance criteria follow directly from the issue, with no material
   ambiguity resolved by guessing.
 
-A declared `本地验收不可达` does **not** by itself block `advance` — it is a
-verifiability caveat, orthogonal to whether the intent was understood. As long
-as it is stated in `关键假设`, it stays visible on the posted artifact for a
-human to revisit later (a `⏩` artifact remains reviewable).
+A declared `S<N> 验证：…` classification does **not** by itself block `advance`
+— it is a verifiability caveat, orthogonal to whether the intent was
+understood. As long as it is stated in `关键假设`, it stays visible on the
+posted artifact for a human to revisit later (a `⏩` artifact remains
+reviewable).
 
 On `advance`, record `confidence: advance` in the workpad notes; Main Flow
 writes the `⏩` reply and opens `phase-design` in the same session.
