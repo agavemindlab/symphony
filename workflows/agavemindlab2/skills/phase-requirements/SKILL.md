@@ -47,6 +47,11 @@ uncertainty. The rule: **unless both the `what` and the `why` are already
 concrete and unambiguous, run it; when in doubt, run it** (a wasted
 interrogation is far cheaper than building the wrong thing).
 
+Form an initial type read from the issue's Linear `Type:Xxx` label (or, if it
+has none, your own quick classification — the same call `## Primary: type`
+below formalizes). Use it only as the heuristic below; you confirm the final
+`Primary:` when writing the artifact.
+
 - Typically run it — `Feature` (boundaries and implicit needs), `Spike`
   (hypotheses and the real question being asked), a vague `Bug` (expected
   behavior / root-cause intent unclear).
