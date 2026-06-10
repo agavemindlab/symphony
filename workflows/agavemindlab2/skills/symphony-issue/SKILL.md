@@ -61,8 +61,8 @@ Also assign a type label: `Bug | Feature | Refactor | Performance | Migration | 
    - *Hard:* skip anything already in workpad `## Spawned Issues`.
    - *Soft (best-effort):* search the same project, non-terminal states, by
      title keywords. On a clear same-work hit → do **not** duplicate; add the
-     relation to the existing issue and note `→ #X` in the artifact. When
-     unsure → create (bias to capture) and append `（可能与 #X 重复，待 triage
+     relation to the existing issue and note `→ ENG-123` in the artifact. When
+     unsure → create (bias to capture) and append `（可能与 ENG-123 重复，待 triage
      合并）` to the description. Never block: on search failure/timeout, create.
 2. **Create** (`issueCreate`): `stateId` = intake state, `assigneeId` =
    creator, `teamId`/project = current's, `labelIds` = the matching
@@ -70,16 +70,16 @@ Also assign a type label: `Bug | Feature | Refactor | Performance | Migration | 
    Description skeleton:
 
    ```md
-   **来源**: 由 symphony 处理 [当前 #ID](url) 时发现
+   **来源**: 由 symphony 处理 <当前 issue 的 identifier，如 ENG-123，裸写让 Linear 渲染引用> 时发现
    **背景（why）**: <发现了什么、为什么该独立成一个 issue>
    **建议范围（what）**: <大致要做什么>
    ```
 
 3. **Link** (`issueRelationCreate`): `related` for follow-up/related;
    current `blocks` new for downstream blocked.
-4. **Record + persist**: write `#new` into workpad `## Spawned Issues`
+4. **Record + persist**: write the new issue's identifier into workpad `## Spawned Issues`
    (status `已创建`), then commit + push the workpad (invariant 5).
-5. **Surface**: return `#new` to the calling phase, which lists it in its
+5. **Surface**: return the new issue's identifier to the calling phase, which lists it in its
    artifact (Design 未覆盖范围 / Implementation 风险 / Deployment 后续事项).
 
 **Failure handling:** `issueCreate` ok but `issueRelationCreate` fails → do
@@ -97,7 +97,7 @@ thread is a dedicated consent channel:
 ## 建议新建 issue：<建议标题>
 - **类型**: blocking / sub-issue
 - **类型标签**: Type:Xxx
-- **关系**: 阻塞当前 #ID / 当前 #ID 的子任务
+- **关系**: 阻塞当前 issue（裸 identifier，如 ENG-123）/ 当前 issue 的子任务
 - **理由**: <为什么需要、为什么不能并进当前 issue>
 
 > 👉 回复本条评论「同意 / 建吧」即由 symphony 代建；回复「不用了」则放弃。
@@ -114,8 +114,7 @@ Flow impact by kind:
 - **blocking** — a true blocker. Also write a callout on the current phase
   artifact and stop:
   ```md
-  > [!WARNING]
-  > 🚧 被阻塞：<one sentence> — 需先创建并完成上述前置 issue
+  > 🚧 **被阻塞**：<one sentence>。需先创建并完成上述前置 issue。
   ```
   Move the issue to `Human Review` and stop (no `Blocked` state exists). This
   is a **hard stop**, like a phase's "When blocked" path: it short-circuits
@@ -134,7 +133,7 @@ interprets the reply's **intent** (not a fixed keyword list):
 
 - **Consent** (e.g. `同意 / 建吧 / 可以 / 👍`) → create the recorded item with
   the Tier A create/link/record/persist steps (intake state, assignee =
-  creator, relation or `parentId`), reply `已创建 #ID` in the proposal thread,
+  creator, relation or `parentId`), reply `已创建 ENG-123` in the proposal thread,
   resolve the proposal comment, flip the workpad entry `待同意 → 已创建`.
 - **Rejection** (e.g. `不用了 / 先不建`) → resolve the proposal comment, flip
   to `已放弃`; never re-propose.
@@ -147,7 +146,7 @@ record it and move on. Both paths coexist.
 
 ```md
 ## Spawned Issues
-- 已创建 #ID — <title> · related/blocks/parent · <one-line why>
+- 已创建 ENG-123 — <title> · related/blocks/parent · <one-line why>
 - 待同意 <proposal-comment-id> — <title> · blocking/sub-issue
 - 已放弃 <proposal-comment-id> — <title> · <reason>
 ```
@@ -159,12 +158,12 @@ record lives in the phase artifacts and the created issues themselves.
 
 - **follow-up during Implementation** → `related` issue created in the intake
   state, assignee = creator, listed in the `## Implementation` artifact;
-  workpad `已创建 #ID`.
+  workpad `已创建 ENG-123`.
 - **blocking dependency found** → proposal comment + blocker callout on the
   artifact + `Human Review`; nothing created until consent.
-- **consent reply in a proposal thread** → issue created, `已创建 #ID`
+- **consent reply in a proposal thread** → issue created, `已创建 ENG-123`
   replied, proposal comment resolved, workpad `待同意 → 已创建`.
 - **rejection reply** → proposal comment resolved, workpad `已放弃`.
 - **resume with the item already recorded** → skipped, not recreated.
 - **soft-search hit** → no duplicate; relation added to the existing issue,
-  `→ #X` noted in the artifact.
+  `→ ENG-123` noted in the artifact.

@@ -109,7 +109,7 @@ Run this loop before posting the artifact:
    - Addressed with code: reply with what changed + commit SHA.
    - Correct but deferred: reply with deferral reason + a follow-up issue
      spun off via the `symphony-issue` skill (autonomous `follow-up` kind);
-     cite the new `#ID` in the reply.
+     cite the new issue's identifier (e.g. `ENG-123`) in the reply.
    - Not applied: reply with explicit technical pushback.
 5. Update the workpad `plan` / `acceptance_criteria` with each feedback
    item and its resolution.
@@ -148,8 +148,7 @@ over social comfort.
 ### Merge 后验证（optional: only for production-only acceptance criteria）
 - S<N>: <metric ID / dashboard URL + observation window>
 
-> [!IMPORTANT]
-> 👉 **Human action needed**: 审查 PR，批准后将 issue 移至 `Merging`；需要修改则移至 `Rework`。
+> 👉 **需要人工处理**：审查 PR，批准后将 issue 移至 `Merging`；需要修改则移至 `Rework`。
 ```
 
 Status column conventions: `✅ 通过`, `⚠️ 部分通过`, `➖ N/A`, `❌ 失败`.
@@ -165,8 +164,7 @@ missing; why it blocks acceptance; exact human action to unblock.
 
 Reflect this in the artifact's `风险/注意` and include:
 ```
-> [!WARNING]
-> 🚨 Blocked: <one sentence>
+> 🚨 **Blocked**：<one sentence>
 ```
 
 ## Cross-phase rework

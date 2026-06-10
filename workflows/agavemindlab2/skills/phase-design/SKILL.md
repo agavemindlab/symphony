@@ -65,7 +65,8 @@ Required content:
 - Intentionally uncovered scope, spun off as a separate ticket via the
   `symphony-issue` skill (autonomous `follow-up`/`related`, or a proposed
   `blocking`/`sub-issue` when it changes this issue's plan); cite the
-  resulting `#ID` (or proposal) in 未覆盖范围.
+  resulting issue identifier (e.g. `ENG-123`, bare so Linear renders the
+  chip) or the proposal in 未覆盖范围.
 
 ## Type-specific writing emphasis
 
@@ -113,7 +114,7 @@ record the decision in the workpad notes, and continue.
 <chosen direction in one or two sentences>
 
 **选择理由**: <why this path over the main alternative>
-**未覆盖范围**: <intentionally out of scope> → follow-up: #<issue>
+**未覆盖范围**: <intentionally out of scope> → follow-up: <ENG-123>
 
 ### 图示（diagram; omit for trivial changes）
 ```mermaid

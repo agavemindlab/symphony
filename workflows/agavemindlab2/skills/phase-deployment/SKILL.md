@@ -54,7 +54,7 @@ After the merge and deploy pipeline confirms success:
 3. Note any `S<N>` items that require a longer observation window or
    human confirmation. Spin off any genuine follow-up work as a separate
    ticket via the `symphony-issue` skill (autonomous `follow-up`) and list
-   its `#ID` in 后续事项 — do not expand this issue.
+   its identifier (e.g. `ENG-123`) in 后续事项; do not expand this issue.
 
 ## `## Deployment` artifact template
 
@@ -75,8 +75,7 @@ After the merge and deploy pipeline confirms success:
 ### 后续事项（optional）
 - <follow-up issues, monitoring windows, rollback path; omit if none>
 
-> [!IMPORTANT]
-> 👉 **Human action needed**: 确认部署结果符合预期，将 issue 置为 `Done`；如有问题置为 `Rework`。
+> 👉 **需要人工处理**：确认部署结果符合预期，将 issue 置为 `Done`；如有问题置为 `Rework`。
 ```
 
 Status conventions: `✅ 通过`, `⚠️ 待观察`, `➖ N/A`, `❌ 失败`.

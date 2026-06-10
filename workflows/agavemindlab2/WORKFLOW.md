@@ -111,9 +111,10 @@ Work only in the provided repository copy. Do not touch any other path.
 
 Phase artifacts and other Linear comments are read by Chinese-speaking humans — write them in clear, readable Chinese:
 
-- Use Chinese throughout; make full use of Linear-supported Markdown: callouts, tables, code blocks, horizontal rules, heading levels
+- Use Chinese throughout, and use the Markdown Linear actually renders: headings, **bold** / _italic_ / `inline code`, tables (`|--`), fenced code blocks, ` ```mermaid ` diagrams, `___` dividers, `:emoji:`, blockquotes (`>`), and **collapsible sections (`>>>`)** to fold away verbose evidence or logs so the artifact stays scannable. Do **not** use GitHub-style `> [!NOTE]` / `[!WARNING]` alerts — Linear renders the `[!...]` as literal text; for emphasis use a `>` blockquote led by an emoji and a **bold** label.
+- **Reference a Linear issue by its bare identifier** (e.g. `ENG-123`) so Linear renders its native issue chip (status + title preview). Never use GitHub-style `#NNN` or a plain markdown link for a Linear issue; reserve `#NNN` and the PR URL for the GitHub PR. `@`-mention a specific person (`@name`) when you need their attention (e.g. a blocker handoff)
 - Use emoji to signal importance and structure; use tables for acceptance-criteria results and before/after comparisons
-- Link to relevant PRs, issues, and resources so readers don't have to hunt
+- Link to relevant PRs, dashboards, and resources so readers don't have to hunt
 - Keep Phase artifact headings (`## Requirements`, `## Design`, `## Implementation`, `## Deployment`) exactly as written — routing depends on them
 - Use English for code, commit messages, PR titles/bodies, test names, and repository documentation
 
@@ -176,7 +177,7 @@ Symphony only starts the agent when the issue is in an active state (`Todo`, `In
    - `In Progress`, `Rework` → determine the target phase via steps 4–5.
 
 4. Gather the signals:
-   - **Proposal-consent channel (run first, orthogonal to phase intent).** Scan unresolved `## 建议新建 issue` proposal comments for a new human reply in *their* thread, and fulfill via the `symphony-issue` skill's fulfill mode (consent → create the proposed issue + reply `已创建 #ID` + resolve the proposal comment; rejection → resolve as `已放弃`). This lives in a different comment thread than the phase artifacts, so it never collides with phase approval; fulfilling spawns here first keeps a single "approve phase + consent to a sub-issue" reply pair well-ordered. See the Spawning related issues section.
+   - **Proposal-consent channel (run first, orthogonal to phase intent).** Scan unresolved `## 建议新建 issue` proposal comments for a new human reply in *their* thread, and fulfill via the `symphony-issue` skill's fulfill mode (consent → create the proposed issue + reply `已创建 ENG-123` + resolve the proposal comment; rejection → resolve as `已放弃`). This lives in a different comment thread than the phase artifacts, so it never collides with phase approval; fulfilling spawns here first keeps a single "approve phase + consent to a sub-issue" reply pair well-ordered. See the Spawning related issues section.
    - Identify the phase awaiting review = the most recent artifact with no closing reply (neither `✅` human approval nor `⏩` auto-advance). The workpad `current_phase` should already name it; if the workpad is absent (brand-new branch), infer it as the most recent phase whose artifact exists. No artifacts at all → target phase is Requirements, go to step 6.
    - Gather new human feedback from two places: (a) replies in each unresolved Phase artifact's thread, and (b) standalone top-level **human** comments on the issue that are not replies to any artifact. Exclude agent-authored `## 建议新建 issue` proposal comments — those are the consent channel handled by the first bullet, not feedback. Scan **every** unresolved artifact, not just the awaiting-review one — humans request cross-phase rework by commenting on the artifact they want changed (e.g. feedback on `## Design` while `## Implementation` awaits review). "New" = newer than the agent's last closing reply on that artifact (or, for standalone comments, newer than the agent's last action). Attribute each standalone comment to the phase it discusses; if unclear, assume the awaiting-review phase. If a comment refers back to an earlier round ("上次"/"之前提到的"), pull the specific resolved comment it points to per the `symphony-linear` skill's back-reference exception.
    - When the awaiting-review phase is Implementation, the **PR is also a feedback channel** — but only for **human** reviewers. Humans often leave change requests as GitHub PR review comments instead of repeating them on Linear; gather new human PR review comments / inline threads / review states and treat them as feedback targeting Implementation. Bot / automated reviews (e.g. the configured `AUTOMATED_REVIEWER`) are **not** human intent: a bot approval never counts as a human approval, and a bot's comments are addressed by the Implementation PR feedback sweep, not by this intent check. Identify the author of each PR review/comment and drop bot ones before judging intent.
@@ -297,7 +298,7 @@ cleanup:
 - Skills invoked: <comma-separated names>
 
 ## Spawned Issues
-- 已创建 #ID — <title> · related/blocks/parent · <one-line why>
+- 已创建 ENG-123 — <title> · related/blocks/parent · <one-line why>
 - 待同意 <proposal-comment-id> — <title> · blocking/sub-issue
 - 已放弃 <proposal-comment-id> — <title> · <reason>
 ```
