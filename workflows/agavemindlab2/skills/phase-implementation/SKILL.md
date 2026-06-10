@@ -25,6 +25,20 @@ opening this skill. Read `## Requirements` (for `S<N>` IDs) and `## Design`
 Implementation never auto-advances: it always ends at `Human Review` with
 the PR up, and Deployment is reachable only via the `Merging` state.
 
+## Type:Spike — findings, not a PR
+
+For a `Type:Spike` issue the deliverable is the **findings / recommendation**,
+not shipped code. Carry out the investigation plan from `## Design`, then write
+a findings artifact in place of the normal `## Implementation` artifact:
+state each Requirements question's answer, the evidence backing it, and the
+recommended decision. TDD and local runtime acceptance apply only to throwaway
+code you write to learn (a prototype, a benchmark) — keep it on a scratch
+branch and do not treat it as production work. The PR/CI line is optional: cite
+a prototype branch or an ADR/docs PR if one exists, else omit it. Exit to
+`Human Review` as usual; for a no-PR spike the human moves the issue straight
+to `Done`. The rest of this skill (PR feedback sweep, Merge-gated Deployment)
+applies only when the spike actually produced a PR worth landing.
+
 If the workpad (`.symphony/workpad.md`) does not exist, create it with the
 template from WORKFLOW.md. If this run is a rework of `## Implementation`
 (the artifact has unresolved human feedback in its thread), reconcile the

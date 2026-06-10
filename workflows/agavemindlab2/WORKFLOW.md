@@ -161,6 +161,8 @@ Requirements, Design, and Implementation all run in the `In Progress` Linear sta
 
 When the agent finishes **Requirements** or **Design** on a fresh run and is confident a human would very likely approve the artifact as-is, it **auto-advances** to the next phase in the same session instead of stopping for review; if the artifact is complete but the agent is not confident, it stops for human review. See Main Flow step 6. **Implementation** always stops at `Human Review` (the PR is up), and **Deployment** is reachable only via `Merging`.
 
+Most issues ship code through all four phases. A `Type:Spike` (investigation / research) issue is the exception: its deliverable is a documented decision, so it rides the same phases (Design becomes an investigation plan, Implementation produces a findings artifact) but normally terminates at `Human Review` after Implementation — the human moves it to `Done` without `Merging` / Deployment. See the phase skills' `Type:Spike` notes. A sub-issue inherits its parent's scope and acceptance criteria rather than re-deriving them (see `phase-requirements`).
+
 ## Main Flow
 
 Symphony only starts the agent when the issue is in an active state (`Todo`, `In Progress`, `Merging`, `Rework`). Other states never reach this flow.

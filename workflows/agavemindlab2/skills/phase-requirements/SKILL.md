@@ -3,8 +3,9 @@ name: phase-requirements
 description:
   Run the Requirements phase of the Symphony workflow. Turn an issue into
   a `## Requirements` Linear artifact with problem statement, motivation,
-  and acceptance criteria locked down. Use at the start of any Todo /
-  In Progress / Rework ticket. Exit by posting the artifact; Main Flow then
+  and acceptance criteria locked down. Main Flow opens this skill only when
+  Requirements is the target phase (a fresh Todo / In Progress ticket, or a
+  Rework that routes back here). Exit by posting the artifact; Main Flow then
   auto-advances to Design or stops for human review.
 ---
 
@@ -42,6 +43,24 @@ problem statement. If none is available, read all issue context
 (description, comments, attachments, linked issues, labels) and surface
 ambiguities explicitly before writing the artifact.
 
+## Sub-issue: inherit the parent's scope
+
+If this issue has a **parent** (it was created as a sub-issue), its
+requirements are a *slice* of the parent, not a fresh problem. Before writing
+the artifact:
+
+- Read the parent's `## Requirements` (and `## Design` if posted) to learn the
+  already-settled problem framing and `S<N>` acceptance criteria.
+- Scope this artifact to **only this child's slice**. Do not re-derive or
+  restate the parent's full requirements.
+- **Inherit** the parent's acceptance criteria that this slice carries (cite
+  them as the parent's `S<N>`, e.g. `继承父 issue ENG-123 的 S2`) rather than
+  inventing parallel ones; add new `S<N>` only for behavior unique to this
+  child.
+- If the slice conflicts with the parent's framing, that is a real ambiguity —
+  raise it as `[NEEDS CLARIFICATION]` instead of silently overriding the
+  parent.
+
 ## `验收标准` — 5 rules
 
 Every `S<N>` entry must satisfy all five:
@@ -60,7 +79,7 @@ Each entry must also be **independently verifiable**. Use stable IDs
 
 ## `Primary:` type
 
-One of `Bug | Feature | Refactor | Performance | Migration | Chore | Other`.
+One of `Bug | Feature | Refactor | Performance | Migration | Chore | Spike | Other`.
 Use the existing Linear `Type:Xxx` label as the mechanical override; if
 none, classify and add the matching label to the issue.
 
@@ -79,13 +98,45 @@ none, classify and add the matching label to the issue.
   includes data-integrity signals.
 - **Type:Chore** — `S<N>` includes transitive smoke and compatibility
   verification.
+- **Type:Spike** — investigation / research / 技术选型, where the deliverable
+  is a documented decision or set of findings, **not** shipped code. `要解决的
+  问题` states the question(s) to answer; each `S<N>` is decision-shaped — a
+  specific question answered with concrete, checkable evidence and a recorded
+  recommendation. See "Non-shipping issues" below for how the 5 rules relax and
+  how the pipeline terminates.
 - **Type:Other** — explicitly justify why none of the other types apply.
+
+## Non-shipping issues (Spike / investigation)
+
+A `Type:Spike` issue answers a question; it does not ship a feature. Two
+things differ from a normal issue.
+
+**Acceptance relaxes** (only for `Type:Spike`): rules 1, 3, 4 still hold, but
+
+- rule 2 (observable read mechanism) becomes **evidence a reviewer can
+  independently check** — a benchmark output, a throwaway prototype branch, a
+  comparison table, a linked artifact;
+- rule 5 (time-bounded) is **dropped** — a spike concludes at decision time,
+  not after an observation window.
+
+**The pipeline terminates early.** The deliverable is a findings /
+recommendation artifact, not a shippable PR. A spike normally ends at
+`Human Review` after Implementation, and the human moves it to `Done`; it
+reaches `Merging` / Deployment only if it also produced a real PR worth
+landing (e.g. an ADR or docs commit). Design becomes an investigation plan and
+Implementation produces the findings — see those skills' `Type:Spike` notes.
+
+**Bounce a pure question.** If the issue is a question or discussion with no
+investigation the agent can actually perform (only a human can answer), do not
+run the pipeline: state this in the `## Requirements` artifact, `@`-mention the
+issue's `creator`, move the issue to `Human Review`, and stop.
 
 ## `[NEEDS CLARIFICATION]` markers
 
 Use `[NEEDS CLARIFICATION: <question>]` inline in the artifact for
 ambiguities that block correct implementation and cannot be resolved with
-a safe default. Record safe-default resolutions as `Brief 假设: <value>`.
+a safe default. Record safe-default resolutions in `关键假设` as
+`<value>（假设）`.
 
 While any marker is unresolved, product implementation code must not start.
 
@@ -101,7 +152,7 @@ set up substitution paths.
 ```md
 ## Requirements
 
-Primary: Type:<Bug|Feature|Refactor|Performance|Migration|Chore|Other>
+Primary: Type:<Bug|Feature|Refactor|Performance|Migration|Chore|Spike|Other>
 
 要解决的问题（what）:
 - <actual problem at mechanism level, not symptom restatement>
@@ -135,8 +186,8 @@ decomposition via the `symphony-issue` skill (consent-gated: it posts a
 `## 建议新建 issue` proposal and creates nothing until a human consents).
 
 On resume: read human replies in the artifact thread. For each marker, if the
-reply resolves it, replace the marker with the answered value (or
-`Brief 假设: <value>` for a recommended default) and proceed to exit. If the
+reply resolves it, replace the marker with the answered value (or record a
+recommended default in `关键假设` as `<value>（假设）`) and proceed to exit. If the
 reply is too vague or off-point to resolve it, do **not** guess: keep the
 marker, refine its question to name exactly what is still missing, bump that
 marker's unresolved-round count in the workpad `notes`, and stop again via
@@ -154,7 +205,9 @@ The artifact is complete enough to post when all of these hold — this is
 about form, not correctness:
 
 - `Primary:`, `要解决的问题`, `为什么解决`, `验收标准` all filled.
-- Every `S<N>` satisfies the 5 rules.
+- Every `S<N>` satisfies the 5 rules and is independently verifiable.
+- Type-specific writing emphasis satisfied for `Primary:` (e.g. a Bug carries
+  its required bug-specific `S<N>`).
 - No unresolved `[NEEDS CLARIFICATION]` markers.
 
 Post or update the `## Requirements` artifact and set the workpad
@@ -173,6 +226,11 @@ Choose **`advance`** only when **all** of these hold:
   would very likely approve it as-is?* Yes only if the problem statement and
   acceptance criteria follow directly from the issue, with no material
   ambiguity resolved by guessing.
+
+A declared `本地验收不可达` does **not** by itself block `advance` — it is a
+verifiability caveat, orthogonal to whether the intent was understood. As long
+as it is stated in `关键假设`, it stays visible on the posted artifact for a
+human to revisit later (a `⏩` artifact remains reviewable).
 
 On `advance`, record `confidence: advance` in the workpad notes; Main Flow
 writes the `⏩` reply and opens `phase-design` in the same session.

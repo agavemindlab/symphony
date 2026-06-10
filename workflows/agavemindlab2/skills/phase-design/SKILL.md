@@ -90,6 +90,12 @@ Apply the emphasis matching `Primary:` from the Requirements artifact.
   recovery); rollback plan; deploy ordering.
 - **Type:Chore** — include breaking-changes review with changelog links
   and per-call-site verification.
+- **Type:Spike** — the "approach" is an **investigation plan**, not an
+  implementation direction: state the hypotheses, what to probe / prototype /
+  measure, and how each Requirements `S<N>` question gets answered (the
+  evidence each will produce). Name the spike's time/scope box so it does not
+  sprawl. A diagram is optional unless the investigation itself is about
+  component flow. The output is findings, posted at Implementation.
 
 ## High-impact decision protocol
 

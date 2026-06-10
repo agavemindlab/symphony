@@ -37,7 +37,7 @@ Linear relation.
 | blocking | current `blocked-by` the new issue | propose only | **B — consent-gated** |
 | sub-issue | decompose current into children | `parentId` | **B — consent-gated** |
 
-Also assign a type label: `Bug | Feature | Refactor | Performance | Migration | Chore | Other`.
+Also assign a type label: `Bug | Feature | Refactor | Performance | Migration | Chore | Spike | Other`.
 
 ## Safety invariants (every spawned issue)
 

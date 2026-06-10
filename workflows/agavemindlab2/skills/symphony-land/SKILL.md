@@ -12,8 +12,9 @@ description:
 
 - Ensure the PR is conflict-free with `upstream/${SYMPHONY_BASE_BRANCH:-main}`.
 - Keep PR CI and post-merge verification runs green.
-- Use the latest `## Review Handoff` merge safety assessment and post-merge
-  verification plan as the Merging gate.
+- Use the approved `## Implementation` artifact — its `风险/注意` (merge
+  safety) and `Merge 后验证` (post-merge verification plan) sections — as the
+  Merging gate.
 - Squash-merge the PR once checks pass, then watch the `main` workflows for
   the merge commit.
 - Do not yield to the user until the PR is merged and the post-merge runs are
@@ -29,15 +30,18 @@ description:
 ## Steps
 
 1. Locate the PR for the current branch.
-2. Read the latest Linear `## Review Handoff` or human approval comment before
-   merging. Confirm it approves Merging and that the latest PR-review handoff
-   includes:
-   - A merge-safety assessment: whether the PR is safe to merge and whether
-     any remaining issue could crash services, corrupt/lose data, break
-     background jobs, or only affect a bounded path.
-   - A post-merge verification plan: the exact checks to run after merge.
-   If either element is missing, do not merge; update the handoff and return
-   the issue to `Human Review`.
+2. Confirm the human approved Merging (the issue is in the `Merging` state)
+   and read the approved `## Implementation` artifact before merging. It must
+   supply both gate elements:
+   - A merge-safety read: the `验收对照` and `风险/注意` sections establish
+     whether the PR is safe to merge and whether any remaining issue could
+     crash services, corrupt/lose data, break background jobs, or only affect
+     a bounded path.
+   - A post-merge verification plan: the `Merge 后验证` section lists the
+     exact checks to run after merge (required when any acceptance criterion
+     is production-only).
+   If either element is missing, do not merge; note the gap in the
+   `## Implementation` thread and return the issue to `Human Review`.
 3. Confirm the relevant `AGENTS.md` validation is green locally before any push.
 4. If the working tree has uncommitted changes, commit with the `symphony-commit` skill
    and push with the `symphony-pr` skill before proceeding.
@@ -230,183 +234,3 @@ direction.
 - When declining feedback, offer a brief alternative or follow-up trigger.
 - Prefer a single consolidated "review addressed" root-level comment after a
   batch of fixes instead of many small updates.
-```
-
----
-
-Now for the WORKFLOW.md additions. Below I identify the exact insertion location for each new section and provide the draft content.
-
----
-
-```
-=== WORKFLOW.md ADDITIONS ===
-```
-
-**1. New section: `## Skill interaction protocol (unattended bridge)`**
-
-Insert after the `## Related Skills` section and before `## Discovery and Planning Gates`.
-
-```markdown
-## Skill interaction protocol (unattended bridge)
-
-This workflow runs the agent unattended via `codex app-server`. There is no
-interactive UI: tools like `AskUserQuestion` are not reachable, and the only
-channel back to the human is the Linear issue (`## Spec` / `## Codex Workpad`
-/ `## Review Handoff` comments).
-
-Many optional skills (discovery tools, engineering-review tools,
-planning skills) assume interactive operation. When **any** invoked skill
-needs to ask the human a question (directly via `AskUserQuestion`, indirectly
-via "wait for user confirmation" prose, or by stalling on ambiguity), bridge
-it to Linear instead of dropping the question, outputting it to chat, or
-auto-deciding silently.
-
-This protocol is the canonical bridge for **every** invoked skill in this
-session. It supersedes any per-skill "AskUserQuestion fallback" or "output
-prose to chat" instruction. When a phase skill references the "Skill
-interaction protocol", "Non-interactive human question protocol", or
-"bridge", it points here.
-
-### Bridge rules
-
-1. **Collect, don't sequentially ask.** Capture every question the skill
-   (or the agent itself) would have asked the human across the entire active
-   gate. Do not stop and ask one at a time. Do not output a prose question
-   to the chat hoping a human will see it — they won't.
-2. **Consider all branches per question.** For each question, write 2-4
-   concrete options the agent considered, why the question matters, and what
-   the agent will do if the human accepts the recommendation.
-3. **Recommend with reason.** Mark one option as `推荐 (recommended)` with a
-   one-sentence rationale. The recommendation is the agent's judgment under
-   current evidence — make it concrete, not a hedge.
-4. **Mark in the persistent artifact.**
-   - For ambiguity in `要解决的问题` / `为什么解决` / `验收标准` — write
-     `[NEEDS CLARIFICATION: <question>]` inline in the `## Spec` comment at
-     the relevant field.
-   - For ambiguity in `解决方案（approach）` / `风险/注意` — write
-     `[NEEDS CLARIFICATION: <question>]` inline in the `## Spec` comment at
-     the relevant field.
-   - For execution / runtime / tooling ambiguity that the Spec cannot capture
-     — write a brief blocker note in the `## Codex Workpad` `Notes` section.
-5. **Batch into one Review Handoff** matching the active gate (status enum →
-   owning skill mapping in `Review handoff lifecycle`):
-   - Gate 1 questions → `Status: Waiting for requirement confirmation`
-     (sub-template in `phase-clarification`).
-   - Gate 2 questions → `Status: Waiting for plan confirmation` (sub-template
-     in `phase-design`).
-   - Gate 3 execution blocker → `Status: Blocked` (sub-template in
-     `phase-implementation`).
-   The handoff's `阻塞决策` (or `阻塞`) section must contain a 1:1 reflection
-   of every unresolved Spec marker / Workpad blocker note: same question text,
-   options considered, recommended option, and what the agent will do if the
-   recommendation is accepted.
-6. **Cap at five.** If there are more than five blocking questions for one
-   human round, propose a narrowed scope or split the issue rather than
-   sending an oversized questionnaire — five distinct uncertainties is a
-   signal the design isn't ready.
-7. **Move issue to `Human Review`** with the chosen status. Do not continue
-   work past the gate while markers are unresolved.
-8. **On resume**, the agent's first edit replaces each resolved marker in the
-   Spec / Workpad with the answered value (or `Brief 假设: <value>` if the
-   agent took its recommendation), then re-syncs Workpad `Acceptance Criteria`
-   if affected, then continues from the gate that was paused.
-
-### What this means for invoked optional skills
-
-- Discovery tool (e.g., `office-hours` equivalent): if it walks through
-  questions interactively, bridge them instead — agent records each
-  question's answer-options as it would have asked, then batches all
-  unresolved ones into one Spec markers + `Waiting for requirement
-  confirmation` handoff at Gate 1 exit.
-- Engineering-review tool (e.g., `plan-eng-review` equivalent): if it calls
-  `AskUserQuestion` per finding, bridge them instead — agent collects all
-  findings the human must approve, batches into Spec `approach` / `风险/注意`
-  markers + `Waiting for plan confirmation` handoff at Gate 2 exit. Findings
-  the agent can resolve unilaterally (per WORKFLOW.md `Discovery and planning
-  gates` Gate 2 high-impact category list) are recorded in the workpad and
-  resolved without bouncing.
-- Any other optional skill: same bridge. If the skill wants to ask the human,
-  the agent batches and posts; otherwise the agent decides and records the
-  decision (and rationale) in the workpad.
-```
-
----
-
-**2. Three-comment model and priority hierarchy — insert inside `## Default Posture`**
-
-Find the existing paragraph in `## Default Posture` that starts with:
-> "Treat the persistent `## Codex Workpad` comment as the agent continuation record."
-
-Insert the following block **after** that paragraph (before "Treat `## Review Handoff` comments..."):
-
-```markdown
-- The three persistent comments have non-overlapping ownership: **Spec** owns
-  the issue-level contract (what to solve, why, chosen approach, observable
-  acceptance signals); **Workpad** owns execution state (plan, validation,
-  attempt history, notes); **Handoff** owns per-round routing and human
-  action. When the Linear description, Spec, Workpad, or human comments
-  disagree, the precedence is:
-  **human comment > Spec > Workpad > original Linear description**.
-  Reconcile by updating the Spec to absorb the human comment's intent, then
-  sync the Workpad, then write code.
-- Investigation code (reproductions, temporary logging, ad-hoc scripts to
-  characterize a bug or measure a baseline) is allowed before the Spec is
-  finalized. Product implementation code (changes that will land in the PR
-  diff) must wait until the Spec is complete with no unresolved
-  `[NEEDS CLARIFICATION: ...]` markers.
-```
-
----
-
-**3. Subagent authorization — insert as item 4 in the `Instructions:` numbered list**
-
-The existing `Instructions:` list in the WORKFLOW.md front matter ends at item 3. Add:
-
-```markdown
-4. **Subagent use is explicitly authorized when available.** This workflow
-   invokes `subagent-driven-development` (superpowers) at Gate 3 when the
-   skill is present and the approved plan contains independent subtasks that
-   can be safely delegated. Invoking this workflow constitutes explicit
-   authorization to dispatch subagents for those tasks. Do not wait for
-   additional user confirmation before using subagents during implementation.
-```
-
----
-
-**4. Completion bar additions — add to `## Step 2: Implementation Phase` completion bar (item 10)**
-
-In the current Step 2 completion bar (the checklist under item 10), add the following items after the existing "All required validation from `AGENTS.md` is passing" check:
-
-```markdown
-    - [ ] A `## Spec` comment exists, contains `Primary: Type:<...>`, has no
-          unresolved `[NEEDS CLARIFICATION]` markers, and uses stable `S<N>`
-          IDs on every `验收标准` entry. The Workpad `Acceptance Criteria`
-          mirrors each `S<N>` (rather than restating text).
-    - [ ] The Spec passes the type-specific quality gate from
-          `phase-clarification` (the `要解决的问题` / `为什么解决` /
-          `验收标准` side) and `phase-design` (the `解决方案（approach）`
-          side) for the Spec's `Primary:` type. Re-read both skills'
-          "Type-specific writing emphasis" sections matching the Spec type
-          and verify each emphasis bullet is satisfied. If any bullet fails,
-          the Spec must be revised before transitioning to `Human Review`.
-    - [ ] If the Spec uses the `Trivial Spec` compact form, the changes in the
-          PR diff contain no behavior/data/security/API/migration/performance
-          impact; if any of those impact categories are detected, escalate to
-          the full Spec template before handoff.
-    - [ ] If the Spec's `关键假设` contains `本地验收不可达：<原因>` (a
-          production-only-repro issue), the following substitution gates apply
-          instead of standard local runtime acceptance:
-          - The Workpad `Acceptance Criteria` includes characterization tests
-            covering each key invariant of the fix path (one entry per
-            invariant; grep the fix-touching functions and confirm each has a
-            corresponding test).
-          - The handoff's `Merge 后验证` section is required (not optional).
-            Every entry names a specific metric ID, dashboard URL, or alert
-            name plus an explicit observation time window. Generic "observe
-            the alert clears" without a concrete signal target fails the gate.
-          - The handoff's TL;DR or rollback statement names the rollback path
-            concretely (feature flag toggle, image revert, replica rollback,
-            etc.), not just "revert PR if it goes wrong".
-          - The handoff explicitly states `本地验収不可达：<原因>` (in the
-            TL;DR or in the `已验証` section if used) rather than omitting
-            the local-acceptance evidence.
