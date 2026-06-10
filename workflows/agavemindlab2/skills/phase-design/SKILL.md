@@ -128,7 +128,7 @@ Apply the emphasis matching `Primary:` from the Requirements artifact.
 
 If the approach has a **high-impact unresolved decision**, do not pick
 unilaterally — surface it as a batched `[NEEDS CLARIFICATION]` question tagged
-`〔影响：高 · 需明确回答〕` (see Batched clarification below) and move to Human
+`🔴 〔影响：高 · 需明确回答〕` (see Batched clarification below) and move to Human
 Review. The tag means a blanket `同意默认` never resolves it — the human must
 answer it explicitly.
 
@@ -184,7 +184,7 @@ that path. Then sort each one:
   most often an **approach fork**: two reasonable architectures with no safe
   default.
 - **High-impact** (the categories in "High-impact decision protocol" above) →
-  batched question tagged `〔影响：高 · 需明确回答〕`, which a blanket approval
+  batched question tagged `🔴 〔影响：高 · 需明确回答〕`, which a blanket approval
   never covers (see the consent convention).
 
 **Batched format** — one block at the foot of the `## Design` artifact:
@@ -195,7 +195,7 @@ that path. Then sort each one:
 Q1. <question> 〔影响：低〕
   - A（推荐）: <answer> — <one-line why>
   - B: <answer>
-Q2. <question> 〔影响：高 · 需明确回答〕
+Q2. <question> 🔴 〔影响：高 · 需明确回答〕
   - A（推荐）: <answer> — <one-line why>
   - B: <answer>
   - C: <answer>
@@ -218,7 +218,7 @@ When a batched `[NEEDS CLARIFICATION]` block remains after analysis:
 ### Consent convention (how the human replies)
 
 - **`同意默认`** (or 认可 / 都按推荐) → accept every `（推荐）` option, **except**
-  any question tagged `〔影响：高 · 需明确回答〕`, which a blanket approval never
+  any question tagged `🔴 〔影响：高 · 需明确回答〕`, which a blanket approval never
   covers.
 - **Per-question override** (e.g. `Q2 选 B；其余默认`, or a prose answer naming
   the question) → take the named choice for those questions, the recommendation

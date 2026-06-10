@@ -178,7 +178,7 @@ path. Then sort each one:
   problem, the acceptance criteria, or the build) → make it a batched question.
 - **High-impact** (schema/data migration, irreversible data op, security/
   privacy behavior, public API contract, dependency breaking change, major UX
-  fork) → batched question tagged `〔影响：高 · 需明确回答〕`; it is **not**
+  fork) → batched question tagged `🔴 〔影响：高 · 需明确回答〕`; it is **not**
   covered by a blanket approval (see the consent convention).
 
 **Batched format** — one block at the foot of the `## Requirements` artifact:
@@ -189,7 +189,7 @@ path. Then sort each one:
 Q1. <question> 〔影响：低〕
   - A（推荐）: <answer> — <one-line why>
   - B: <answer>
-Q2. <question> 〔影响：高 · 需明确回答〕
+Q2. <question> 🔴 〔影响：高 · 需明确回答〕
   - A（推荐）: <answer> — <one-line why>
   - B: <answer>
   - C: <answer>
@@ -249,7 +249,7 @@ When a batched `[NEEDS CLARIFICATION]` block remains after honest analysis:
 ### Consent convention (how the human replies)
 
 - **`同意默认`** (or 认可 / 都按推荐) → accept every `（推荐）` option, **except**
-  any question tagged `〔影响：高 · 需明确回答〕`, which a blanket approval never
+  any question tagged `🔴 〔影响：高 · 需明确回答〕`, which a blanket approval never
   covers.
 - **Per-question override** (e.g. `Q2 选 B；其余默认`, or a prose answer naming
   the question) → take the named choice for those questions, the recommendation
