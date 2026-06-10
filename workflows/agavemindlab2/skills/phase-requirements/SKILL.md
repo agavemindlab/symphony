@@ -19,7 +19,14 @@ these fields locked down:
 - `Primary: Type:<...>` classifier
 - `要解决的问题（what）`
 - `为什么解决（why）`
-- `验收标准（S1, S2, ...）` — every entry passing the 5 rules below
+- `验收标准（S1, S2, ...）` — every entry passing the 5 rules below, and the
+  set as a whole passing the sufficiency check below
+
+The `验收标准` are the issue's **close test**: when every `S<N>` is satisfied
+the issue is genuinely done and can be closed; if any fails it cannot. They are
+not a proxy for "the code ran" — passing unit tests, a green build, or a merged
+PR are evidence the *implementation* moved, never on their own evidence the
+*problem* is solved.
 
 The Design approach is not part of this artifact; it belongs in `## Design`.
 
@@ -105,6 +112,25 @@ Every `S<N>` entry must satisfy all five:
 
 Each entry must also be **independently verifiable**. Use stable IDs
 (`S1`, `S2`, ...). Design and Implementation reference these IDs.
+
+### Sufficiency check (the set, not the item)
+
+The 5 rules govern each `S<N>` in isolation; this governs the **whole set**.
+The criteria must be **necessary and sufficient to close the issue**:
+
+- **Sufficient** — if every `S<N>` is satisfied, `要解决的问题` is genuinely
+  solved with no material outcome left unproven. Apply the set-falsification
+  test: *imagine all `S<N>` green — could the issue still legitimately stay
+  open?* If yes, a criterion is **missing** (usually the primary user/business
+  outcome, which is easy to omit when each individual criterion looks fine);
+  add it.
+- **Necessary** — every `S<N>` is actually required to close. If the issue
+  could close with one left unmet, it is gold-plating — cut it, or move it to a
+  spun-off follow-up issue.
+
+A set that is all-green-but-not-closeable is the failure this guards against:
+well-formed individual criteria that together still do not witness that the
+problem is solved.
 
 ## `Primary:` type
 
@@ -312,6 +338,8 @@ about form, not correctness:
 
 - `Primary:`, `要解决的问题`, `为什么解决`, `验收标准` all filled.
 - Every `S<N>` satisfies the 5 rules and is independently verifiable.
+- The `S<N>` set passes the **sufficiency check** — necessary and sufficient to
+  close the issue (the set-falsification test holds: all-green ⟹ closeable).
 - Type-specific writing emphasis satisfied for `Primary:` (e.g. a Bug carries
   its required bug-specific `S<N>`).
 - No unresolved `[NEEDS CLARIFICATION]` markers.
