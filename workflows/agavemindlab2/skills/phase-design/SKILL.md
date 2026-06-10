@@ -40,10 +40,25 @@ cannot fit the parent's design.
 
 ## Discovery / design review
 
-**Invoke the `plan-eng-review` skill** to adversarially review the chosen
-approach across architecture / code quality / tests / performance. Enumerate
-alternatives, consider edge cases and failure modes, and record the analysis in
-the workpad before writing the approach.
+Decide whether to **invoke the `plan-eng-review` skill** to adversarially
+review the chosen approach across architecture / code quality / tests /
+performance. plan-eng-review earns its place only when the approach carries
+genuine design risk. The rule: **unless the approach is the single obvious one
+with no real architectural choice, run it; when in doubt, run it** (a wasted
+review is far cheaper than building on a flawed design).
+
+- Typically run it — there is a real architectural fork, new component / data
+  flow, async / concurrency, a migration, a security boundary, or any
+  non-obvious failure mode. When run, enumerate alternatives, consider edge
+  cases and failure modes, and record the analysis in the workpad before
+  writing the approach.
+- Typically skip it — the change is mechanical with no design latitude: a
+  config / dep `Chore`, a one-line fix with an obvious correct shape, a scoped
+  `Refactor` whose only question is behavior-invariance (cover that with the
+  Type-specific emphasis instead). Go straight to writing the approach.
+
+Judge the actual design surface, not the type label — a "small" change that
+touches a trust boundary or shared schema still warrants the review.
 
 This workflow is unattended, so resolve what you can unilaterally (the
 safe-default tradeoffs) and route every finding that genuinely needs a human

@@ -37,16 +37,35 @@ Requirements is the target phase. Two cases:
 
 ## Discovery
 
-Read all issue context (description, comments, attachments, linked issues,
-labels), then **invoke the `office-hours` skill** to interrogate intent,
-surface ambiguity, and stress-test the problem statement before writing the
-artifact.
+Read all issue context first (description, comments, attachments, linked
+issues, labels).
 
-This workflow is unattended, so you cannot interview a human turn by turn. When
-office-hours (or your own analysis) would put a question to the human, do not
-ask one at a time: collect every uncertainty and resolve it through the
-**Batched clarification** protocol below — assume-and-record the immaterial
-ones, batch the material ones with a recommended answer.
+Then decide whether to **invoke the `office-hours` skill** to interrogate
+intent, surface hidden assumptions, and stress-test the problem statement.
+office-hours earns its place only when the problem framing has genuine
+uncertainty. The rule: **unless both the `what` and the `why` are already
+concrete and unambiguous, run it; when in doubt, run it** (a wasted
+interrogation is far cheaper than building the wrong thing).
+
+- Typically run it — `Feature` (boundaries and implicit needs), `Spike`
+  (hypotheses and the real question being asked), a vague `Bug` (expected
+  behavior / root-cause intent unclear).
+- Typically skip it — the intent is already mechanical and self-evident:
+  `Chore` (dep bump, config, rename), a scoped `Refactor` (intent is
+  behavior-preservation, the risk is invariance not intent), a metric-bound
+  `Performance`, a reproduced `Bug` with clear expected behavior. Go straight
+  to writing acceptance criteria.
+
+Type is only a heuristic — a fuzzy Chore can still need interrogation, a
+crisply-specified Feature may not. Judge the actual `what`/`why`, not the label.
+
+Regardless of that decision, always do the lightweight ambiguity scan that
+feeds Batched clarification. This workflow is unattended, so you cannot
+interview a human turn by turn: when office-hours (or your own analysis) would
+put a question to the human, do not ask one at a time — collect every
+uncertainty and resolve it through the **Batched clarification** protocol below
+(assume-and-record the immaterial ones, batch the material ones with a
+recommended answer).
 
 ## Sub-issue: inherit the parent's scope
 
