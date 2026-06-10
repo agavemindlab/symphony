@@ -112,6 +112,10 @@ issue's `creator`, and leave it for the human to route to `Rework`.
 > 👉 **需要人工处理**：确认部署结果符合预期。
 > - 若仍有「待验证项」：把 issue 留在 `Human Review`（或任何 Symphony 不处理的状态）直到「何时可验」满足，然后将其移回 `In Progress` —— Deployment 会重入、把剩余验收跑完并回报；全部 `✅` 后由你置 `Done`。
 > - 若验收已全部完成：直接将 issue 置为 `Done`；如有问题置为 `Rework`。
+
+>>> 🛠️ 本次激活的 skills
+- `<skill>` — <≤6-word purpose>
+>>>
 ```
 
 Status conventions: `✅ 通过`, `⚠️ 待观察`, `➖ N/A`, `❌ 失败`.
@@ -125,8 +129,7 @@ and production-log access alone.
 ## Cross-phase rework
 
 If post-deploy verification reveals the implementation was fundamentally
-wrong and a new PR is required, follow the cross-phase rework protocol in
-WORKFLOW.md: resolve `## Deployment`, update workpad
+wrong and a new PR is required, follow the cross-phase rework protocol in your workflow instructions: resolve `## Deployment`, update workpad
 `current_phase: Implementation`, and open `phase-implementation`.
 
 ## Exit

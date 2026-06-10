@@ -217,6 +217,8 @@ Symphony only starts the agent when the issue is in an active state (`Todo`, `In
 
 ## Skill Interaction Protocol
 
+The phase skills under `.agents/skills/` refer back to **your workflow instructions** (e.g. "the Workpad template in your workflow instructions", "the cross-phase rework protocol in your workflow instructions"). That is this prompt — every referenced section is here; find it by its heading. There is no separate file to open.
+
 This workflow runs unattended — no interactive UI. When any invoked skill needs a human decision, mark it `[NEEDS CLARIFICATION: <question>]` inline in the current phase's artifact, update the artifact comment, move the issue to `Human Review`, and stop. Each phase skill's "When blocked" section defines the detailed bridging procedure for that phase.
 
 ## Phase Artifact Protocol
@@ -224,6 +226,19 @@ This workflow runs unattended — no interactive UI. When any invoked skill need
 Each phase maintains exactly one top-level comment on the Linear issue, identified by its heading (see Phase Map). A phase skill posts its artifact via `commentCreate`, or updates the existing one in place via `commentUpdate`. No phase edits another phase's artifact, and no comments are posted outside this protocol.
 
 When content conflicts, precedence is: human reply in artifact thread > current artifact body > previous artifact > original issue description. Reconcile by updating the current artifact to absorb the human's intent.
+
+### Skills-activated footer
+
+Every phase artifact ends with a collapsible footer listing the skills this phase run actually activated, so a human can audit what drove the work. Use the workflow's own skills (the phase skill's `Skills to invoke`, `office-hours`, `plan-eng-review`, `brainstorming`, `symphony-*`, etc.) — not Linear/git mechanics. On a rework re-post, list the skills of that run, not the original. The exact block (keep the heading verbatim; omit any line that does not apply):
+
+```md
+>>> 🛠️ 本次激活的 skills
+- `<skill>` — <≤6-word purpose>
+- _跳过_ `<skill>` — <reason>
+>>>
+```
+
+For Implementation, this footer mirrors the workpad `notes` record of invoked / `Skipped <skill>` skills; for other phases, list what the run invoked.
 
 ### Phase-closing replies
 

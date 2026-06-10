@@ -40,7 +40,7 @@ Requirements is the target phase. Two cases:
   unresolved human feedback. Proceed to Discovery.
 - **Rework** — the `## Requirements` artifact has unresolved human feedback
   in its thread. Address that feedback and follow the same-phase Rework
-  cycle in WORKFLOW.md when re-posting the artifact.
+  cycle in your workflow instructions when re-posting the artifact.
 
 ## Discovery
 
@@ -283,7 +283,7 @@ record the classification in `关键假设` as
 `S<N> 验证：<延迟验收 | 需人工判定> — <原因>`. The pipeline acts on it:
 Implementation writes the executable deferred-verification spec into
 `Merge 后验证` for each `延迟验收`, which Deployment carries into its `待验证项`
-and runs once checkable (re-entered via `In Progress` — see WORKFLOW.md); a
+and runs once checkable (re-entered via `In Progress` — see your workflow instructions); a
 `需人工判定` gets the substitution path plus a human/follow-up route.
 
 ## Artifact template
@@ -310,6 +310,10 @@ Primary: Type:<Bug|Feature|Refactor|Performance|Migration|Chore|Spike|Other>
 - <one sentence per item>
 
 ### 待确认（omit if none; the batched [NEEDS CLARIFICATION] block — see Batched clarification）
+
+>>> 🛠️ 本次激活的 skills
+- `<skill>` — <≤6-word purpose>
+>>>
 ```
 
 ## When blocked

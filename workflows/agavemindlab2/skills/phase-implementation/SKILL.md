@@ -40,10 +40,10 @@ to `Done`. The rest of this skill (PR feedback sweep, Merge-gated Deployment)
 applies only when the spike actually produced a PR worth landing.
 
 If the workpad (`.symphony/workpad.md`) does not exist, create it with the
-template from WORKFLOW.md. If this run is a rework of `## Implementation`
+template from your workflow instructions. If this run is a rework of `## Implementation`
 (the artifact has unresolved human feedback in its thread), reconcile the
 workpad plan with that feedback before writing code, and follow the
-same-phase Rework cycle in WORKFLOW.md when re-posting the artifact.
+same-phase Rework cycle in your workflow instructions when re-posting the artifact.
 
 ## Skills to invoke
 
@@ -69,8 +69,7 @@ record `Skipped <skill>: <reason>` in workpad `notes`.
 ## Workpad (`.symphony/workpad.md`)
 
 The workpad is the agent's execution record and continuation state. Keep
-it accurate so a fresh session can resume without losing state. See the
-WORKFLOW.md Workpad template for the exact layout (YAML frontmatter +
+it accurate so a fresh session can resume without losing state. See the Workpad template in your workflow instructions for the exact layout (YAML frontmatter +
 markdown sections).
 
 Frontmatter fields:
@@ -161,6 +160,11 @@ comfort.
 - S<N>: **查询** `<exact runnable query/command against the prod log / error tracker>` · **通过判据** `<pass/fail predicate, e.g. 匹配条数 == 0>` · **观察窗口** `<length, e.g. 7 天>`
 
 > 👉 **需要人工处理**：审查 PR，批准后将 issue 移至 `Merging`；需要修改则移至 `Rework`。
+
+>>> 🛠️ 本次激活的 skills（mirror workpad notes: invoked + Skipped）
+- `<skill>` — <≤6-word purpose>
+- _跳过_ `<skill>` — <reason>
+>>>
 ```
 
 Status column conventions: `✅ 通过`, `⚠️ 部分通过`, `➖ N/A`, `❌ 失败`.
@@ -185,10 +189,13 @@ A blocker is a claim about what the environment **actually refused**, never an
 assumption. Before writing any `🚨 Blocked`: attempt the operation and capture
 the real error (exact command + stderr/exit); honor any human grant in the
 issue thread (e.g. "you can access `~/data/...`") by actually attempting that
-access; and recall the sandbox is `workspace-write` — a task-referenced path
-outside the repo is readable (don't self-block on it), while
-writes-outside-workspace and network are the real constraints. See WORKFLOW.md
-for the read-scope policy (task-referenced paths only, not arbitrary roaming).
+access. Do **not** assume an access boundary the environment has not actually
+imposed: a path being outside the repo is not, on its own, proof a read will
+fail — find out by attempting it and reading the real result. The
+repo-write-confinement and read-scope rules in your workflow instructions are *behavioral
+policy you self-enforce*, not a sandbox you can lean on. A real blocker is a
+captured command + error (missing auth / secrets / tools, or an endpoint that
+genuinely refuses you) — never an assumption.
 
 Only after a real, captured failure with no in-session workaround, write a
 blocker description in the workpad `notes` covering: what is missing; the exact
@@ -208,7 +215,7 @@ the implementation:
 - **Design flaw** (approach needs to change) → target `phase-design`
 - **Requirements flaw** (problem statement or acceptance criteria wrong) → target `phase-requirements`
 
-Follow the cross-phase rework protocol in WORKFLOW.md: resolve intermediate
+Follow the cross-phase rework protocol in your workflow instructions: resolve intermediate
 artifacts in reverse order (Implementation first, then any phases between
 target and Implementation), update workpad `current_phase` to the target
 phase, and open the target phase skill.

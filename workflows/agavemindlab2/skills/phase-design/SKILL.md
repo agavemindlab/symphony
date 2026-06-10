@@ -28,7 +28,7 @@ this skill. Just read the `## Requirements` artifact to extract `Primary:`,
 `验收标准 S<N>`, and `关键假设` before designing the approach.
 
 If this run is a rework of `## Design` (the artifact has unresolved human
-feedback in its thread), follow the same-phase Rework cycle in WORKFLOW.md.
+feedback in its thread), follow the same-phase Rework cycle in your workflow instructions.
 
 ## Sub-issue: fit the parent's design
 
@@ -163,6 +163,10 @@ batched question with your recommended direction.
 - <one sentence per item>
 
 ### 待确认（omit if none; the batched [NEEDS CLARIFICATION] block — see Batched clarification）
+
+>>> 🛠️ 本次激活的 skills
+- `<skill>` — <≤6-word purpose>
+>>>
 ```
 
 ## Batched clarification (`[NEEDS CLARIFICATION]`)
@@ -270,7 +274,7 @@ Once no batched question remains, proceed to Exit.
 If `Rework` feedback indicates that Requirements need fundamental revision
 (problem statement wrong, acceptance criteria invalid) rather than a Design
 fix, do not patch it within `## Design`. Follow the cross-phase rework
-protocol in WORKFLOW.md: resolve this artifact, resolve `## Requirements`,
+protocol in your workflow instructions: resolve this artifact, resolve `## Requirements`,
 update workpad `current_phase: Requirements`, and open `phase-requirements`.
 
 ## Exit
