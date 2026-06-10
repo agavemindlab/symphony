@@ -134,9 +134,17 @@ scope reduction or splitting — when a split is warranted, propose `sub-issue`
 decomposition via the `symphony-issue` skill (consent-gated: it posts a
 `## 建议新建 issue` proposal and creates nothing until a human consents).
 
-On resume: read human replies in the artifact thread, replace each marker
-with the answered value (or `Brief 假设: <value>` for recommended
-defaults), then proceed to exit.
+On resume: read human replies in the artifact thread. For each marker, if the
+reply resolves it, replace the marker with the answered value (or
+`Brief 假设: <value>` for a recommended default) and proceed to exit. If the
+reply is too vague or off-point to resolve it, do **not** guess: keep the
+marker, refine its question to name exactly what is still missing, bump that
+marker's unresolved-round count in the workpad `notes`, and stop again via
+"When blocked". After a marker has gone two rounds unresolved, stop re-asking
+the same way — `@`-mention the issue's `creator` in the artifact, state the
+blocking point and the decision you need, and (when the deadlock is really
+scope being too large) propose a `sub-issue` split via `symphony-issue`.
+Remain at `Human Review`.
 
 ## Exit
 
