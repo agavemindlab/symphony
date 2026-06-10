@@ -181,12 +181,23 @@ verifies it.
 Use only when completion is blocked by missing required tools or
 auth/permissions that cannot be resolved in-session.
 
-Write a blocker description in the workpad `notes` covering: what is
-missing; why it blocks acceptance; exact human action to unblock.
+A blocker is a claim about what the environment **actually refused**, never an
+assumption. Before writing any `🚨 Blocked`: attempt the operation and capture
+the real error (exact command + stderr/exit); honor any human grant in the
+issue thread (e.g. "you can access `~/data/...`") by actually attempting that
+access; and recall the sandbox is `workspace-write` — a task-referenced path
+outside the repo is readable (don't self-block on it), while
+writes-outside-workspace and network are the real constraints. See WORKFLOW.md
+for the read-scope policy (task-referenced paths only, not arbitrary roaming).
+
+Only after a real, captured failure with no in-session workaround, write a
+blocker description in the workpad `notes` covering: what is missing; the exact
+command + error proving it; why it blocks acceptance; exact human action to
+unblock.
 
 Reflect this in the artifact's `风险/注意` and include:
 ```
-> 🚨 **Blocked**：<one sentence>
+> 🚨 **Blocked**：<one sentence + the captured command/error>
 ```
 
 ## Cross-phase rework

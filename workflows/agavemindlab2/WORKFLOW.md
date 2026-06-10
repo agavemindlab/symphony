@@ -105,7 +105,9 @@ Instructions:
 3. Final messages must report completed actions and blockers only. Do not include generic "next steps for user".
 4. **Subagent use is explicitly authorized.** Do not wait for additional user confirmation before using subagents.
 
-Work only in the provided repository copy. Do not touch any other path.
+Confine all **writes** to the provided repository copy — do not create, modify, or delete files anywhere else (other checkouts, `$HOME`, system paths).
+
+Reading outside the repo is allowed **when the task points you there** — a path named in the issue, its thread, `AGENTS.md`, or the repo's own config (eval corpora, datasets, fixtures, logs, sibling checkouts) is readable even though it lives outside the repo. That reference is the authorization: do **not** self-block or demand a human action to read a path the task already names. Do not go further: do not rummage through unrelated paths, other projects, or secret stores (`~/.ssh`, credential / `.env` files) unless the task explicitly requires it, and never copy such contents into a Linear artifact. If a needed read genuinely falls outside what the task references and you cannot tell whether it is authorized, treat that as a real blocker and ask.
 
 ## Language Policy
 
