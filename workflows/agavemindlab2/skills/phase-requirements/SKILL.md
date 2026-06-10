@@ -181,22 +181,32 @@ path. Then sort each one:
   fork) → batched question tagged `🔴 〔影响：高 · 需明确回答〕`; it is **not**
   covered by a blanket approval (see the consent convention).
 
+Each question must carry enough for the human to decide **without re-reading
+the issue**: a `背景` line naming what is ambiguous and what a wrong pick would
+cost, and a short consequence on **every** option — not just the recommended
+one (a bare option label gives the human nothing to weigh an override against).
+When office-hours (or your own analysis) surfaced the underlying tradeoff,
+preserve it here — do not flatten the reasoning down to a bare question.
+
 **Batched format** — one block at the foot of the `## Requirements` artifact:
 
 ```md
 ### 待确认（一次性审阅：认可全部推荐请回复「同意默认」，否则逐条说明）
 [NEEDS CLARIFICATION]
 Q1. <question> 〔影响：低〕
-  - A（推荐）: <answer> — <one-line why>
-  - B: <answer>
+  背景: <一句：歧义在哪 + 选错的代价>
+  - A（推荐）: <answer> — <这样选的后果 / 为什么是安全选择>
+  - B: <answer> — <这样选的后果>
 Q2. <question> 🔴 〔影响：高 · 需明确回答〕
-  - A（推荐）: <answer> — <one-line why>
-  - B: <answer>
-  - C: <answer>
+  背景: <一句：利害所在 / 为什么 blanket approval 不能覆盖>
+  - A（推荐）: <answer> — <后果>
+  - B: <answer> — <后果>
+  - C: <answer> — <后果>
 ```
 
 Keep each question's options to 2–4 concrete branches, exactly one marked
-`（推荐）` with a one-line rationale. **Cap at five questions per round** — more
+`（推荐）`. Every option states its consequence; the recommended one's doubles
+as the rationale. **Cap at five questions per round** — more
 signals the issue needs scope reduction or splitting (propose a `sub-issue`
 split via `symphony-issue`, which posts a `## 建议新建 issue` proposal and
 creates nothing until a human consents).
