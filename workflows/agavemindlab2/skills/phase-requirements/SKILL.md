@@ -37,29 +37,16 @@ Requirements is the target phase. Two cases:
 
 ## Discovery
 
-Use the project's configured discovery tool if one is available (e.g.,
-`office-hours`) — interrogate intent, surface ambiguity, stress-test the
-problem statement. If none is available, read all issue context
-(description, comments, attachments, linked issues, labels) and surface
-ambiguities explicitly before writing the artifact.
+Read all issue context (description, comments, attachments, linked issues,
+labels), then **invoke the `office-hours` skill** to interrogate intent,
+surface ambiguity, and stress-test the problem statement before writing the
+artifact.
 
-This workflow is unattended, so you cannot interview a human turn by turn:
-collect every uncertainty here and resolve it through the **Batched
-clarification** protocol below (assume-and-record the immaterial ones; batch
-the material ones with a recommended answer), rather than stopping to ask one
-question at a time.
-
-**Seed question bank (borrow with judgment).** For product- / user-facing
-issues (most `Type:Feature`, some `Type:Bug`), interrogate intent with the
-`office-hours` **Six Forcing Questions**, adapted to a ticket: (1) demand
-reality — strongest evidence someone actually wants this; (2) status quo — what
-users do today and what the workaround costs; (3) desperate specificity — name
-the actual user/role and the consequence they face; (4) narrowest wedge — the
-smallest version worth shipping; (5) observation & surprise — what real usage
-contradicted; (6) future-fit — does this stay essential as the world changes.
-Push each past the comfortable answer to something specific and evidence-based.
-Skip the ones that don't apply (they rarely fit `Refactor` / `Chore` /
-`Migration`). Borrow the questions; do not invoke the skill.
+This workflow is unattended, so you cannot interview a human turn by turn. When
+office-hours (or your own analysis) would put a question to the human, do not
+ask one at a time: collect every uncertainty and resolve it through the
+**Batched clarification** protocol below — assume-and-record the immaterial
+ones, batch the material ones with a recommended answer.
 
 ## Sub-issue: inherit the parent's scope
 

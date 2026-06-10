@@ -151,9 +151,6 @@ record it and move on. Both paths coexist.
 - 已放弃 <proposal-comment-id> — <title> · <reason>
 ```
 
-This is execution state, cleaned up with the workpad before merge. The durable
-record lives in the phase artifacts and the created issues themselves.
-
 ## Worked examples
 
 - **follow-up during Implementation** → `related` issue created in the intake

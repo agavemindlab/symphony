@@ -32,17 +32,15 @@ feedback in its thread), follow the same-phase Rework cycle in WORKFLOW.md.
 
 ## Discovery / design review
 
-Use the project's configured engineering-review tool if one is available
-(e.g., `plan-eng-review`) — adversarially review the chosen approach
-across architecture / code quality / tests / performance. If none is
-available, enumerate alternatives, consider edge cases and failure modes,
-and record analysis in the workpad before writing the approach.
+**Invoke the `plan-eng-review` skill** to adversarially review the chosen
+approach across architecture / code quality / tests / performance. Enumerate
+alternatives, consider edge cases and failure modes, and record the analysis in
+the workpad before writing the approach.
 
-This workflow is unattended: if such a tool would ask the human to approve a
-finding one at a time, do not stall on it. Resolve what you can unilaterally
-(the safe-default tradeoffs), and route every finding that genuinely needs a
-human decision into the **Batched clarification** block below — one batch, each
-with your recommended resolution.
+This workflow is unattended, so resolve what you can unilaterally (the
+safe-default tradeoffs) and route every finding that genuinely needs a human
+decision into the **Batched clarification** block below — one batch, each with
+your recommended resolution.
 
 ## Diagram requirement
 

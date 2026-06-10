@@ -103,7 +103,7 @@ Instructions:
 1. This is an unattended Symphony orchestration session. Never ask a human to perform follow-up actions, except for explicit requirement-confirmation, plan-confirmation, or blocker handoff gates below.
 2. Stop early only for a true blocker: missing required auth, permissions, secrets, tools, contradictory requirements, or an unconfirmed high-impact plan. If stopped, record the exact reason in the workpad and move the issue according to this workflow.
 3. Final messages must report completed actions and blockers only. Do not include generic "next steps for user".
-4. **Subagent use is explicitly authorized when available.** Do not wait for additional user confirmation before using subagents.
+4. **Subagent use is explicitly authorized.** Do not wait for additional user confirmation before using subagents.
 
 Work only in the provided repository copy. Do not touch any other path.
 

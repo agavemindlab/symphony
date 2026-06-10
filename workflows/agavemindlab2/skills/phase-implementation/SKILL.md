@@ -47,12 +47,11 @@ same-phase Rework cycle in WORKFLOW.md when re-posting the artifact.
 
 ## Skills to invoke
 
-- `writing-plans` (superpowers, if available) — produce the hierarchical
-  plan. If unavailable, construct the plan manually in the workpad.
-- `subagent-driven-development` (superpowers, if available and tasks are
-  parallelizable) — delegate independent plan items to subagents.
-- `test-driven-development` (superpowers, if available) — write failing
-  tests first for any new behavior.
+- `writing-plans` (superpowers) — produce the hierarchical plan.
+- `subagent-driven-development` (superpowers, when tasks are parallelizable) —
+  delegate independent plan items to subagents.
+- `test-driven-development` (superpowers) — write failing tests first for any
+  new behavior.
 - `symphony-commit` (.agents/skills) — clean, logical commits.
 - `symphony-pr` (.agents/skills) — push to `origin`, publish PR, request code
   review per the project's reviewer configuration.
@@ -61,11 +60,11 @@ same-phase Rework cycle in WORKFLOW.md when re-posting the artifact.
 - `symphony-issue` (.agents/skills) — spin off a separate ticket for any
   out-of-scope / deferred / blocking work discovered during implementation,
   instead of expanding this issue.
-- `verification-before-completion` (superpowers, if available) — gate
-  before claiming work is done.
+- `verification-before-completion` (superpowers) — gate before claiming work
+  is done.
 
-If any skill is skipped, record `Skipped <skill>: <reason>` in workpad
-`notes`.
+If a skill genuinely does not apply (e.g. no new behavior to test-drive),
+record `Skipped <skill>: <reason>` in workpad `notes`.
 
 ## Workpad (`.symphony/workpad.md`)
 
@@ -88,11 +87,10 @@ Markdown sections:
 
 ## Implementation flow
 
-1. **Plan** — invoke `writing-plans` (or construct manually) to produce
-   the hierarchical plan; write it to the workpad. Mirror `S<N>` IDs in
-   `acceptance_criteria`.
-2. **Delegate** — if `subagent-driven-development` is available and the
-   plan has independent subtasks, invoke it.
+1. **Plan** — invoke `writing-plans` to produce the hierarchical plan; write
+   it to the workpad. Mirror `S<N>` IDs in `acceptance_criteria`.
+2. **Delegate** — if the plan has independent subtasks, invoke
+   `subagent-driven-development`.
 3. **Implement with TDD** — for new behavior: failing test → minimal code
    → green → refactor.
 4. **Commit** — invoke `symphony-commit` skill for each logical change.
@@ -102,7 +100,7 @@ Markdown sections:
    feature against the running service per `AGENTS.md`. If local
    acceptance is impossible, record the reason and closest safe
    alternative proof; surface the caveat in the artifact `风险/注意`.
-7. **Verify** — invoke `verification-before-completion` if available.
+7. **Verify** — invoke `verification-before-completion`.
 8. **PR feedback sweep** — see protocol below.
 9. **Post artifact** — write the `## Implementation` artifact and move to
    `Human Review`.
@@ -131,8 +129,8 @@ Run this loop before posting the artifact:
 7. Repeat until no outstanding actionable comments remain.
 
 When responding to review feedback, follow `receiving-code-review`
-discipline if available: verify before implementing, technical correctness
-over social comfort.
+discipline: verify before implementing, technical correctness over social
+comfort.
 
 ## `## Implementation` artifact template
 
