@@ -67,11 +67,19 @@ def graphql(query, variables):
 issue_query = """
 query SymphonyRunningMarkerIssue($issueId: String!) {
   issue(id: $issueId) {
-    labels {
-      nodes { id name }
-    }
     team {
       id
+    }
+  }
+}
+"""
+
+issue_label_query = """
+query SymphonyRunningMarkerIssueLabels($issueId: String!, $after: String) {
+  issue(id: $issueId) {
+    labels(first: 100, after: $after) {
+      nodes { id name }
+      pageInfo { hasNextPage endCursor }
     }
   }
 }
@@ -108,22 +116,29 @@ mutation SymphonyRunningMarkerUpdateIssue($issueId: String!, $labelIds: [String!
 """
 
 
-issue = graphql(issue_query, {"issueId": issue_id}).get("issue")
-if not issue:
-    sys.exit(0)
-
-current_labels = issue.get("labels", {}).get("nodes", [])
-team = issue.get("team") or {}
-team_id = team.get("id")
-
-current_ids = [label["id"] for label in current_labels if label.get("id")]
-
-
 def find_label_id(labels, name):
     return next(
         (label["id"] for label in labels if label.get("name") == name and label.get("id")),
         None,
     )
+
+
+def fetch_issue_labels():
+    after = None
+    current_labels = []
+
+    while True:
+        data = graphql(issue_label_query, {"issueId": issue_id, "after": after})
+        labels = (data.get("issue") or {}).get("labels", {})
+        current_labels.extend(labels.get("nodes", []))
+
+        page_info = labels.get("pageInfo") or {}
+        if not page_info.get("hasNextPage"):
+            return current_labels
+
+        after = page_info.get("endCursor")
+        if not after:
+            return current_labels
 
 
 def find_team_label_id(name):
@@ -148,6 +163,14 @@ def find_team_label_id(name):
             return None
 
 
+issue = graphql(issue_query, {"issueId": issue_id}).get("issue")
+if not issue:
+    sys.exit(0)
+
+team = issue.get("team") or {}
+team_id = team.get("id")
+current_labels = fetch_issue_labels()
+current_ids = [label["id"] for label in current_labels if label.get("id")]
 current_label_id = find_label_id(current_labels, label_name)
 
 if event == "running":
