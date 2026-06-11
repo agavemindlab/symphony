@@ -67,7 +67,7 @@ Drive every acceptance `S<N>` from `## Requirements` to a resolved status
 **post-merge 最终验收** for each, recording the evidence form the design named —
 a 截屏 / 录屏 for an interactive `S<N>`, the query+matched-lines for a log
 signal — readably (verdict line + artifact, raw output folded). The `验收对照`
-table is the running ledger. On a re-entry the still-`⚠️ 待观察` items are the
+section is the running ledger. On a re-entry the still-`⚠️ 待观察` items are the
 main work — but also re-confirm any earlier `✅` you judge was only a
 point-in-time proxy for a criterion whose real intent is sustained or needs
 fresh confirmation; do not mechanically trust a prior pass.
@@ -104,10 +104,12 @@ issue's `creator`, and leave it for the human to route to `Rework`.
 <2-3 句：PR 合并了什么；deploy pipeline 结果；是否有部署 caveat。>
 
 ### 验收对照（acceptance criteria）
-| 验收项 | 状态 | 证据 |
-|--------|------|------|
-| S1: <criterion> | ✅ 通过 | <命令或观测结果> |
-| S2: <criterion> | ⚠️ 待观察 | 见待验证项 |
+- **S1: <criterion>**
+  - 状态: ✅ 通过
+  - 证据: <命令或观测结果>
+- **S2: <criterion>**
+  - 状态: ⚠️ 待观察
+  - 证据: 见待验证项
 
 ### 待验证项（omit when none pending; one per still-`⚠️ 待观察` S<N>）
 - S<N>: **查询** `<runnable query>` · **通过判据** `<predicate>` · **何时可验** `窗口末 <YYYY-MM-DD>` / `<其它前置条件>`
