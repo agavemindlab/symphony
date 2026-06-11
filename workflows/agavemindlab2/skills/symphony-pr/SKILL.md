@@ -25,12 +25,10 @@ description:
 
 ## Reviewer configuration
 
-Check `AGENTS.md` or the project's workflow configuration for the
-designated automated reviewer (e.g., a bot or CI-driven review account).
-If a reviewer is configured, request review from that account after every PR
-create/update with a code, test, or documentation diff. If no reviewer is
-configured, skip the automated review request step and proceed directly to
-human handoff.
+The designated automated reviewer is the `AUTOMATED_REVIEWER` environment
+variable. If it is non-empty, request review from that account after every PR
+create/update with a code, test, or documentation diff. If it is empty, skip
+the automated review request and proceed directly to human handoff.
 
 ## Related Skills
 
