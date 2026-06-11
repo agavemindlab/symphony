@@ -123,6 +123,14 @@ def find_label_id(labels, name):
     )
 
 
+def require_success(data, field, action):
+    result = data.get(field) or {}
+    if result.get("success") is not True:
+        raise RuntimeError(f"Linear {action} failed: success was not true")
+
+    return result
+
+
 def fetch_issue_labels():
     after = None
     current_labels = []
@@ -180,7 +188,10 @@ if event == "running":
             raise RuntimeError("Linear issue team id missing; cannot create running marker label")
 
         created = graphql(label_create_mutation, {"teamId": team_id, "name": label_name})
-        label_id = created["issueLabelCreate"]["issueLabel"]["id"]
+        create_result = require_success(created, "issueLabelCreate", "issue label create")
+        label_id = (create_result.get("issueLabel") or {}).get("id")
+        if not label_id:
+            raise RuntimeError("Linear issue label create did not return an issueLabel id")
 
     updated_ids = list(dict.fromkeys(current_ids + [label_id]))
 else:
@@ -193,5 +204,6 @@ else:
 if updated_ids == current_ids:
     sys.exit(0)
 
-graphql(issue_update_mutation, {"issueId": issue_id, "labelIds": updated_ids})
+update_result = graphql(issue_update_mutation, {"issueId": issue_id, "labelIds": updated_ids})
+require_success(update_result, "issueUpdate", "issue update")
 PY
