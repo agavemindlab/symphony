@@ -72,8 +72,18 @@ query SymphonyRunningMarkerIssue($issueId: String!) {
     }
     team {
       id
-      labels(first: 100) {
+    }
+  }
+}
+"""
+
+team_label_query = """
+query SymphonyRunningMarkerTeamLabels($issueId: String!, $after: String) {
+  issue(id: $issueId) {
+    team {
+      labels(first: 100, after: $after) {
         nodes { id name }
+        pageInfo { hasNextPage endCursor }
       }
     }
   }
@@ -105,12 +115,43 @@ if not issue:
 current_labels = issue.get("labels", {}).get("nodes", [])
 team = issue.get("team") or {}
 team_id = team.get("id")
-team_labels = team.get("labels", {}).get("nodes", [])
 
 current_ids = [label["id"] for label in current_labels if label.get("id")]
-label_id = next((label["id"] for label in team_labels if label.get("name") == label_name), None)
+
+
+def find_label_id(labels, name):
+    return next(
+        (label["id"] for label in labels if label.get("name") == name and label.get("id")),
+        None,
+    )
+
+
+def find_team_label_id(name):
+    after = None
+
+    while True:
+        data = graphql(team_label_query, {"issueId": issue_id, "after": after})
+        labels = (
+            ((data.get("issue") or {}).get("team") or {})
+            .get("labels", {})
+        )
+        label_id_found = find_label_id(labels.get("nodes", []), name)
+        if label_id_found:
+            return label_id_found
+
+        page_info = labels.get("pageInfo") or {}
+        if not page_info.get("hasNextPage"):
+            return None
+
+        after = page_info.get("endCursor")
+        if not after:
+            return None
+
+
+current_label_id = find_label_id(current_labels, label_name)
 
 if event == "running":
+    label_id = current_label_id or find_team_label_id(label_name)
     if not label_id:
         if not team_id:
             raise RuntimeError("Linear issue team id missing; cannot create running marker label")
@@ -120,6 +161,7 @@ if event == "running":
 
     updated_ids = list(dict.fromkeys(current_ids + [label_id]))
 else:
+    label_id = current_label_id
     if not label_id:
         sys.exit(0)
 
