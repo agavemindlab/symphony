@@ -27,7 +27,7 @@ action after reading the `## Deployment` artifact.
 - **Merge entry** (issue in `Merging`). Main Flow detected the merge approval,
   wrote the approval reply on `## Implementation`, and set
   `current_phase: Deployment`. Read the `## Implementation` artifact and PR,
-  then run the full path below: cleanup → land → verify → post artifact.
+  then run the full path below: leak check → land → verify → post artifact.
 - **Verification re-entry** (issue in `In Progress`, a concluded `## Deployment`
   artifact already exists with unresolved `⚠️ 待观察` items). The PR has long
   since merged. **Skip cleanup and land entirely** — do not touch the working
@@ -37,22 +37,24 @@ action after reading the `## Deployment` artifact.
   Deployment-in-`In Progress` means: continue verifying what could not be
   confirmed at deploy time.
 
-## Cleanup before merge (merge entry only)
+## Cleanup leak check before merge (merge entry only)
 
-Before landing the PR, remove all files listed in the workpad `cleanup`
-field. At minimum this includes `.symphony/workpad.md`, `.symphony/design.md`
-(Design's agent-facing design doc), and any plan docs generated during
-brainstorming (e.g., `docs/superpowers/specs/`).
+Implementation should already have kept all files listed in the workpad
+`cleanup` field out of the PR branch and persisted them through the
+`Symphony agent state` Linear attachment. Before landing, verify the PR diff is
+still clean. If any cleanup path is present because legacy state or rework
+tracked it accidentally, stop and return to Implementation rework; do not merge
+agent-only files. At minimum the cleanup list includes `.symphony/workpad.md`,
+`.symphony/design.md` (Design's agent-facing design doc), and any plan docs
+generated during brainstorming (e.g., `docs/superpowers/specs/`).
 
 ```sh
-# Example — actual paths come from workpad cleanup field
-git rm .symphony/workpad.md .symphony/design.md
-git rm -r docs/superpowers/specs/
-git commit -m "chore: remove agent scaffolding before merge"
+# Actual paths come from the restored workpad cleanup field
+git diff --name-only upstream/${SYMPHONY_BASE_BRANCH:-main}...HEAD
 ```
 
-Do not remove files that belong in the repository. Only remove files
-explicitly listed in the `cleanup` field.
+Do not remove files that belong in the repository. Only reject paths explicitly
+listed in the `cleanup` field.
 
 ## Land (merge entry only)
 
@@ -69,6 +71,38 @@ table is the running ledger. On a re-entry the still-`⚠️ 待观察` items ar
 main work — but also re-confirm any earlier `✅` you judge was only a
 point-in-time proxy for a criterion whose real intent is sustained or needs
 fresh confirmation; do not mechanically trust a prior pass.
+
+### Authenticated production acceptance accounts
+
+Some projects provide a dedicated acceptance account for production checks that
+need logged-in user state. This is optional and project-scoped. If the current
+project does not expose the metadata below, keep using the normal verification
+path.
+
+Projects opt in by setting non-secret metadata in their workflow environment:
+
+- `SYMPHONY_ACCEPTANCE_USER_EMAIL_ENV`: name of the environment variable that
+  contains the account email.
+- `SYMPHONY_ACCEPTANCE_USER_CODE_ENV`: name of the environment variable that
+  contains the login code, PIN, or equivalent short credential.
+- `SYMPHONY_ACCEPTANCE_USER_PURPOSE`: optional human-readable scope for when
+  the account should be used.
+
+When a post-merge acceptance check requires logged-in user state:
+
+1. Resolve the metadata variable names from the inherited environment, then
+   resolve the actual credential values from those named variables. Use the
+   values only in the browser/API interaction needed for verification.
+2. Do **not** print, quote, screenshot, persist, or copy credential values into
+   Linear comments, PR comments, commit messages, workpad notes, logs, or
+   artifacts. Evidence should state that the configured acceptance account was
+   used, not what its values were.
+3. If metadata is present but one of the named credential variables is missing,
+   mark the affected acceptance item as blocked and report only the missing
+   variable name(s).
+4. If metadata is absent and the acceptance check genuinely requires a logged-in
+   production user, mark that specific check blocked; do not search unrelated
+   files or secret stores.
 
 1. **Verify what is checkable now.** For each unresolved `S<N>`, run its check
    and record evidence: immediate signals at deploy (smoke tests, endpoint
