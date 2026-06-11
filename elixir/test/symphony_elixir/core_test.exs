@@ -706,6 +706,151 @@ defmodule SymphonyElixir.CoreTest do
              AgentRunner.continue_with_issue_for_test(issue, fetcher)
   end
 
+  test "dispatch writes issue running marker hook after claim" do
+    marker =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-running-marker-#{System.unique_integer([:positive])}.log"
+      )
+
+    on_exit(fn -> File.rm(marker) end)
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      hook_issue_running: "printf '%s|%s|%s|%s' \"$SYMPHONY_HOOK_EVENT\" \"$SYMPHONY_HOOK_REASON\" \"$SYMPHONY_ISSUE_IDENTIFIER\" \"${SYMPHONY_WORKER_HOST:-}\" > #{marker}"
+    )
+
+    parent = self()
+
+    start_child = fn _fun ->
+      pid =
+        spawn(fn ->
+          send(parent, :fake_agent_started)
+
+          receive do
+            :stop -> :ok
+          end
+        end)
+
+      {:ok, pid}
+    end
+
+    issue = %Issue{
+      id: "issue-running-hook",
+      identifier: "MT-RUNNING",
+      title: "Running hook",
+      state: "In Progress",
+      url: "https://linear.example/MT-RUNNING"
+    }
+
+    state = %Orchestrator.State{
+      running: %{},
+      claimed: MapSet.new(),
+      blocked: %{},
+      retry_attempts: %{},
+      codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
+      max_concurrent_agents: 10
+    }
+
+    updated_state = Orchestrator.dispatch_issue_for_test(state, issue, start_child)
+
+    assert_receive :fake_agent_started
+    assert Map.has_key?(updated_state.running, "issue-running-hook")
+    assert MapSet.member?(updated_state.claimed, "issue-running-hook")
+    assert File.read!(marker) == "running|dispatch|MT-RUNNING|"
+  end
+
+  test "normal worker exit writes issue stopped marker hook before continuation retry" do
+    marker =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-stopped-marker-#{System.unique_integer([:positive])}.log"
+      )
+
+    on_exit(fn -> File.rm(marker) end)
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      hook_issue_stopped: "printf '%s|%s|%s' \"$SYMPHONY_HOOK_EVENT\" \"$SYMPHONY_HOOK_REASON\" \"$SYMPHONY_ISSUE_IDENTIFIER\" > #{marker}"
+    )
+
+    issue_id = "issue-stopped-hook"
+    ref = make_ref()
+    orchestrator_name = Module.concat(__MODULE__, :IssueStoppedHookOrchestrator)
+    {:ok, pid} = Orchestrator.start_link(name: orchestrator_name)
+
+    on_exit(fn ->
+      if Process.alive?(pid) do
+        Process.exit(pid, :normal)
+      end
+    end)
+
+    initial_state = :sys.get_state(pid)
+
+    running_entry = %{
+      pid: self(),
+      ref: ref,
+      identifier: "MT-STOPPED",
+      issue: %Issue{
+        id: issue_id,
+        identifier: "MT-STOPPED",
+        title: "Stopped hook",
+        state: "In Progress"
+      },
+      started_at: DateTime.utc_now()
+    }
+
+    :sys.replace_state(pid, fn _ ->
+      initial_state
+      |> Map.put(:running, %{issue_id => running_entry})
+      |> Map.put(:claimed, MapSet.new([issue_id]))
+      |> Map.put(:retry_attempts, %{})
+    end)
+
+    send(pid, {:DOWN, ref, :process, self(), :normal})
+    Process.sleep(50)
+
+    assert File.read!(marker) == "stopped|agent_down_normal|MT-STOPPED"
+    refute Map.has_key?(:sys.get_state(pid).running, issue_id)
+  end
+
+  test "orchestrator startup cleanup clears stale markers for active and terminal issues" do
+    marker =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-startup-marker-cleanup-#{System.unique_integer([:positive])}.log"
+      )
+
+    on_exit(fn -> File.rm(marker) end)
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_kind: "memory",
+      tracker_active_states: ["Todo", "In Progress"],
+      tracker_terminal_states: ["Done"],
+      hook_issue_stopped: "printf '%s|%s\\n' \"$SYMPHONY_HOOK_REASON\" \"$SYMPHONY_ISSUE_IDENTIFIER\" >> #{marker}"
+    )
+
+    Application.put_env(:symphony_elixir, :memory_tracker_issues, [
+      %Issue{id: "active-1", identifier: "MT-ACTIVE", title: "Active", state: "In Progress"},
+      %Issue{id: "done-1", identifier: "MT-DONE", title: "Done", state: "Done"},
+      %Issue{id: "other-1", identifier: "MT-OTHER", title: "Other", state: "Backlog"}
+    ])
+
+    orchestrator_name = Module.concat(__MODULE__, :StartupMarkerCleanupOrchestrator)
+    {:ok, pid} = Orchestrator.start_link(name: orchestrator_name)
+
+    on_exit(fn ->
+      if Process.alive?(pid) do
+        Process.exit(pid, :normal)
+      end
+    end)
+
+    Process.sleep(50)
+
+    assert marker |> File.read!() |> String.split("\n", trim: true) |> Enum.sort() == [
+             "startup_recovery|MT-ACTIVE",
+             "startup_recovery|MT-DONE"
+           ]
+  end
+
   test "normal worker exit schedules active-state continuation retry" do
     issue_id = "issue-resume"
     ref = make_ref()

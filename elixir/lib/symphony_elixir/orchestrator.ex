@@ -7,7 +7,7 @@ defmodule SymphonyElixir.Orchestrator do
   require Logger
   import Bitwise, only: [<<<: 2]
 
-  alias SymphonyElixir.{AgentRunner, Config, StatusDashboard, Tracker, Workspace}
+  alias SymphonyElixir.{AgentRunner, Config, IssueRunHook, StatusDashboard, Tracker, Workspace}
   alias SymphonyElixir.Linear.Issue
 
   @continuation_retry_delay_ms 1_000
@@ -66,6 +66,7 @@ defmodule SymphonyElixir.Orchestrator do
     }
 
     run_terminal_workspace_cleanup()
+    run_startup_issue_marker_cleanup()
     state = schedule_tick(state, 0)
 
     {:ok, state}
@@ -130,6 +131,7 @@ defmodule SymphonyElixir.Orchestrator do
         state = record_session_completion_totals(state, running_entry)
         session_id = running_entry_session_id(running_entry)
 
+        run_issue_stopped_hook(running_entry, agent_down_hook_reason(reason))
         state = handle_agent_down(reason, state, issue_id, running_entry, session_id)
 
         Logger.info("Agent task finished for issue_id=#{issue_id} session_id=#{session_id} reason=#{inspect(reason)}")
@@ -399,6 +401,13 @@ defmodule SymphonyElixir.Orchestrator do
     select_worker_host(state, preferred_worker_host)
   end
 
+  @doc false
+  @spec dispatch_issue_for_test(term(), Issue.t(), function()) :: term()
+  def dispatch_issue_for_test(%State{} = state, %Issue{} = issue, start_child_fun)
+      when is_function(start_child_fun, 1) do
+    spawn_issue_on_worker_host(state, issue, nil, self(), nil, start_child_fun)
+  end
+
   defp reconcile_running_issue_states([], state, _active_states, _terminal_states), do: state
 
   defp reconcile_running_issue_states([issue | rest], state, active_states, terminal_states) do
@@ -415,12 +424,12 @@ defmodule SymphonyElixir.Orchestrator do
       terminal_issue_state?(issue.state, terminal_states) ->
         Logger.info("Issue moved to terminal state: #{issue_context(issue)} state=#{issue.state}; stopping active agent")
 
-        terminate_running_issue(state, issue.id, true)
+        terminate_running_issue(state, issue.id, true, "terminal_state")
 
       !issue_routable?(issue) ->
         Logger.info("Issue no longer routed to this worker: #{issue_context(issue)} assignee=#{inspect(issue.assignee_id)}; stopping active agent")
 
-        terminate_running_issue(state, issue.id, false)
+        terminate_running_issue(state, issue.id, false, "not_routable")
 
       active_issue_state?(issue.state, active_states) ->
         refresh_running_issue_state(state, issue)
@@ -428,7 +437,7 @@ defmodule SymphonyElixir.Orchestrator do
       true ->
         Logger.info("Issue moved to non-active state: #{issue_context(issue)} state=#{issue.state}; stopping active agent")
 
-        terminate_running_issue(state, issue.id, false)
+        terminate_running_issue(state, issue.id, false, "non_active_state")
     end
   end
 
@@ -482,7 +491,7 @@ defmodule SymphonyElixir.Orchestrator do
         state_acc
       else
         log_missing_running_issue(state_acc, issue_id)
-        terminate_running_issue(state_acc, issue_id, false)
+        terminate_running_issue(state_acc, issue_id, false, "missing")
       end
     end)
   end
@@ -543,7 +552,7 @@ defmodule SymphonyElixir.Orchestrator do
     end
   end
 
-  defp terminate_running_issue(%State{} = state, issue_id, cleanup_workspace) do
+  defp terminate_running_issue(%State{} = state, issue_id, cleanup_workspace, reason) do
     case Map.get(state.running, issue_id) do
       nil ->
         release_issue_claim(state, issue_id)
@@ -551,6 +560,8 @@ defmodule SymphonyElixir.Orchestrator do
       %{pid: pid, ref: ref, identifier: identifier} = running_entry ->
         state = record_session_completion_totals(state, running_entry)
         worker_host = Map.get(running_entry, :worker_host)
+
+        run_issue_stopped_hook(running_entry, reason)
 
         if cleanup_workspace do
           cleanup_issue_workspace(identifier, worker_host)
@@ -619,7 +630,7 @@ defmodule SymphonyElixir.Orchestrator do
         next_attempt = next_retry_attempt_from_running(running_entry)
 
         state
-        |> terminate_running_issue(issue_id, false)
+        |> terminate_running_issue(issue_id, false, "stalled_restart")
         |> schedule_issue_retry(issue_id, next_attempt, %{
           identifier: identifier,
           issue_url: running_entry.issue.url,
@@ -738,6 +749,7 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   defp stop_and_block_issue(%State{} = state, issue_id, running_entry, error) do
+    run_issue_stopped_hook(running_entry, "input_required_blocked")
     stop_running_task(Map.get(running_entry, :pid), Map.get(running_entry, :ref))
     block_issue_from_entry(state, issue_id, running_entry, error)
   end
@@ -940,7 +952,19 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   defp spawn_issue_on_worker_host(%State{} = state, issue, attempt, recipient, worker_host) do
-    case Task.Supervisor.start_child(SymphonyElixir.TaskSupervisor, fn ->
+    spawn_issue_on_worker_host(state, issue, attempt, recipient, worker_host, &start_agent_task/1)
+  end
+
+  defp spawn_issue_on_worker_host(
+         %State{} = state,
+         issue,
+         attempt,
+         recipient,
+         worker_host,
+         start_child_fun
+       )
+       when is_function(start_child_fun, 1) do
+    case start_child_fun.(fn ->
            AgentRunner.run(issue, recipient, attempt: attempt, worker_host: worker_host)
          end) do
       {:ok, pid} ->
@@ -948,29 +972,33 @@ defmodule SymphonyElixir.Orchestrator do
 
         Logger.info("Dispatching issue to agent: #{issue_context(issue)} pid=#{inspect(pid)} attempt=#{inspect(attempt)} worker_host=#{worker_host || "local"}")
 
+        running_entry = %{
+          pid: pid,
+          ref: ref,
+          identifier: issue.identifier,
+          issue: issue,
+          worker_host: worker_host,
+          workspace_path: nil,
+          session_id: nil,
+          last_codex_message: nil,
+          last_codex_timestamp: nil,
+          last_codex_event: nil,
+          codex_app_server_pid: nil,
+          codex_input_tokens: 0,
+          codex_output_tokens: 0,
+          codex_total_tokens: 0,
+          codex_last_reported_input_tokens: 0,
+          codex_last_reported_output_tokens: 0,
+          codex_last_reported_total_tokens: 0,
+          turn_count: 0,
+          retry_attempt: normalize_retry_attempt(attempt),
+          started_at: DateTime.utc_now()
+        }
+
+        IssueRunHook.run(:running, issue, worker_host: worker_host, reason: "dispatch")
+
         running =
-          Map.put(state.running, issue.id, %{
-            pid: pid,
-            ref: ref,
-            identifier: issue.identifier,
-            issue: issue,
-            worker_host: worker_host,
-            workspace_path: nil,
-            session_id: nil,
-            last_codex_message: nil,
-            last_codex_timestamp: nil,
-            last_codex_event: nil,
-            codex_app_server_pid: nil,
-            codex_input_tokens: 0,
-            codex_output_tokens: 0,
-            codex_total_tokens: 0,
-            codex_last_reported_input_tokens: 0,
-            codex_last_reported_output_tokens: 0,
-            codex_last_reported_total_tokens: 0,
-            turn_count: 0,
-            retry_attempt: normalize_retry_attempt(attempt),
-            started_at: DateTime.utc_now()
-          })
+          Map.put(state.running, issue.id, running_entry)
 
         %{
           state
@@ -991,6 +1019,50 @@ defmodule SymphonyElixir.Orchestrator do
         })
     end
   end
+
+  defp start_agent_task(fun) when is_function(fun, 0) do
+    Task.Supervisor.start_child(SymphonyElixir.TaskSupervisor, fun)
+  end
+
+  defp run_issue_stopped_hook(%{issue: %Issue{} = issue} = running_entry, reason) do
+    IssueRunHook.run(:stopped, issue,
+      worker_host: Map.get(running_entry, :worker_host),
+      reason: reason
+    )
+  end
+
+  defp run_issue_stopped_hook(_running_entry, _reason), do: :ok
+
+  defp agent_down_hook_reason(:normal), do: "agent_down_normal"
+  defp agent_down_hook_reason(_reason), do: "agent_down_abnormal"
+
+  defp run_startup_issue_marker_cleanup do
+    if IssueRunHook.configured?(:stopped) do
+      do_run_startup_issue_marker_cleanup(startup_marker_cleanup_states())
+    end
+  end
+
+  defp startup_marker_cleanup_states do
+    Config.settings!().tracker.active_states
+    |> Enum.concat(Config.settings!().tracker.terminal_states)
+    |> Enum.uniq()
+  end
+
+  defp do_run_startup_issue_marker_cleanup(states) do
+    case Tracker.fetch_issues_by_states(states) do
+      {:ok, issues} ->
+        Enum.each(issues, &cleanup_startup_issue_marker/1)
+
+      {:error, reason} ->
+        Logger.warning("Skipping startup issue marker cleanup; failed to fetch issues: #{inspect(reason)}")
+    end
+  end
+
+  defp cleanup_startup_issue_marker(%Issue{} = issue) do
+    IssueRunHook.run(:stopped, issue, reason: "startup_recovery")
+  end
+
+  defp cleanup_startup_issue_marker(_issue), do: :ok
 
   defp revalidate_issue_for_dispatch(%Issue{id: issue_id}, issue_fetcher, terminal_states)
        when is_binary(issue_id) and is_function(issue_fetcher, 1) do
