@@ -72,6 +72,8 @@ codex:
   turn_sandbox_policy:
     type: workspaceWrite
     networkAccess: true
+    writableRoots:
+      - /var/run/docker.sock
 ---
 
 You are working on a Linear ticket `{{ issue.identifier }}`.
