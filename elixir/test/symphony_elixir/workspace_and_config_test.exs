@@ -1083,11 +1083,11 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
 
       assert {:ok, workspace} = Workspace.create_for_issue("MT-SKILL-INSTALL")
 
-      assert File.exists?(Path.join([workspace, ".agents", "skills", "commit", "SKILL.md"]))
+      assert File.exists?(Path.join([workspace, ".agents", "skills", "symphony-commit", "SKILL.md"]))
       assert File.read!(Path.join([workspace, ".agents", "skills", "linear", "SKILL.md"])) == "repo version\n"
 
       exclude = File.read!(Path.join([workspace, ".git", "info", "exclude"]))
-      assert exclude =~ ".agents/skills/commit/"
+      assert exclude =~ ".agents/skills/symphony-commit/"
       refute exclude =~ ".agents/skills/linear/"
 
       assert {"", 0} = System.cmd("git", ["-C", workspace, "status", "--short"])

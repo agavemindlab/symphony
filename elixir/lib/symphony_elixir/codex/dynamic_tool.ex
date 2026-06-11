@@ -6,8 +6,12 @@ defmodule SymphonyElixir.Codex.DynamicTool do
   alias SymphonyElixir.Linear.Client
 
   @linear_graphql_tool "linear_graphql"
+  @session_context_tool "symphony_session_context"
   @linear_graphql_description """
   Execute a raw GraphQL query or mutation against Linear using Symphony's configured auth.
+  """
+  @session_context_description """
+  Return the current Symphony Codex session metadata for audit footers.
   """
   @linear_graphql_input_schema %{
     "type" => "object",
@@ -25,12 +29,20 @@ defmodule SymphonyElixir.Codex.DynamicTool do
       }
     }
   }
+  @session_context_input_schema %{
+    "type" => "object",
+    "additionalProperties" => false,
+    "properties" => %{}
+  }
 
   @spec execute(String.t() | nil, term(), keyword()) :: map()
   def execute(tool, arguments, opts \\ []) do
     case tool do
       @linear_graphql_tool ->
         execute_linear_graphql(arguments, opts)
+
+      @session_context_tool ->
+        execute_session_context(opts)
 
       other ->
         failure_response(%{
@@ -49,8 +61,24 @@ defmodule SymphonyElixir.Codex.DynamicTool do
         "name" => @linear_graphql_tool,
         "description" => @linear_graphql_description,
         "inputSchema" => @linear_graphql_input_schema
+      },
+      %{
+        "name" => @session_context_tool,
+        "description" => @session_context_description,
+        "inputSchema" => @session_context_input_schema
       }
     ]
+  end
+
+  defp execute_session_context(opts) do
+    dynamic_tool_response(
+      true,
+      encode_payload(%{
+        "session_id" => metadata_value(Keyword.get(opts, :session_id)),
+        "thread_id" => metadata_value(Keyword.get(opts, :thread_id)),
+        "turn_id" => metadata_value(Keyword.get(opts, :turn_id))
+      })
+    )
   end
 
   defp execute_linear_graphql(arguments, opts) do
@@ -143,6 +171,15 @@ defmodule SymphonyElixir.Codex.DynamicTool do
   end
 
   defp encode_payload(payload), do: inspect(payload)
+
+  defp metadata_value(value) when is_binary(value) do
+    case String.trim(value) do
+      "" -> "n/a"
+      trimmed -> trimmed
+    end
+  end
+
+  defp metadata_value(_value), do: "n/a"
 
   defp tool_error_payload(:missing_query) do
     %{

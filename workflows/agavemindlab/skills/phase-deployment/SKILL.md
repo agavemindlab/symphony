@@ -120,6 +120,7 @@ issue's `creator`, and leave it for the human to route to `Rework`.
 > - 若验收已全部完成：直接将 issue 置为 `Done`；如有问题置为 `Rework`。
 
 >>> 🛠️ 本次激活的 skills
+- Codex session id: `<session_id | n/a>`
 - `<skill>` — <≤6-word purpose>
 >>>
 ```

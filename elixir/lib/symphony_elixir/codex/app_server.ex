@@ -83,14 +83,11 @@ defmodule SymphonyElixir.Codex.AppServer do
       ) do
     on_message = Keyword.get(opts, :on_message, &default_on_message/1)
 
-    tool_executor =
-      Keyword.get(opts, :tool_executor, fn tool, arguments ->
-        DynamicTool.execute(tool, arguments)
-      end)
-
     case start_turn(port, thread_id, prompt, issue, workspace, approval_policy, turn_sandbox_policy) do
       {:ok, turn_id} ->
         session_id = "#{thread_id}-#{turn_id}"
+        tool_executor = tool_executor_for_turn(opts, session_id, thread_id, turn_id)
+
         Logger.info("Codex session started for #{issue_context(issue)} session_id=#{session_id}")
 
         emit_message(
@@ -137,6 +134,19 @@ defmodule SymphonyElixir.Codex.AppServer do
         emit_message(on_message, :startup_failed, %{reason: reason}, metadata)
         {:error, reason}
     end
+  end
+
+  defp tool_executor_for_turn(opts, session_id, thread_id, turn_id) do
+    Keyword.get(opts, :tool_executor) ||
+      fn tool, arguments ->
+        DynamicTool.execute(
+          tool,
+          arguments,
+          session_id: session_id,
+          thread_id: thread_id,
+          turn_id: turn_id
+        )
+      end
   end
 
   @spec stop_session(session()) :: :ok
