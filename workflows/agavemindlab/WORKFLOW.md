@@ -159,7 +159,7 @@ The workflow progresses through four sequential phases. Each phase has a dedicat
 | Implementation | `phase-implementation` | Design approved |
 | Deployment | `phase-deployment` | Human approves merge (`Merging` state) |
 
-When the agent finishes **Requirements** or **Design** on a fresh run and is confident a human would very likely approve the artifact as-is, it **auto-advances** to the next phase in the same session instead of stopping for review; if the artifact is complete but the agent is not confident, it stops for human review. See Main Flow step 6. **Implementation** always stops at `Human Review` (the PR is up), and **Deployment** is reachable only via `Merging`.
+When the agent finishes **Requirements** or **Design** on a fresh run and is confident a human would very likely approve the artifact as-is, it **auto-advances** by closing the artifact, saving the next phase, leaving the issue `In Progress`, and ending this agent run; the next Symphony dispatch continues from that saved phase. If the artifact is complete but the agent is not confident, it stops for human review. See Main Flow step 6. **Implementation** always stops at `Human Review` (the PR is up), and **Deployment** is reachable only via `Merging`.
 
 Most issues ship code through all four phases. A `Type:Spike` (investigation / research) issue is the exception: its deliverable is a documented decision, so it rides the same phases (Design becomes an investigation plan, Implementation produces a findings artifact) but normally terminates at `Human Review` after Implementation — the human moves it to `Done` without `Merging` / Deployment. See the phase skills' `Type:Spike` notes. A sub-issue inherits its parent's scope and acceptance criteria rather than re-deriving them (see `phase-requirements`).
 
@@ -214,12 +214,12 @@ Symphony only starts the agent when the issue is in an active state (`Todo`, `In
 
 6. Set the workpad `current_phase` to the target phase and open the matching phase skill (per the Phase Map). The skill does its phase work, posts or updates its own artifact, and on a **clean** exit hands back one of two outcomes — the skill alone decides which (see its "Exit"); only the Requirements and Design skills ever choose `advance`:
 
-   - **`advance`** → write the `⏩ 自动进入 [Next Phase]` reply on the just-posted artifact, set the workpad `current_phase` to the next phase, and loop back to the start of step 6 with that as the target.
+   - **`advance`** → write the `⏩ 自动进入 [Next Phase]` reply on the just-posted artifact, set the workpad `current_phase` to the next phase, keep the issue in `In Progress`, persist the agent state, and stop this agent run. Do **not** open the next phase skill in this session; the next Symphony dispatch targets the saved phase.
    - **`stop`** → move the issue to `Human Review` and stop.
 
    (A skill that stops **blocked** — unresolved `[NEEDS CLARIFICATION]` / escalated high-impact decision — moves the issue to `Human Review` itself; the session ends there.)
 
-   This is the only auto-advance mechanism, and Main Flow does not second-guess the skill's choice. A single confident session may chain Requirements → Design → Implementation, but the Implementation skill always returns `stop` (the PR awaits the human's merge decision), so the chain always ends at `Human Review`; Deployment is reached only via `Merging` (step 3).
+   This is the only auto-advance mechanism, and Main Flow does not second-guess the skill's choice. A confident issue may progress Requirements → Design → Implementation across successive active dispatches, but the Implementation skill always returns `stop` (the PR awaits the human's merge decision), so the chain still ends at `Human Review`; Deployment is reached only via `Merging` (step 3).
 
 ## Skill Interaction Protocol
 
@@ -251,7 +251,7 @@ For Implementation, this footer mirrors the workpad `notes` record of invoked / 
 A phase artifact is **closed** (no longer awaiting review) once its thread carries a Main-Flow-written closing reply. Two kinds exist:
 
 - `✅ 已批准，进入 [Next Phase]（[timestamp]）` — **human approval**. Main Flow writes it (step 5, or the `Merging` branch of step 3) when a human accepted the phase.
-- `⏩ 自动进入 [Next Phase]（agent 自评通过，未经人工评审，[timestamp]）` — **agent auto-advance**. Main Flow writes it when it advances a fresh, clean Requirements/Design phase without stopping (step 6).
+- `⏩ 自动进入 [Next Phase]（agent 自评通过，未经人工评审，[timestamp]）` — **agent auto-advance**. Main Flow writes it when it advances a fresh, clean Requirements/Design phase before stopping the current run (step 6).
 
 Both are equivalent for routing: an artifact with **no** closing reply is the one still awaiting human review. The distinction is for humans — a `⏩` artifact was never human-gated, so the human is free to comment on it and set `Rework` to pull the chain back via cross-phase rework.
 
