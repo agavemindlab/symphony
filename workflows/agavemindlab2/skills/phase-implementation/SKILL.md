@@ -95,10 +95,13 @@ Markdown sections:
 4. **Commit** — invoke `symphony-commit` skill for each logical change.
 5. **Push** — invoke `symphony-pr` skill to publish to `origin` and request code
    review.
-6. **Local runtime acceptance** — for app-behavior changes, exercise the
-   feature against the running service per `AGENTS.md`. If local
-   acceptance is impossible, record the reason and closest safe
-   alternative proof; surface the caveat in the artifact `风险/注意`.
+6. **Local runtime acceptance** — execute the `## Design` 验收方案's **pre-PR
+   本地验收** for each `S<N>`: exercise the feature against the running service
+   per `AGENTS.md` and produce the evidence form the design named — a 截屏 for a
+   single state, a 录屏 / GIF for an interactive flow — recorded readably (a
+   verdict line + the artifact, raw output folded in `>>>`). If local acceptance
+   is impossible, record the reason and closest safe alternative proof; surface
+   the caveat in the artifact `风险/注意`.
 7. **Verify** — invoke `verification-before-completion`.
 8. **PR feedback sweep** — see protocol below.
 9. **Post artifact** — write the `## Implementation` artifact and move to

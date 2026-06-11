@@ -40,6 +40,42 @@ cannot fit the parent's design.
 
 ## Discovery / design review
 
+Form the approach, ground it in evidence, then adversarially review it. Each
+step below uses a skill that is **natively interactive**, but this workflow is
+unattended: never let one interview the human turn by turn. Run each in the
+batched mode used throughout this phase — simulate it, walk its decision tree
+along your **own recommended answers** to its natural stop, record the analysis
+in the workpad, and route only what genuinely needs a human into the **Batched
+clarification** block below (one batch, each with your recommended resolution).
+
+### Form the approach — `brainstorming`
+
+When the design has a **real approach fork** (≥2 viable architectures / data
+models / sequencing strategies), invoke the `brainstorming` skill (superpowers)
+to generate and compare 2–3 candidates and land on one with explicit tradeoffs.
+Run it unattended: do **not** stop at its approval HARD-GATE, and do **not**
+follow its terminal hand-off (writing a `docs/.../specs/` doc or invoking
+`writing-plans` — implementation breakdown belongs to the Implementation
+phase). Its output here is the chosen direction + named alternatives +
+rationale, captured in the workpad and the `## Design` artifact. Skip it when
+there is a single obvious approach (mechanical `Chore`, one-line fix, scoped
+`Refactor`).
+
+### Ground the approach in evidence (gated on type / uncertainty)
+
+- **`Type:Bug` with no established root cause** → invoke the
+  `systematic-debugging` skill (superpowers) to reach the actual mechanism
+  before designing the fix. The approach's causal-link claim and 治标 vs 治本
+  call must rest on that finding, not a guess.
+- **Approach hinges on an unfamiliar library / external API / non-obvious
+  pattern** → invoke the `best-practice-research` skill (gstack) to pull
+  official / upstream evidence before committing, so "this is the standard
+  approach" is grounded rather than assumed.
+
+Skip both when neither condition holds.
+
+### Adversarial review — `plan-eng-review`
+
 Decide whether to **invoke the `plan-eng-review` skill** to adversarially
 review the chosen approach across architecture / code quality / tests /
 performance. plan-eng-review earns its place only when the approach carries
@@ -59,11 +95,6 @@ review is far cheaper than building on a flawed design).
 
 Judge the actual design surface, not the type label — a "small" change that
 touches a trust boundary or shared schema still warrants the review.
-
-This workflow is unattended, so resolve what you can unilaterally (the
-safe-default tradeoffs) and route every finding that genuinely needs a human
-decision into the **Batched clarification** block below — one batch, each with
-your recommended resolution.
 
 ## Diagram requirement
 
@@ -94,6 +125,49 @@ Required content:
   `blocking`/`sub-issue` when it changes this issue's plan); cite the
   resulting issue identifier (e.g. `ENG-123`, bare so Linear renders the
   chip) or the proposal in 未覆盖范围.
+
+## 验收方案设计（pre-PR 本地验收 + post-merge 最终验收）
+
+A design is not done until it says **how each acceptance `S<N>` will be proven**
+— and it is proven **twice**: once locally before the PR, once in production
+after merge. Design only *specifies* the plan and the evidence form; the
+Implementation and Deployment phases *execute* it and attach the actual
+evidence. Plan both gates for every `S<N>`, keyed to its Requirements
+verifiability class (`当场可验` / `延迟验收` / `需人工判定`):
+
+- **Pre-PR 本地验收** — how the change is exercised on the running service /
+  locally before the PR, and the evidence form it will produce. This is the
+  reviewer's proof the change works *before* merge. Executed at Implementation
+  (its `Local runtime acceptance` step), evidence lands on `## Implementation`.
+- **Post-Merge 最终验收** — how the criterion is confirmed in production *after*
+  merge, and its evidence form. Executed at Deployment, evidence lands on
+  `## Deployment`. By verifiability class: `当场可验` → an immediate
+  post-deploy signal; `延迟验收` → the runnable spec (query + pass/fail
+  predicate + observation window) Deployment re-runs once the window closes —
+  here name the **method and signal**, the exact query is filled in at
+  Implementation's `Merge 后验证`; `需人工判定` → name who/what produces the
+  human判定 and how it is recorded.
+
+**Evidence must be readable, not a raw dump.** Each piece is a one-line verdict
++ the concrete artifact backing it. Pick the artifact form by what the criterion
+actually is:
+
+- **交互 / UI 行为** → a **截屏** for a single end state, a **录屏 / GIF** for a
+  multi-step flow. A user-facing or interactive change with no visual capture is
+  **not** acceptably verified — name in the plan exactly which screen / flow
+  gets captured and with what tool (per `AGENTS.md`; if the project ships no
+  capture tooling, flag that as a `风险/注意`).
+- **API / 后端行为** → a request/response snippet, or a log / error-tracker
+  query with its matched (or zero) lines.
+- **数据 / 迁移** → a read-only query result, before/after row counts.
+- **性能** → before/after numbers with the rerunnable measurement command.
+
+Keep raw logs and long output folded in a `>>>` collapsible with the verdict on
+the top line, so a reviewer reads the conclusion first and expands only on
+doubt. Scale to the change: a config `Chore` may need only a one-line smoke
+note; a user-facing feature needs a captured flow for its critical path. Skip a
+gate only when it genuinely does not apply (a pure `Spike` ships findings, not
+behavior) and say why.
 
 ## Type-specific writing emphasis
 
@@ -159,6 +233,11 @@ batched question with your recommended direction.
 <diagram>
 ```
 
+### 验收方案（每个 S<N> 两道关；指定证据形式，交互须截屏/录屏）
+| 验收项 | Pre-PR 本地验收（方法 → 证据形式） | Post-Merge 最终验收（方法 → 证据形式） |
+|--------|------|------|
+| S1: <criterion> | <如何本地验 → 截屏 / 录屏 / 命令输出 / 日志片段> | <如何线上验 → 即时信号 / 查询+判据+窗口 / 人工判定> |
+
 ### 风险/注意（risks; omit if none）
 - <one sentence per item>
 
@@ -176,11 +255,12 @@ are resolved in **one batch** with a recommended answer per question, so the
 human can approve the whole set with a single reply or push back only on the
 items they disagree with.
 
-**What becomes a question — and what doesn't.** plan-eng-review is natively
-interactive; the batch is how you run it unattended. Simulate its review:
-answer each design question it would raise with your **own recommended
-answer**, walk on down the decision tree, and keep going until it reaches its
-natural stopping point. Collect every uncertainty you hit along that full path
+**What becomes a question — and what doesn't.** The Discovery skills
+(`brainstorming`, `plan-eng-review`) are natively interactive; the batch is how
+you run them unattended. Simulate each review: answer every design question it
+would raise with your **own recommended answer**, walk on down the decision
+tree, and keep going until it reaches its natural stopping point. Collect every
+uncertainty you hit along that full path
 — do not stop early to keep the list short; a batch is cheapest when it is
 complete, because the human answers it in one pass. Then sort each one:
 
@@ -286,6 +366,9 @@ about form, not correctness:
 
 - `方案（approach）` is complete (no placeholder text).
 - Diagram included for non-trivial designs.
+- `验收方案` covers every `S<N>` with both gates (pre-PR 本地 + post-merge 最终)
+  and names each evidence form — visual capture for any interactive `S<N>` — or
+  states why a gate does not apply.
 - Type-specific approach emphasis satisfied for `Primary:`.
 - No unresolved `[NEEDS CLARIFICATION]` markers.
 

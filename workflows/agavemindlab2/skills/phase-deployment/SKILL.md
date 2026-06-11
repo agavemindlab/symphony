@@ -60,11 +60,14 @@ Open and follow `.agents/skills/symphony-land/SKILL.md` to merge the PR.
 ## Verification
 
 Drive every acceptance `S<N>` from `## Requirements` to a resolved status
-(`✅ 通过` / `❌ 失败` / `➖ N/A`); the `验收对照` table is the running ledger.
-On a re-entry the still-`⚠️ 待观察` items are the main work — but also re-confirm
-any earlier `✅` you judge was only a point-in-time proxy for a criterion whose
-real intent is sustained or needs fresh confirmation; do not mechanically trust
-a prior pass.
+(`✅ 通过` / `❌ 失败` / `➖ N/A`) by executing the `## Design` 验收方案's
+**post-merge 最终验收** for each, recording the evidence form the design named —
+a 截屏 / 录屏 for an interactive `S<N>`, the query+matched-lines for a log
+signal — readably (verdict line + artifact, raw output folded). The `验收对照`
+table is the running ledger. On a re-entry the still-`⚠️ 待观察` items are the
+main work — but also re-confirm any earlier `✅` you judge was only a
+point-in-time proxy for a criterion whose real intent is sustained or needs
+fresh confirmation; do not mechanically trust a prior pass.
 
 1. **Verify what is checkable now.** For each unresolved `S<N>`, run its check
    and record evidence: immediate signals at deploy (smoke tests, endpoint
