@@ -12,13 +12,22 @@ description:
 
 ## Goal
 
-Post (or update) the `## Design` artifact on the Linear issue with:
+Produce **two paired outputs** — they serve different readers (see
+`## 设计文档（.symphony/design.md）` below):
 
-- Chosen approach direction and rationale
-- Key trade-offs and alternatives considered
-- Diagram (for non-trivial designs — see Diagram requirement below)
-- Intentionally uncovered scope with follow-up issue IDs
-- Any newly-discovered risks
+1. **`.symphony/design.md`** — the detailed, English, **agent-facing** design
+   doc that Implementation builds from (approach, alternatives, architecture,
+   edge cases, failure modes, type-specific substance). Dev-cycle only — listed
+   in workpad `cleanup`, removed at merge.
+2. The **`## Design` Linear artifact** — the **human-facing** Chinese review
+   surface that summarizes the doc and gates approval, carrying:
+   - Chosen approach direction and rationale
+   - Key trade-offs and alternatives considered
+   - Diagram (for non-trivial designs — see Diagram requirement below)
+   - Verification plan (`验收方案`)
+   - Intentionally uncovered scope with follow-up issue IDs
+   - Any newly-discovered risks
+   - A pointer to `.symphony/design.md`
 
 ## At phase start
 
@@ -45,8 +54,9 @@ step below uses a skill that is **natively interactive**, but this workflow is
 unattended: never let one interview the human turn by turn. Run each in the
 batched mode used throughout this phase — simulate it, walk its decision tree
 along your **own recommended answers** to its natural stop, record the analysis
-in the workpad, and route only what genuinely needs a human into the **Batched
-clarification** block below (one batch, each with your recommended resolution).
+in `.symphony/design.md` (see `## 设计文档`), and route only what genuinely needs
+a human into the **Batched clarification** block below (one batch, each with
+your recommended resolution).
 
 ### Form the approach — `brainstorming`
 
@@ -54,12 +64,12 @@ When the design has a **real approach fork** (≥2 viable architectures / data
 models / sequencing strategies), invoke the `brainstorming` skill (superpowers)
 to generate and compare 2–3 candidates and land on one with explicit tradeoffs.
 Run it unattended: do **not** stop at its approval HARD-GATE, and do **not**
-follow its terminal hand-off (writing a `docs/.../specs/` doc or invoking
-`writing-plans` — implementation breakdown belongs to the Implementation
-phase). Its output here is the chosen direction + named alternatives +
-rationale, captured in the workpad and the `## Design` artifact. Skip it when
-there is a single obvious approach (mechanical `Chore`, one-line fix, scoped
-`Refactor`).
+invoke `writing-plans` from its hand-off (implementation breakdown belongs to
+the Implementation phase). Point its design output at `.symphony/design.md`
+(override its default `docs/.../specs/` path — see `## 设计文档` below); the
+chosen direction + named alternatives + rationale land there, summarized into
+the `## Design` artifact. Skip it when there is a single obvious approach
+(mechanical `Chore`, one-line fix, scoped `Refactor`).
 
 ### Ground the approach in evidence (gated on type / uncertainty)
 
@@ -217,6 +227,40 @@ material-but-not-high-impact approach fork (a real architectural choice a
 reviewer might decide differently, no safe default) becomes an ordinary
 batched question with your recommended direction.
 
+## 设计文档（`.symphony/design.md`）
+
+Design emits **two paired records with different readers**, kept in sync:
+
+- **`.symphony/design.md`** — for the **agent**. The detailed, English design
+  spec that Implementation builds from. It holds the full depth the human
+  summary does not repeat: the chosen approach and rationale, the alternatives
+  considered **and why each was rejected**, the architecture / diagram, the
+  type-specific substance (the edge-case matrix / call-site survey / migration
+  plan / bug causal-chain from `Type-specific writing emphasis`), failure
+  modes, and the verification approach behind `验收方案`. Write the analysis
+  from Discovery here as you go — this is the home for it, not the workpad.
+  Scale its depth to the change (a few lines for a trivial one). When
+  `brainstorming` runs, point its design output at this file (overriding its
+  default `docs/.../specs/` path); never invoke `writing-plans` (implementation
+  breakdown is the Implementation phase's job).
+- **`## Design` Linear artifact** — for the **human**. The Chinese review
+  surface: a faithful summary of the doc + the diagram + `验收方案` + risks +
+  `待确认`, ending with a **clickable GitHub link** to the doc on the feature
+  branch — `https://github.com/<owner>/<repo>/blob/<branch>/.symphony/design.md`,
+  with `<owner>/<repo>` from the `origin` remote and `<branch>` the issue's
+  `branchName`. Use a plain markdown link: Linear's rich GitHub embedding is for
+  PR / issue links, not file blobs. The link is branch-scoped and resolves only
+  during the dev cycle (the doc is removed at merge), which is expected.
+  Approving this artifact approves the design it represents.
+
+Lifecycle: `.symphony/design.md` lives on the feature branch, is listed in the
+workpad `cleanup` field, and is **removed at merge** — it is a dev-cycle spec,
+not durable repo documentation. **Commit and push it to `origin` before posting
+the artifact**, so the GitHub link resolves when the human opens it. Keep the
+two in sync; the human only reviewed the artifact, so on any conflict the
+**approved artifact and its thread govern** and the doc is reconciled toward
+them.
+
 ## Artifact template
 
 ```md
@@ -242,6 +286,8 @@ batched question with your recommended direction.
 - <one sentence per item>
 
 ### 待确认（omit if none; the batched [NEEDS CLARIFICATION] block — see Batched clarification）
+
+> 📄 详细设计（agent 实现依据，分支内文档，merge 前清理）：[`.symphony/design.md`](https://github.com/<owner>/<repo>/blob/<branch>/.symphony/design.md)
 
 >>> 🛠️ 本次激活的 skills
 - `<skill>` — <≤6-word purpose>
@@ -364,6 +410,8 @@ update workpad `current_phase: Requirements`, and open `phase-requirements`.
 The artifact is complete enough to post when all of these hold — this is
 about form, not correctness:
 
+- `.symphony/design.md` written (scaled to the change) and listed in workpad
+  `cleanup`; the `## Design` artifact faithfully summarizes it and links it.
 - `方案（approach）` is complete (no placeholder text).
 - Diagram included for non-trivial designs.
 - `验收方案` covers every `S<N>` with both gates (pre-PR 本地 + post-merge 最终)

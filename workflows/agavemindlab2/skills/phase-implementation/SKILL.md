@@ -19,8 +19,25 @@ artifact.
 
 Main Flow has already closed `## Design` (a `✅` human approval or a `⏩`
 agent auto-advance reply) and set `current_phase: Implementation` before
-opening this skill. Read `## Requirements` (for `S<N>` IDs) and `## Design`
-(for approach) to anchor the implementation plan.
+opening this skill. Build from three sources — not the Linear summary alone:
+
+- **`.symphony/design.md`** — the detailed, agent-facing design doc Design
+  wrote for you to implement from. This is your primary spec: the full approach,
+  the alternatives and why each was rejected, the architecture, the edge-case
+  matrix / call-site survey / failure modes, and the verification approach. A
+  fresh session has no other memory of Design's reasoning, so read this doc;
+  do not work off the one-line Linear summary.
+- The **approved Linear `## Requirements` and `## Design`** — what the human
+  actually signed off on: `S<N>` IDs, the `验收方案`, the approved approach, and
+  risks. These are **authoritative on scope and commitments**.
+- The **workpad** (`.symphony/workpad.md`) — execution continuation: the plan
+  checklist, spawned/proposed issues that bound scope, and progress notes.
+
+Keep the design doc and the approved artifact consistent; the human reviewed
+only the artifact, so on any conflict the **approved artifact and its thread
+govern** and the doc is reconciled toward them. If the design doc itself reveals
+the approved design is actually wrong, that is a **cross-phase rework** (see
+below), never a silent deviation.
 
 Implementation never auto-advances: it always ends at `Human Review` with
 the PR up, and Deployment is reachable only via the `Merging` state.
@@ -52,6 +69,10 @@ same-phase Rework cycle in your workflow instructions when re-posting the artifa
   delegate independent plan items to subagents.
 - `test-driven-development` (superpowers) — write failing tests first for any
   new behavior.
+- `systematic-debugging` (superpowers) — when a test fails or behavior
+  surprises you **while coding**, root-cause it before patching. This is for
+  surprises that arise during implementation — not for re-investigating a
+  `Type:Bug` root cause already established in `## Design`.
 - `symphony-commit` (.agents/skills) — clean, logical commits.
 - `symphony-pr` (.agents/skills) — push to `origin`, publish PR, request code
   review per the project's reviewer configuration.
@@ -66,6 +87,24 @@ same-phase Rework cycle in your workflow instructions when re-posting the artifa
 If a skill genuinely does not apply (e.g. no new behavior to test-drive),
 record `Skipped <skill>: <reason>` in workpad `notes`.
 
+### Type-conditional skills (gate on `Primary:`; they produce the 验收方案 evidence)
+
+Invoke when the issue's type calls for it, to produce the acceptance evidence
+the `## Design` 验收方案 named (recorded into `验收对照`); skip and record
+`Skipped <skill>: <reason>` otherwise. These run autonomously — they do not
+interview a human; any decision only a human can make follows the workflow's
+`[NEEDS CLARIFICATION]` handling.
+
+- **Feature / UI behavior** → `qa` (gstack — QA the running web app and fix what
+  it finds) or `qa-only` (report-only) — exercise the critical-path flow and
+  capture the **截屏 / 录屏** the pre-PR 本地验收 requires.
+- **UI / visual change** → `design-review` (gstack) — designer's-eye pass on
+  spacing / hierarchy / visual consistency, with before/after capture.
+- **`Type:Refactor`** → `refactor` (gstack) — surgical, behavior-preserving
+  edits plus the call-site survey the design committed to.
+- **`Type:Performance`** → `benchmark` (gstack) or `performance-goal` — produce
+  the before/after numbers the 验收方案 demands, with a rerunnable command.
+
 ## Workpad (`.symphony/workpad.md`)
 
 The workpad is the agent's execution record and continuation state. Keep
@@ -75,7 +114,8 @@ markdown sections).
 Frontmatter fields:
 - `current_phase`: must be `Implementation`.
 - `cleanup`: list all files that must not be merged into main (at minimum
-  `.symphony/workpad.md` and any plan docs from brainstorming).
+  `.symphony/workpad.md`, `.symphony/design.md`, and any plan docs from
+  brainstorming).
 
 Markdown sections:
 - `## Plan`: hierarchical checklist mirroring the implementation plan.

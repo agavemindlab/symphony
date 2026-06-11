@@ -304,6 +304,7 @@ Agent execution state lives in `.symphony/workpad.md` on the feature branch, com
 current_phase: Requirements   # Requirements | Design | Implementation | Deployment
 cleanup:
   - .symphony/workpad.md
+  - .symphony/design.md   # Design's agent-facing design doc; dev-cycle only
 ---
 
 ## Plan
@@ -328,7 +329,7 @@ cleanup:
 
 ### Persistence
 
-Commit and push the workpad so origin always holds the latest agent state — this is what lets a recreated workspace recover via `git pull`. Whenever the workpad changes materially, and always before returning the issue to `Human Review`, run `git add .symphony/workpad.md && git commit && git push origin <branch>`.
+Commit and push the agent state — the workpad and, once Design has written it, `.symphony/design.md` — so origin always holds the latest and a recreated workspace recovers via `git pull`. Whenever that state changes materially, and always before returning the issue to `Human Review`, run `git add .symphony/ && git commit && git push origin <branch>`.
 
 ## Guardrails
 

@@ -40,12 +40,13 @@ action after reading the `## Deployment` artifact.
 ## Cleanup before merge (merge entry only)
 
 Before landing the PR, remove all files listed in the workpad `cleanup`
-field. At minimum this includes `.symphony/workpad.md` and any plan docs
-generated during brainstorming (e.g., `docs/superpowers/specs/`).
+field. At minimum this includes `.symphony/workpad.md`, `.symphony/design.md`
+(Design's agent-facing design doc), and any plan docs generated during
+brainstorming (e.g., `docs/superpowers/specs/`).
 
 ```sh
 # Example — actual paths come from workpad cleanup field
-git rm .symphony/workpad.md
+git rm .symphony/workpad.md .symphony/design.md
 git rm -r docs/superpowers/specs/
 git commit -m "chore: remove agent scaffolding before merge"
 ```
