@@ -1,1 +1,1 @@
-../agavemindlab2/WORKFLOW.md
+../agavemindlab/WORKFLOW.md

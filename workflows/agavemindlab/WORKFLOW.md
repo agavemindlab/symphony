@@ -2,7 +2,7 @@
 tracker:
   kind: linear
   project_slug: $SYMPHONY_PROJECT_SLUG
-  assignee: me
+  required_labels: ["symphony"]
   active_states:
     - Todo
     - In Progress
@@ -68,9 +68,12 @@ agent:
 codex:
   command: codex --config shell_environment_policy.inherit=all --config 'model="gpt-5.5"' --config model_reasoning_effort=xhigh app-server
   approval_policy: never
-  thread_sandbox: danger-full-access
+  thread_sandbox: workspace-write
   turn_sandbox_policy:
-    type: dangerFullAccess
+    type: workspaceWrite
+    networkAccess: true
+    writableRoots:
+      - /var/run/docker.sock
 ---
 
 You are working on a Linear ticket `{{ issue.identifier }}`.
@@ -103,73 +106,40 @@ Instructions:
 1. This is an unattended Symphony orchestration session. Never ask a human to perform follow-up actions, except for explicit requirement-confirmation, plan-confirmation, or blocker handoff gates below.
 2. Stop early only for a true blocker: missing required auth, permissions, secrets, tools, contradictory requirements, or an unconfirmed high-impact plan. If stopped, record the exact reason in the workpad and move the issue according to this workflow.
 3. Final messages must report completed actions and blockers only. Do not include generic "next steps for user".
-4. **Subagent use is explicitly authorized when available.** This workflow invokes `subagent-driven-development` (superpowers) at Gate 3 when the skill is present and the approved plan contains independent subtasks that can be safely delegated. Invoking this workflow constitutes explicit authorization to dispatch subagents for those tasks. Do not wait for additional user confirmation before using subagents during implementation.
+4. **Subagent use is explicitly authorized.** Do not wait for additional user confirmation before using subagents.
 
-Work only in the provided repository copy. Do not touch any other path.
+Confine all **writes** to the provided repository copy — do not create, modify, or delete files anywhere else (other checkouts, `$HOME`, system paths).
+
+Reading outside the repo is allowed **when the task points you there** — a path named in the issue, its thread, `AGENTS.md`, or the repo's own config (eval corpora, datasets, fixtures, logs, sibling checkouts) is readable even though it lives outside the repo. That reference is the authorization: do **not** self-block or demand a human action to read a path the task already names. Do not go further: do not rummage through unrelated paths, other projects, or secret stores (`~/.ssh`, credential / `.env` files) unless the task explicitly requires it, and never copy such contents into a Linear artifact. If a needed read genuinely falls outside what the task references and you cannot tell whether it is authorized, treat that as a real blocker and ask.
 
 ## Language Policy
 
-- Write Linear-facing content in Chinese, including workpad notes, blocker briefs, review handoff notes, and status summaries.
-- For `## Review Handoff`, keep the marker header and `Status` enum values exactly as written for workflow routing, but write section headings, bullet content, risk notes, and the human-action sentence in Chinese.
-- Keep code, code comments, commit messages, PR titles/bodies, test names, and repository documentation in English unless the target repository documents a different convention.
-- Preserve exact command names, errors, file paths, identifiers, labels, and checklist item titles when quoting or when English is clearer for technical precision.
+Phase artifacts and other Linear comments are read by Chinese-speaking humans — write them in clear, readable Chinese:
+
+- Use Chinese throughout, and use the Markdown Linear actually renders: headings, **bold** / _italic_ / `inline code`, tables (`|--`), fenced code blocks, ` ```mermaid ` diagrams, `___` dividers, `:emoji:`, blockquotes (`>`), and **collapsible sections (`>>>`)** to fold away verbose evidence or logs so the artifact stays scannable. Do **not** use GitHub-style `> [!NOTE]` / `[!WARNING]` alerts — Linear renders the `[!...]` as literal text; for emphasis use a `>` blockquote led by an emoji and a **bold** label.
+- **Reference a Linear issue by its bare identifier** (e.g. `ENG-123`) so Linear renders its native issue chip (status + title preview). Never use GitHub-style `#NNN` or a plain markdown link for a Linear issue; reserve `#NNN` and the PR URL for the GitHub PR. `@`-mention a specific person (`@name`) when you need their attention (e.g. a blocker handoff)
+- Use emoji to signal importance and structure; use tables for acceptance-criteria results and before/after comparisons
+- Link to relevant PRs, dashboards, and resources so readers don't have to hunt
+- Keep Phase artifact headings (`## Requirements`, `## Design`, `## Implementation`, `## Deployment`) exactly as written — routing depends on them
+- Use English for code, commit messages, PR titles/bodies, test names, and repository documentation
+
+### Write clearly (not just correctly formatted)
+
+Formatting is not readability. Every artifact (and every `symphony-issue`
+issue description) also follows these prose rules.
+
+- **Lead with the conclusion, then the why.** The first sentence is the point: what this phase did, why it matters, and whether to approve. A reviewer should decide in 30 seconds, not read to the end to learn the verdict.
+- **Be concrete and clickable.** Name the PR, `file:line`, functions, key numbers, commands, and dashboards, and link them. Vague is not allowed. Not "optimized performance" but "p99 820ms → 210ms ([dashboard](url))".
+- **Scannable at a glance.** Short sentences and paragraphs; tables for comparisons and acceptance results; put the one action the human must take in its own callout.
+- **Serve the decision and the outcome.** Each paragraph should move the reviewer toward approve / rework / ask, and (Requirements and Design especially) state what the real user or system gains, loses, or waits for. Do not stop at "what changed"; give the effect.
+- **No filler, no slop.** Cut throat-clearing, pleasantries, self-praise, and hedging. If one sentence says it, do not write three. Avoid empty Chinese qualifiers and connectors that signal AI prose over a clear point: 基本上、总的来说、值得注意的是、众所周知、显著地、极大地、进一步、从而、健壮的、全面的、优雅的、丝滑的. Prefer a period or colon over a 破折号 (—) used as a connector crutch.
+
+> Good：「PR #123 修了登录在 cookie 过期时白屏的问题（`auth.ts:47`）：受影响用户从约 5%/天降到 0，验收见下表；请审。」
+> Bad：「我对认证流程做了一些可能有助于改善特定情况下用户体验的潜在改进。」
 
 ## Prerequisite: Linear MCP or `linear_graphql` tool is available
 
 The agent must be able to talk to Linear, either via a configured Linear MCP server or the injected Symphony `linear_graphql` tool. If neither is present, stop through the blocker handoff flow.
-
-## Project Setup
-
-- This workflow is shared by all projects under `workflows/`.
-- Project identity comes from `$SYMPHONY_WORKFLOW_DIR/project.env`. Operators
-  normally start Symphony with:
-
-```sh
-bin/symphony-run <project>
-```
-
-- `SYMPHONY_PROJECT_SLUG` selects the Linear project.
-- `SYMPHONY_BASE_BRANCH` may override the default base branch; use `main` when unset.
-- `AUTOMATED_REVIEWER` may name the automated reviewer account to request
-  after PR create/update.
-- The project repository's own `AGENTS.md` is the source of truth for build, test, validation, migration, and runtime commands.
-
-## Default Posture
-
-- Start by determining the ticket's current status, then follow the matching flow for that status.
-- Start every active ticket by opening the persistent `## Codex Workpad` comment and bringing it up to date before new implementation work.
-- Spend extra effort up front on planning and validation design before implementation.
-- Reproduce first when the ticket is a bug, regression, CI failure, broken script, or behavior mismatch.
-- Keep ticket metadata current: state, checklist, acceptance criteria, links, and PR attachment.
-- Treat the persistent `## Spec` Linear comment as the issue-level contract:
-  what to solve, why, the chosen approach, and observable acceptance signals.
-  Created at the end of Gate 1 (phase-clarification), before product
-  implementation code. Updated only when scope, approach, acceptance, or
-  assumptions change.
-- Treat the persistent `## Codex Workpad` comment as the agent continuation
-  record. It contains detailed plans, validation notes, and attempt history.
-- Treat `## Review Handoff` comments as compact per-handoff snapshots for
-  human action. Each transition to `Human Review` must create a new handoff
-  comment instead of editing or reusing an older handoff.
-- The three persistent comments have non-overlapping ownership: **Spec** owns
-  the issue-level contract; **Workpad** owns execution state; **Handoff** owns
-  per-round routing and human action. When the Linear description, Spec,
-  Workpad, or human comments disagree, the precedence is:
-  **human comment > Spec > Workpad > original Linear description**.
-  Reconcile by updating the Spec to absorb the human comment's intent, then
-  sync the Workpad, then write code.
-- Investigation code (reproductions, temporary logging, ad-hoc scripts to
-  characterize a bug or measure a baseline) is allowed before the Spec is
-  finalized. Product implementation code (changes that will land in the PR
-  diff) must wait until the Spec is complete with no unresolved
-  `[NEEDS CLARIFICATION: ...]` markers.
-- At every stop for human action, update the workpad and Spec first, then
-  create a separate `## Review Handoff` comment last.
-- Do not post additional "done" or summary comments outside the workpad and handoff protocol.
-- Treat any ticket-authored `Validation`, `Test Plan`, or `Testing` section as non-negotiable acceptance input: mirror it in the workpad and execute it before considering the work complete.
-- When meaningful out-of-scope improvements are discovered, file a separate Linear issue instead of expanding the current issue.
-- Move status only when the matching quality bar is met.
-- Operate autonomously end-to-end unless blocked by unclear requirements, unconfirmed high-impact engineering approach, missing requirements, secrets, permissions, or unavailable required tools.
 
 ## Operational Safety Boundaries
 
@@ -177,401 +147,200 @@ bin/symphony-run <project>
 - Do not modify production infrastructure, services, databases, queues, storage, payment systems, analytics exports, or customer/user data.
 - Do not run destructive commands such as `rm -rf`, `git reset --hard`, `git clean -fdx`, broad database deletes, infrastructure deletes, or deploy commands unless the confirmed plan explicitly requires it.
 - Do not push directly to `upstream/$SYMPHONY_BASE_BRANCH`, `upstream/main`, or any protected/base branch. Push only to the current issue PR branch on `origin`.
-- Do not force-push except when the `pull`, `push`, or `land` skill explicitly requires `--force-with-lease` for the current PR branch, after checking the remote branch did not advance with unrelated human work.
+- Do not force-push except when the `symphony-pull`, `symphony-pr`, or `symphony-land` skill explicitly requires `--force-with-lease` for the current PR branch, after checking the remote branch did not advance with unrelated human work.
 - Do not commit generated, cache, build, pyc, or temporary artifacts.
 - Do not expose secrets in Linear comments, PR comments, commit messages, logs, screenshots, or workpad notes.
 
-## Related Skills
+## Phase Map
 
-The Symphony workflow skills are installed into `.agents/skills/`. When this workflow names a skill, open and follow its `SKILL.md` before acting.
+The workflow progresses through four sequential phases. Each phase has a dedicated skill.
 
-- **Always**: `linear` at `.agents/skills/linear/SKILL.md`.
-- **Requirement clarification**: `phase-clarification` at `.agents/skills/phase-clarification/SKILL.md`.
-- **Solution design**: `phase-design` at `.agents/skills/phase-design/SKILL.md`.
-- **Implementation**: `phase-implementation` at `.agents/skills/phase-implementation/SKILL.md`.
-- **Merging**: `phase-merge-and-confirm` at `.agents/skills/phase-merge-and-confirm/SKILL.md`.
-- Supporting skills: `commit`, `push`, `pull`, `land`, and `debug` under `.agents/skills/`.
+| Phase | Skill | Trigger |
+|-------|-------|---------|
+| Requirements | `phase-requirements` | New issue; requirements not yet confirmed |
+| Design | `phase-design` | Requirements approved |
+| Implementation | `phase-implementation` | Design approved |
+| Deployment | `phase-deployment` | Human approves merge (`Merging` state) |
 
-## Skill interaction protocol (unattended bridge)
+When the agent finishes **Requirements** or **Design** on a fresh run and is confident a human would very likely approve the artifact as-is, it **auto-advances** to the next phase in the same session instead of stopping for review; if the artifact is complete but the agent is not confident, it stops for human review. See Main Flow step 6. **Implementation** always stops at `Human Review` (the PR is up), and **Deployment** is reachable only via `Merging`.
 
-This workflow runs the agent unattended via `codex app-server`. There is no
-interactive UI: tools like `AskUserQuestion` are not reachable, and the only
-channel back to the human is the Linear issue (`## Spec` / `## Codex Workpad`
-/ `## Review Handoff` comments).
+Most issues ship code through all four phases. A `Type:Spike` (investigation / research) issue is the exception: its deliverable is a documented decision, so it rides the same phases (Design becomes an investigation plan, Implementation produces a findings artifact) but normally terminates at `Human Review` after Implementation — the human moves it to `Done` without `Merging` / Deployment. See the phase skills' `Type:Spike` notes. A sub-issue inherits its parent's scope and acceptance criteria rather than re-deriving them (see `phase-requirements`).
 
-Optional skills (discovery tools, engineering-review tools, planning skills)
-may assume interactive operation. When **any** invoked skill needs to ask the
-human a question (via `AskUserQuestion`, "wait for confirmation" prose, or
-stalling on ambiguity), bridge it to Linear instead of dropping the question,
-outputting it to chat, or auto-deciding silently.
+## Main Flow
 
-### Bridge rules
+Symphony only starts the agent when the issue is in an active state (`Todo`, `In Progress`, `Merging`, `Rework`). Other states never reach this flow.
 
-1. **Collect, don't sequentially ask.** Capture every question across the
-   entire active gate before posting. Do not output prose questions to chat.
-2. **Consider all branches.** For each question, write 2–4 concrete options,
-   why the question matters, and what the agent will do if the human accepts
-   the recommendation.
-3. **Recommend with reason.** Mark one option as `推荐 (recommended)` with a
-   one-sentence rationale.
-4. **Mark in the persistent artifact.**
-   - Requirement/acceptance ambiguity → `[NEEDS CLARIFICATION: <question>]`
-     inline in the relevant `## Spec` field.
-   - Approach/risk ambiguity → `[NEEDS CLARIFICATION: <question>]` inline in
-     `解决方案（approach）` or `风险/注意` in the `## Spec`.
-   - Execution/runtime ambiguity → blocker note in `## Codex Workpad` `Notes`.
-5. **Batch into one Review Handoff** matching the active gate:
-   - Gate 1 → `Status: Waiting for requirement confirmation`
-     (`phase-clarification` sub-template).
-   - Gate 2 → `Status: Waiting for plan confirmation`
-     (`phase-design` sub-template).
-   - Gate 3 blocker → `Status: Blocked`
-     (`phase-implementation` sub-template).
-   The handoff's `阻塞决策` (or `阻塞`) section reflects every unresolved
-   marker 1:1.
-6. **Cap at five.** More than five blocking questions signals the design is not
-   ready — propose narrowed scope or issue split instead.
-7. **Move issue to `Human Review`** with the chosen status. Do not continue
-   past the gate while markers are unresolved.
-8. **On resume**, replace each resolved marker with the answered value (or
-   `Brief 假设: <value>` if the agent took its recommendation), re-sync
-   Workpad `Acceptance Criteria` if affected, then continue from the paused gate.
+1. Open and follow `.agents/skills/symphony-linear/SKILL.md` to fetch the issue, its current Linear state, and its active (unresolved) Phase artifacts.
 
-## Discovery and Planning Gates
+2. Ensure the feature branch exists so `.symphony/workpad.md` is readable and writable:
+   - Read the issue's `branchName` field from Linear.
+   - If already on that branch, continue. Otherwise check it out — preferring an existing branch on `origin`, then a local branch, then creating a new one from `upstream/${SYMPHONY_BASE_BRANCH:-main}`.
 
-Before writing implementation code for any `Todo`, `In Progress`, or `Rework` ticket:
+3. Route by Linear state:
+   - `Todo` → move to `In Progress`, then continue as `In Progress`.
+   - `Merging` → the human approved the PR. Write an approval reply on `## Implementation`: `✅ 已批准，进入 Deployment（[timestamp]）`. Target phase = Deployment; go to step 6.
+   - `In Progress`, `Rework` → determine the target phase via steps 4–5.
 
-1. Analyze the issue state, workpad, description, acceptance criteria, comments, attachments, linked PRs, labels, and known blockers.
-2. If requirements are contradictory, incomplete, too broad, or missing a safe default, batch blocking questions and recommendations into `## Review Handoff`, move the issue to `Human Review` with `Status: Waiting for requirement confirmation`, and stop.
-3. If the engineering approach has a high-impact unresolved decision, use the plan-confirmation handoff. High-impact decisions include schema/data migrations, dependency changes, production/shared infrastructure, security/privacy behavior, public API contracts, irreversible data operations, or major product tradeoffs.
-4. For ordinary implementation tradeoffs with a safe default, choose the simplest low-risk approach, record the decision in the workpad, and continue.
-5. If the issue is too large for one focused PR, narrow the current scope or create clearly separable follow-up issues instead of expanding the current issue.
-6. Write/update a hierarchical plan in the workpad with acceptance criteria and validation.
+4. Gather the signals:
+   - **Proposal-consent channel (run first, orthogonal to phase intent).** Scan unresolved `## 建议新建 issue` proposal comments for a new human reply in *their* thread, and fulfill via the `symphony-issue` skill's fulfill mode (consent → create the proposed issue + reply `已创建 ENG-123` + resolve the proposal comment; rejection → resolve as `已放弃`). This lives in a different comment thread than the phase artifacts, so it never collides with phase approval; fulfilling spawns here first keeps a single "approve phase + consent to a sub-issue" reply pair well-ordered. See the Spawning related issues section.
+   - Identify the phase awaiting review = the most recent artifact with no closing reply (neither `✅` human approval nor `⏩` auto-advance). The workpad `current_phase` should already name it; if the workpad is absent (brand-new branch), infer it as the most recent phase whose artifact exists. No artifacts at all → target phase is Requirements, go to step 6.
+   - Gather new human feedback from two places: (a) replies in each unresolved Phase artifact's thread, and (b) standalone top-level **human** comments on the issue that are not replies to any artifact. Exclude agent-authored `## 建议新建 issue` proposal comments — those are the consent channel handled by the first bullet, not feedback. Scan **every** unresolved artifact, not just the awaiting-review one — humans request cross-phase rework by commenting on the artifact they want changed (e.g. feedback on `## Design` while `## Implementation` awaits review). "New" = newer than the agent's last closing reply on that artifact (or, for standalone comments, newer than the agent's last action). Attribute each standalone comment to the phase it discusses; if unclear, assume the awaiting-review phase. If a comment refers back to an earlier round ("上次"/"之前提到的"), pull the specific resolved comment it points to per the `symphony-linear` skill's back-reference exception.
+   - When the awaiting-review phase is Implementation, the **PR is also a feedback channel** — but only for **human** reviewers. Humans often leave change requests as GitHub PR review comments instead of repeating them on Linear; gather new human PR review comments / inline threads / review states and treat them as feedback targeting Implementation. Bot / automated reviews (e.g. the configured `AUTOMATED_REVIEWER`) are **not** human intent: a bot approval never counts as a human approval, and a bot's comments are addressed by the Implementation PR feedback sweep, not by this intent check. Identify the author of each PR review/comment and drop bot ones before judging intent.
+   - Note the Linear state (`In Progress` vs `Rework`).
 
-## Status Map
+5. Determine intent:
 
-- `Backlog` -> out of scope for this workflow; do not modify.
-- `Todo` -> queued; immediately transition to `In Progress` before active work.
-- `In Progress` -> implementation actively underway.
-- `Human Review` -> wait for human action by default. In Phase 1, a human or
-  external scheduler may explicitly launch a Maestro dry-run session for this
-  state; only in that explicit Maestro lane, if there is a latest active
-  `## Review Handoff` comment/status, read that handoff plus human comments
-  after that handoff, then open and follow `.agents/skills/maestro/SKILL.md` in
-  dry-run mode: write one `## Maestro Decision【试运行 · 不修改状态】` audit comment,
-  do not update Linear state, do not code, do not push, and stop. If no handoff
-  exists, wait for human action.
-- `Merging` -> approved by human; open and follow
-  `.agents/skills/phase-merge-and-confirm/SKILL.md`. The agent **never** moves
-  the issue to `Done` — the agent posts a `Waiting for completion confirmation`
-  handoff and returns the issue to `Human Review`; the human makes the final
-  `Done` transition.
-- `Rework` -> reviewer requested changes; planning and implementation required.
-- `Done` -> terminal state; the agent does nothing and shuts down.
+   **If the awaiting-review artifact still carries an unresolved `[NEEDS CLARIFICATION]` marker** (the phase stopped on its blocked path, not for ordinary review), a new human reply in its thread is an **answer to that question**, not an approval or a change request. Target phase = the current (awaiting-review) phase; do **not** write an approval reply or treat it as a rework. Re-open that phase's skill, which follows its own "On resume" path: fold each answer into the artifact, drop the resolved marker, and re-decide advance/stop. If an answer does not actually resolve a marker, the skill keeps it open, refines the question, and stops again (its "When blocked" / "On resume" defines the re-ask and the two-round escalation). This branch takes precedence over the intent read below.
 
-## Step 0: Determine Current Ticket State and Route
+   **If the human left new feedback**, read it to understand the intent — approval, question, or change request — using the Linear state as a hint (`In Progress` leans approval, `Rework` leans change request) to break ambiguity:
+   - **Question / discussion** (asks for rationale or explores alternatives without requesting a concrete change) → answer in that artifact's thread. Do **not** write an approval reply, advance, resolve, or re-post the artifact. Return the issue to `Human Review` and stop — the human will approve, ask more, or request a change next.
+   - **Approval** (accepts the work, possibly with non-blocking remarks) → write an approval reply on the awaiting-review artifact: `✅ 已批准，进入 [Next Phase]（[timestamp]）`. Target phase = the next phase. Address any non-blocking remark in that next phase.
+   - **Change request** → target phase = the **earliest** phase (in Phase Map order) carrying a change request. If that phase is earlier than the awaiting-review phase, follow Cross-phase rework; otherwise it is a same-phase rework. When a later phase also carried feedback, record it in the workpad `notes` so it is not lost when that phase is redone. (A comment that both asks and requests a change is a change request; answer the question inside the rework summary.)
 
-1. Fetch the issue by explicit ticket ID.
-2. Read the current state.
-3. Route to the matching flow:
-   - `Backlog` -> stop and wait for human to move it to `Todo`.
-   - `Todo` -> move to `In Progress`, ensure the workpad exists, then start execution.
-   - `In Progress` -> continue from the current workpad.
-   - `Human Review` -> wait for human action unless this session was
-     explicitly launched as a Phase 1 Maestro dry-run by a human or external
-     scheduler. In that explicit Maestro lane, if there is a latest active
-     `## Review Handoff` comment/status, read that handoff plus human comments
-     after that handoff, open and follow `.agents/skills/maestro/SKILL.md`,
-     create exactly one `## Maestro Decision【试运行 · 不修改状态】` audit comment,
-     do not update Linear state, do not code, do not push, and stop. If no
-     handoff exists, wait for human action.
-   - `Merging` -> open and follow `.agents/skills/phase-merge-and-confirm/SKILL.md`.
-     The agent never moves the issue to `Done`; it creates a
-     `Waiting for completion confirmation` handoff and moves back to `Human Review`.
-   - `Rework` -> run the rework flow (Step 4).
-   - `Done` -> do nothing and shut down.
-4. Check whether a PR already exists for the current branch and whether it is closed or merged. If it is closed or merged, create a fresh branch from `upstream/${SYMPHONY_BASE_BRANCH:-main}` and restart from reproduction/planning.
+   **If the human left no feedback** (on Linear artifacts or, for Implementation, the PR), decide by Linear state alone:
+   - **`In Progress`** → approval. Write an approval reply on the awaiting-review artifact and target the next phase.
+   - **`Rework`** → a rework was requested but with no stated direction anywhere. Only after confirming there is no new PR feedback either, reply in the awaiting-review artifact's thread asking what to change (e.g. `🔧 已收到打回，但 Linear 与 PR 上都未看到具体修改要求，请说明需要调整的内容`); do not resolve or re-post the unchanged artifact. Return the issue to `Human Review` and stop. The human's next reply provides the direction, which the following session reads as a change request.
 
-## Step 1: Start or Continue Execution
+   **If the phase never reached review** (no awaiting-review artifact — e.g. an interrupted session resuming mid-phase) → target phase = the current phase, no approval reply.
 
-1. Find or create the persistent active `## Codex Workpad` comment. Reuse the
-   existing comment; do not create a duplicate.
-2. Find the latest active `## Review Handoff` comment for context only. Do not
-   edit or reuse a prior handoff comment for a new `Human Review` transition.
-3. Reconcile the workpad before new edits: check off completed items, expand/fix
-   the plan, and keep acceptance/validation current. If returning from
-   `Human Review`, explicitly read recent human comments and incorporate each
-   material item into the workpad before writing code.
-4. Run the discovery and planning gates before implementation code.
-5. Record a concrete reproduction or current-behavior signal before changing code.
-6. Create the feature branch from `upstream/${SYMPHONY_BASE_BRANCH:-main}`, not
-   from `origin/${SYMPHONY_BASE_BRANCH:-main}`; the fork's default branch may be
-   arbitrarily stale.
-7. Run the `pull` skill to sync with `upstream/${SYMPHONY_BASE_BRANCH:-main}`
-   before edits and record merge source, result, and resulting short SHA in the
-   workpad.
-8. Proceed through implementation using `.agents/skills/phase-implementation/SKILL.md`.
+   Two **exceptions** override the generic `In Progress → approval → advance` read above, each on a different phase:
 
-## Step 2: Implementation Phase
+   **Exception 1 — Implementation → Deployment is gated by `Merging`.** Deployment is irreversible (it merges and deploys) and is entered **only** via the `Merging` state (step 3). When the awaiting-review phase is Implementation, an approval detected in `In Progress` (with or without feedback) must **not** advance to Deployment, open `phase-deployment`, or write a Deployment approval reply. Treat it as "implementation accepted, awaiting the human's merge decision": leave the `## Implementation` artifact awaiting review, reply nudging `实现已通过 review，如需合并请将 issue 置为 Merging`, return the issue to `Human Review`, and stop.
 
-1. Determine repo state (`branch`, `git status`, `HEAD`) and verify the kickoff sync result is recorded.
-2. Implement against the workpad plan and keep the checklist current.
-3. For behavior changes, write failing tests first, then implement the minimal passing change.
-4. Run validation from the repository's `AGENTS.md`; do not invent project-specific validation commands in this workflow.
-5. Re-check all acceptance criteria.
-6. Before pushing, run the required validation for the scope and confirm it passes.
-7. Use the `commit` and `push` skills to publish a feature branch to `origin` and create/update the PR.
-8. Merge latest `upstream/${SYMPHONY_BASE_BRANCH:-main}` into the branch, resolve conflicts, and rerun checks before handoff.
-9. Run the PR feedback sweep protocol until no outstanding actionable comments remain or a review timeout/caveat is explicitly handed off.
-10. Before moving to `Human Review`, verify the completion bar:
-    - [ ] Workpad plan and acceptance criteria fully reflect completed work.
-    - [ ] All required validation from `AGENTS.md` is passing.
-    - [ ] PR checks are green and PR is linked on the issue.
-    - [ ] PR feedback sweep is complete; every actionable comment has a
-          code change or same-thread pushback response.
-    - [ ] A `## Spec` comment exists with `Primary: Type:<...>`, no unresolved
-          `[NEEDS CLARIFICATION]` markers, and stable `S<N>` IDs on every
-          `验收标准` entry. The Workpad `Acceptance Criteria` mirrors each
-          `S<N>` (rather than restating text).
-    - [ ] The Spec passes the type-specific quality gate from
-          `phase-clarification` (`要解决的问题` / `为什么解决` / `验收标准`)
-          and `phase-design` (`解决方案（approach）`) for the Spec's
-          `Primary:` type. Re-read both skills' "Type-specific writing
-          emphasis" sections and verify each emphasis bullet is satisfied.
-          Revise the Spec before handoff if any bullet fails.
-    - [ ] If the Spec uses `Trivial Spec`, the PR diff contains no
-          behavior/data/security/API/migration/performance impact; escalate
-          to the full template if any of those categories apply.
-    - [ ] If the Spec's `关键假设` contains `本地验收不可达：<原因>`,
-          verify the substitution path is in place:
-          - Workpad `Acceptance Criteria` includes characterization tests for
-            each key invariant of the fix path.
-          - Handoff `Merge 后验证` section is present and names specific metric
-            IDs, dashboard URLs, or alert names with explicit observation time
-            windows (generic "observe the alert clears" fails this gate).
-          - Handoff TL;DR names the rollback path concretely.
-          - Handoff explicitly states `本地验收不可达：<原因>`.
-    - [ ] If returning from `Human Review`, every human question or objection
-          since the last handoff is directly answered in the new handoff.
-11. Create a fresh **new** `## Review Handoff` comment last, then move the issue
-    to `Human Review`. Do not edit or reuse a prior handoff comment.
+   **Exception 2 — post-Deployment `In Progress` means finish verification.** When a concluded `## Deployment` still has unresolved `⚠️ 待观察` items and the issue is `In Progress`, this is a verification continuation, not a phase approval: with no feedback (or just a verify nudge) → target phase = Deployment, write no approval reply; with substantive feedback → interpret it by content per the rules above.
 
-## Step 3: Human Review and Merge Handling
+6. Set the workpad `current_phase` to the target phase and open the matching phase skill (per the Phase Map). The skill does its phase work, posts or updates its own artifact, and on a **clean** exit hands back one of two outcomes — the skill alone decides which (see its "Exit"); only the Requirements and Design skills ever choose `advance`:
 
-1. When the issue is in `Human Review`, do not code, push, edit the PR, or poll
-   for review updates. Phase 1 exception: if there is a latest active
-   `## Review Handoff` comment/status, Maestro may read that handoff plus human
-   comments after that handoff, write exactly one dry-run audit comment with
-   `## Maestro Decision【试运行 · 不修改状态】`, and must leave the issue state
-   unchanged.
-2. Use the latest `## Review Handoff` status as the source of truth for the
-   expected human action:
-   - `Waiting for requirement confirmation`: human leaves feedback and moves
-     back to `In Progress`.
-   - `Waiting for plan confirmation`: human leaves feedback and moves back to
-     `In Progress`.
-   - `Waiting for PR review`: human moves to `Rework` for changes or `Merging`
-     for approval.
-   - `Waiting for completion confirmation`: human moves to `Done` or `Rework`.
-   - `Blocked`: human resolves the blocker and moves to the appropriate active
-     state.
-3. When the issue enters `Rework`, follow Step 4.
-4. When the issue enters `Merging`, open and follow
-   `.agents/skills/phase-merge-and-confirm/SKILL.md`. The agent never moves the
-   issue to `Done`; after merge it creates a `Waiting for completion
-   confirmation` handoff and returns the issue to `Human Review`.
+   - **`advance`** → write the `⏩ 自动进入 [Next Phase]` reply on the just-posted artifact, set the workpad `current_phase` to the next phase, and loop back to the start of step 6 with that as the target.
+   - **`stop`** → move the issue to `Human Review` and stop.
 
-## Step 4: Rework Handling
+   (A skill that stops **blocked** — unresolved `[NEEDS CLARIFICATION]` / escalated high-impact decision — moves the issue to `Human Review` itself; the session ends there.)
 
-1. Re-read the full issue body, latest `## Review Handoff`, PR comments and
-   reviews, and Linear comments. Explicitly identify what must be done differently.
-2. If the requested change is not explicit, infer it only when unambiguous;
-   otherwise use a requirement-confirmation handoff.
-3. If the existing PR is open and the branch is reusable, keep the PR and
-   branch, update the workpad plan with the requested changes, and continue
-   through Step 1/2.
-4. If the prior approach is invalid, the PR is closed/merged, the branch is
-   unusable, or the human explicitly requested a restart: close the existing PR
-   if still open, create a fresh branch from
-   `upstream/${SYMPHONY_BASE_BRANCH:-main}`, start a new `### Current Attempt`
-   section at the top of the workpad, and restart the kickoff flow.
-5. Do not delete or recreate the persistent `## Codex Workpad` on Rework;
-   preserve the comment and its ID. Preserve previous `## Review Handoff`
-   comments as historical snapshots.
+   This is the only auto-advance mechanism, and Main Flow does not second-guess the skill's choice. A single confident session may chain Requirements → Design → Implementation, but the Implementation skill always returns `stop` (the PR awaits the human's merge decision), so the chain always ends at `Human Review`; Deployment is reached only via `Merging` (step 3).
 
-## PR Feedback Sweep Protocol
+## Skill Interaction Protocol
 
-When a ticket has an attached PR:
+The phase skills under `.agents/skills/` refer back to **your workflow instructions** (e.g. "the Workpad template in your workflow instructions", "the cross-phase rework protocol in your workflow instructions"). That is this prompt — every referenced section is here; find it by its heading. There is no separate file to open.
 
-1. Identify the PR number from issue links or attachments.
-2. Gather top-level PR comments, inline review comments, and review summaries/states.
-3. Treat every actionable reviewer comment as blocking until code/test/docs are updated or explicit justified pushback is posted on the same thread.
-4. Update the workpad plan/checklist with each feedback item and its resolution.
-5. Re-run validation after feedback-driven changes and push updates.
-6. Repeat until no outstanding actionable comments remain and checks are understood.
+This workflow runs unattended — no interactive UI. When any invoked skill needs a human decision, mark it `[NEEDS CLARIFICATION: <question>]` inline in the current phase's artifact, update the artifact comment, move the issue to `Human Review`, and stop. Each phase skill's "When blocked" section defines the detailed bridging procedure for that phase.
 
-## Review Handoff Lifecycle Invariants
+## Phase Artifact Protocol
 
-These rules apply to every handoff comment regardless of status:
+Each phase maintains exactly one top-level comment on the Linear issue, identified by its heading (see Phase Map). A phase skill posts its artifact via `commentCreate`, or updates the existing one in place via `commentUpdate`. No phase edits another phase's artifact, and no comments are posted outside this protocol.
 
-- **Marker header**: every handoff comment starts with the literal H2 line
-  `## Review Handoff` followed by a `Status: <enum>` line.
-- **Status enum** (one of): `Waiting for requirement confirmation`,
-  `Waiting for plan confirmation`, `Waiting for PR review`, `Blocked`,
-  `Waiting for completion confirmation`.
-- **One new comment per `Human Review` transition**: each transition creates a
-  fresh `## Review Handoff` comment. Do not edit, reuse, or persist a prior
-  handoff comment ID for a new transition, even if the status is the same.
-- **Last comment before transition**: update the workpad first, then post the
-  fresh handoff last. The handoff must be the latest visible Linear update
-  before the issue moves to `Human Review`.
-- **`Human action needed`** is required in every handoff (one verb-led Chinese
-  sentence with finite options, e.g. `OK → Merging；想改 X → Rework`).
-- **Before publishing**: re-read human comments since the last handoff. If a
-  human asked a question or raised an objection, the handoff must directly
-  answer it — do not make reviewers hunt through the workpad.
+When content conflicts, precedence is: human reply in artifact thread > current artifact body > previous artifact > original issue description. Reconcile by updating the current artifact to absorb the human's intent.
 
-## Review Handoff Template
+### Skills-activated footer
 
-Use this structure for every separate handoff comment. Create a new comment last before moving to `Human Review`.
-
-- Keep the `## Review Handoff` heading and `Status:` field as plain top-level text. Do not wrap them in callouts, blockquotes, or `<details>` blocks because workflow routing depends on them.
-- For PR review handoffs, include the summary, changed areas, review focus, risks, validation, and follow-ups sections in that order. Prefix section headings with these emoji labels: `📝 变更摘要（summary）`, `📂 变更范围（changed areas）`, `🔎 审核重点（review focus）`, `⚠️ 风险/注意（risks）`, `✅ 验证`, and `📌 后续事项（follow-ups）`. Write `无` for risks or follow-ups when there is nothing to call out.
-- In summary, make the first bullet a one-sentence synthesis of intent or result, not a label list; use later bullets for concrete details.
-- In changed areas, mark deltas inline with `（新增）/（修改）/（语义变化: X→Y）/（顺序调整）` so reviewers do not need to diff the old template mentally.
-- In validation, map evidence back to acceptance criteria（映射回 acceptance criteria）. Prefer a table such as `| 验收项 | 状态 | 证据 |`; use exactly these status-column conventions: `✅ 通过`, `⚠️ 部分通过`, `➖ N/A`, and `❌ 失败`. The validation 表格只列当前 acceptance criterion 的状态; do not put TDD RED→GREEN observations, historical failures, or debugging process notes in the status column. `❌ 失败` must mean that the criterion is still unmet at handoff time. If an acceptance criterion has no measurable check, say so explicitly with `➖ N/A`.
-- In review focus and risks, mark each item as `🚨 blocker` or `💡 nit` so reviewers can distinguish required fixes from non-blocking observations. Do not stack the previous square-bracket plain labels with the emoji labels.
-- When risks contain a `🚨 blocker`, wrap the blocker item or risk block in a Linear warning callout using `> [!WARNING]`.
-- In `Human action needed`, use a Linear callout or blockquote and give finite options such as `OK → Merging；想改 X → Rework` instead of only asking for review. Prefer `> [!IMPORTANT]` followed by `> 👉 **Human action needed**: ...`.
-- Separate major PR handoff sections with horizontal rules (`---`) so Linear renders clear visual breaks.
-- When a Review Handoff includes a Before/After comparison, wrap the Before content in `<details>` with a `<summary>` line, and keep After expanded as the visual focus.
-- Keep bullets short and scannable in Linear comments. Start changed-area bullets with a file path, module, command, or workflow area when possible.
-- Use parentheses or dash side notes for compact context, for example `（由“可省略”改为“无内容写 无”）`, instead of splitting every detail into separate bullets.
-- For requirement, plan, or blocker handoffs, omit PR-only sections and include only the decision/blocker sections that apply.
+Every phase artifact ends with a collapsible footer listing the skills this phase run actually activated, so a human can audit what drove the work. Use the workflow's own skills (the phase skill's `Skills to invoke`, `office-hours`, `plan-eng-review`, `brainstorming`, `symphony-*`, etc.) — not Linear/git mechanics. On a rework re-post, list the skills of that run, not the original. The exact block (keep the heading verbatim; omit any line that does not apply):
 
 ```md
-## Review Handoff
-
-Status: Waiting for PR review
-
-📝 变更摘要（summary）:
-- <第一条用一句话陈述意图或结果；后续 bullet 补主要决策或用户可见变化>
-
----
-
-📂 变更范围（changed areas）:
-- `<关键文件/模块/流程>`: <用 `（新增）/（修改）/（语义变化: X→Y）/（顺序调整）` 标注 delta，并说明 reviewer 需要知道什么>
-
----
-
-🔎 审核重点（review focus）:
-- 🚨 blocker <需要人工重点查看的文件、流程、边界条件或决策点>
-- 💡 nit <非阻塞的措辞、展示或偏好检查>
-
----
-
-⚠️ 风险/注意（risks）:
-> [!WARNING]
-> - 🚨 blocker <阻塞风险、回归面或验证 caveat>
-- 💡 nit <非阻塞风险或观察；没有则写“无”>
-
----
-
-✅ 验证:
-| 验收项 | 状态 | 证据 |
-|---|---|---|
-| <acceptance criterion> | ✅ 通过 | <命令或检查结果> |
-| <acceptance criterion> | ⚠️ 部分通过 | <已验证范围与需要人工判断的 caveat> |
-| <acceptance criterion> | ➖ N/A | <无对应可测项的原因> |
-| <acceptance criterion> | ❌ 失败 | <命令、影响和后续处理> |
-
----
-
-📌 后续事项（follow-ups）:
-- <未完成事项、已拆出的 follow-up、非阻塞观察；没有则写“无”>
-
-已回应的问题（如上一轮 human review 提问/质疑/要求证据；否则省略）:
-- <直接回答问题，并说明对应证据或修复结果>
-
-问题/选项（仅 requirement/plan confirmation；否则省略）:
-- <阻塞决策、选项、推荐默认值、接受默认值后会怎么做>
-
-阻塞（仅 Blocked；否则省略）:
-- <blocker、影响、已尝试事项、精确 unblock action>
-
-> [!IMPORTANT]
-> 👉 **Human action needed**: <给出有限选项，例如 `OK → Merging；想改 X → Rework`>
+>>> 🛠️ 本次激活的 skills
+- `<skill>` — <≤6-word purpose>
+- _跳过_ `<skill>` — <reason>
+>>>
 ```
 
-When including a Before/After comparison in a handoff, format it this way:
+For Implementation, this footer mirrors the workpad `notes` record of invoked / `Skipped <skill>` skills; for other phases, list what the run invoked.
 
-```md
-<details>
-<summary>📜 展开旧模板下的 handoff（仅供对比，可跳过）</summary>
+### Phase-closing replies
 
-<Before 内容>
+A phase artifact is **closed** (no longer awaiting review) once its thread carries a Main-Flow-written closing reply. Two kinds exist:
 
-</details>
+- `✅ 已批准，进入 [Next Phase]（[timestamp]）` — **human approval**. Main Flow writes it (step 5, or the `Merging` branch of step 3) when a human accepted the phase.
+- `⏩ 自动进入 [Next Phase]（agent 自评通过，未经人工评审，[timestamp]）` — **agent auto-advance**. Main Flow writes it when it advances a fresh, clean Requirements/Design phase without stopping (step 6).
 
-### After（当前模板）
+Both are equivalent for routing: an artifact with **no** closing reply is the one still awaiting human review. The distinction is for humans — a `⏩` artifact was never human-gated, so the human is free to comment on it and set `Rework` to pull the chain back via cross-phase rework.
 
-<After 内容>
-```
+### Identifying the current artifact
 
-## Workpad Template
+Current artifact for a phase = the most recent comment of that type with no closing reply in its thread. Resolved artifacts (older rework versions) need not be read on session start.
 
-````md
-## Codex Workpad
+### Rework cycle (same phase)
 
-```text
-<hostname>:<abs-path>@<short-sha>
-```
+When the target phase is a rework of its own artifact:
 
-### Current Attempt
+1. Read the human feedback — from the artifact's thread, from any standalone issue comment addressing this phase, and (for Implementation) from PR review comments.
+2. Do the rework.
+3. Resolve the old artifact via `commentResolve` — its outdated content collapses out of the way.
+4. Post a fresh artifact comment with the updated content.
+5. Add a reply on the **new** artifact summarizing what changed since the last version and how each piece of human feedback was addressed (`🔧 本轮修改：...`, pointing back to the specific feedback). The changelog must live on the new artifact, not the resolved old one, so the human can review the update without expanding collapsed history.
 
-#### Plan
+### Cross-phase rework
 
+When the human feedback requires revisiting an earlier phase (e.g., a design flaw found during Implementation review), Main Flow step 5 routes here:
+
+1. Before resolving anything, copy any unaddressed human feedback on the phases being rolled back into the workpad `notes`, so it survives once those artifacts are resolved and is reconsidered when those phases are redone.
+2. Reply in the awaiting-review artifact's thread: `🔄 反馈要求回到 [Target Phase]，当前阶段暂停`.
+3. Resolve the awaiting-review artifact.
+4. For each intermediate phase between target and the awaiting-review phase (if any), resolve that artifact too with a reply: `🔄 因跨阶段回退，此阶段需重新完成`.
+5. Set workpad `current_phase` to the target phase and open the target phase skill.
+
+The approval chain restarts from the target phase. All artifacts from target onward will be re-posted as those phases complete again.
+
+## Spawning related issues
+
+When a phase discovers work that needs its **own** Linear ticket (not a
+workpad Plan item), it invokes the `symphony-issue` skill. Two tiers:
+
+- **Autonomous create** — `follow-up`, `related`, downstream `blocked`
+  (current blocks the new issue). The agent creates them directly.
+- **Consent-gated** — `blocking` (current is blocked by the new issue) and
+  `sub-issue` decomposition. The agent posts a `## 建议新建 issue` proposal
+  comment and creates nothing until a human replies consent in that comment's
+  thread; Main Flow step 4 fulfills the consent.
+
+Safety invariants for every spawned issue: it lands in the team's **intake
+state** (resolved by `type` — `triage` else `backlog`, never by name), is
+**assigned to the current issue's `creator`**, never to Symphony, and is
+therefore **never auto-worked** (the intake state is outside `active_states`).
+A `blocking` discovery additionally parks the current issue at `Human Review`
+with a 🚧 callout — creating the blocker does not unblock it. Full mechanics,
+dedup, and the workpad record live in `symphony-issue`.
+
+## Workpad
+
+Agent execution state lives in `.symphony/workpad.md` on the feature branch, committed to git. Machine-read fields (`current_phase`, `cleanup`) go in the YAML frontmatter; the rest is markdown. It is excluded from the final merge via the `cleanup` field.
+
+```markdown
+---
+current_phase: Requirements   # Requirements | Design | Implementation | Deployment
+cleanup:
+  - .symphony/workpad.md
+  - .symphony/design.md   # Design's agent-facing design doc; dev-cycle only
+---
+
+## Plan
 - [ ] 1. Parent task
   - [ ] 1.1 Child task
 
-#### Acceptance Criteria
+## Acceptance Criteria
+- [ ] S1: <executable check>
 
-- [ ] Criterion 1
-
-#### Validation
-
+## Validation
 - [ ] targeted tests: `<command>`
 
-#### Notes
-
+## Notes
 - <short progress note with timestamp>
-````
+- Skills invoked: <comma-separated names>
+
+## Spawned Issues
+- 已创建 ENG-123 — <title> · related/blocks/parent · <one-line why>
+- 待同意 <proposal-comment-id> — <title> · blocking/sub-issue
+- 已放弃 <proposal-comment-id> — <title> · <reason>
+```
+
+### Persistence
+
+Commit and push the agent state — the workpad and, once Design has written it, `.symphony/design.md` — so origin always holds the latest and a recreated workspace recovers via `git pull`. Whenever that state changes materially, and always before returning the issue to `Human Review`, run `git add .symphony/ && git commit && git push origin <branch>`.
 
 ## Guardrails
 
-- **Agent never moves to `Done`**: only humans move the issue to `Done`. After
-  merge, the agent creates a `Waiting for completion confirmation` handoff and
-  returns to `Human Review`.
-- **Do not move to `Human Review`** unless the completion bar in Step 2 is
-  satisfied. No premature handoffs.
-- **In `Human Review`**, do not code, push, change ticket content, or poll for
-  updates. Wait for the human to change the issue state. This `Human Review`
-  guardrail has one Phase 1 exception: a human or external scheduler may
-  explicitly launch Maestro to read the latest active `## Review Handoff`
-  comment/status plus human comments after that handoff and write exactly one
-  `## Maestro Decision【试运行 · 不修改状态】` audit comment without changing issue
-  state.
-- **One persistent workpad**: use exactly one `## Codex Workpad` comment per
-  issue. Update it in place; never create a duplicate. Preserve the comment ID
-  across retries, rework rounds, and full resets.
-- **One new handoff per transition**: each `Human Review` transition creates a
-  fresh `## Review Handoff` comment; never edit or reuse a prior handoff.
-- **Feature branch from upstream**: create new branches from
-  `upstream/${SYMPHONY_BASE_BRANCH:-main}`, not `origin/${SYMPHONY_BASE_BRANCH:-main}`.
-- **Out-of-scope improvements**: file a separate Linear issue in `Backlog` with
-  a clear title, description, acceptance criteria, same-project assignment, and
-  a `related` link to the current issue. Do not expand current scope.
-- **No secrets in comments**: do not expose secrets, tokens, or credentials in
-  Linear comments, PR bodies, commit messages, workpad notes, or logs.
-- **Temporary proof edits**: allowed for local verification only; must be
-  reverted before commit and documented in the workpad `Notes`.
+- **Phase gating**: phase advancement is driven by human signals (Linear state + human words), with one exception — the agent may **auto-advance** a fresh, clean Requirements or Design phase (Main Flow step 6). A bot / automated PR review (e.g. `AUTOMATED_REVIEWER`) is never an approval or a phase-routing signal; its feedback is handled inside the Implementation PR feedback sweep.
+- **Auto-advance is upstream-only and confidence-gated**: only Requirements and Design may be auto-advanced, and only on a fresh, blocker-free run the agent judges a human would very likely approve as-is. Confidence — not formal completeness — is the gate; when in doubt, stop for review. A reworked phase, or one whose artifact already carries a human reply, always stops at `Human Review`. Implementation never auto-advances.
+- **Deployment only via `Merging`**: the merge/deploy is irreversible and must be gated by the explicit `Merging` state. An approval of Implementation detected in any other state (e.g. `In Progress`) never triggers merge or opens `phase-deployment`.
+- **Deployment verification re-entry (no re-merge, no new state)**: acceptance criteria not confirmable at deploy time stay `⚠️ 待观察`; the human moves the issue back to `In Progress` to re-enter `phase-deployment` and finish them (step 5). Re-entry never re-merges, and introduces no extra Linear state.
+- **Agent never moves to `Done`**: only humans close the issue. After Deployment concludes, the agent posts a completion summary in the `## Deployment` artifact thread and returns the issue to `Human Review`.
+- **No phase advances without its artifact**: each phase must post or update its artifact before moving to `Human Review`.
+- **`Human Review` is not an agent state**: Symphony does not start the agent there. Do not design any phase skill to act while the issue is in `Human Review`.
+- **Out-of-scope improvements**: do not expand the current issue — spin off a separate ticket via the `symphony-issue` skill (see Spawning related issues). Every spawned issue lands in the team intake state, is assigned to the current issue's `creator` (never Symphony), and is never auto-worked. Flow-changing kinds (`blocking`, `sub-issue`) are only proposed and wait for human consent.

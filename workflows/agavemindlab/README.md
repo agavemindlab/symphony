@@ -55,7 +55,7 @@ specific to the Agavemindlab workflow namespace.
 project's `setup.sh`.
 
 `project.env.defaults` currently defines `AUTOMATED_REVIEWER="gl-swe"`, the
-shared Agavemindlab automated reviewer used by the `push` skill. Keep common
+shared Agavemindlab automated reviewer used by the `symphony-pr` skill. Keep common
 workflow values there instead of duplicating them in every project env file.
 Profile env files may fill local defaults, and project env files (or the
 optional `project.env.local`) may override them when needed.
@@ -80,7 +80,7 @@ repository version in place. Only newly installed skills are added to
 ## Shared Skills
 
 `workflows/agavemindlab/skills/` contains the shared workflow skills installed
-into each workspace. The `cleanup` skill is shared because it only uses Docker's
+into each workspace. The `symphony-cleanup` skill is shared because it only uses Docker's
 `com.docker.compose.project` labels and the configured Symphony workspace root
 to identify resources left behind by removed workspaces; it does not depend on
 any project-specific Compose files or services.
