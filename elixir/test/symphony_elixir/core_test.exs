@@ -17,6 +17,16 @@ defmodule SymphonyElixir.CoreTest do
     assert config.tracker.terminal_states == ["Closed", "Cancelled", "Canceled", "Duplicate", "Done"]
     assert config.tracker.assignee == nil
     assert config.agent.max_turns == 20
+    assert config.hooks.issue_running == nil
+    assert config.hooks.issue_stopped == nil
+
+    assert :ok =
+             SymphonyElixir.IssueRunHook.run(:running, %Issue{
+               id: "issue-no-hook",
+               identifier: "MT-NO-HOOK",
+               title: "No hook",
+               state: "In Progress"
+             })
 
     write_workflow_file!(Workflow.workflow_file_path(), poll_interval_ms: "invalid")
 
