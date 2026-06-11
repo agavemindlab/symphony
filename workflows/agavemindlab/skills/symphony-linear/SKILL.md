@@ -208,9 +208,11 @@ query IssueTeamStates($id: String!) {
 
 ### Query active issue comments
 
-Returns the issue's Phase artifacts and their reply threads. Each top-level
-comment carries `resolvedAt` (non-null once resolved) and its `children`
-(replies, e.g. approval replies and rework-change summaries).
+Returns the issue's Phase artifacts and their reply threads. Linear may return
+reply comments in `comments.nodes`, so use `parent` to keep replies attached to
+the artifact they belong to. Each top-level comment carries `resolvedAt`
+(non-null once resolved) and its `children` (replies, e.g. approval replies and
+rework-change summaries).
 
 **Default contract**: this read returns *active* state only. Drop every node
 whose `resolvedAt` is non-null before using the result — resolved comments are
@@ -232,6 +234,9 @@ query IssueComments($issueId: String!) {
       nodes {
         id
         body
+        parent {
+          id
+        }
         resolvedAt
         user {
           name
