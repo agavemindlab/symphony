@@ -19,3 +19,19 @@ How to apply:
 - After changing it, re-read: does any new paragraph merely restate what is
   already true once the root cause is fixed? If so, delete it.
 - Ending shorter than you started is the norm, not the exception.
+
+## Where to work: the workflows/ symlink model
+
+`workflows/<project>/` is composed from symlinks into a canonical shared base
+plus real files that override it. Before editing anything under a project
+directory, `readlink` it first:
+
+- A **symlink** (e.g. `WORKFLOW.md -> ../agavemindlab/WORKFLOW.md`,
+  `skills -> ../agavemindlab/skills`) means you are editing the **shared base** —
+  the change hits every project that inherits it. `agavemindlab` is the base.
+- A **real file/dir** is a per-project override; it touches only that project.
+  To make a shared entry project-specific, replace the symlink with a real file.
+
+There is no `extends`/merge layer — directory entries are the whole mechanism.
+See `workflows/agavemindlab/README.md` for the override rules and `bin/README.md`
+for the launcher's env layering.
