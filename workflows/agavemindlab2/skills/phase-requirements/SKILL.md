@@ -107,8 +107,13 @@ Every `S<N>` entry must satisfy all five:
    query / error tracker / reproduction path / database read).
 3. **Measurable** — number, boolean, or clearly defined state.
 4. **Falsifiable** — can be rewritten as "if X then NOT accepted".
-5. **Time-bounded** — names how long to observe (e.g., "for 7 days
-   post-merge").
+5. **Time-bounded** — names *when* it is judged. A point in time is a valid
+   bound: a signal one conclusive observation settles (a reproduction path that
+   no longer triggers, checked at **PR 验收 / 上线 smoke**) needs no window. Use
+   a *sustained window* ("zero X events for N days") **only** for signals whose
+   meaning depends on duration — absence of events, stability, no-regression
+   under real traffic. Don't attach a window to a criterion a single check
+   already settles.
 
 Each entry must also be **independently verifiable**. Use stable IDs
 (`S1`, `S2`, ...). Design and Implementation reference these IDs.
