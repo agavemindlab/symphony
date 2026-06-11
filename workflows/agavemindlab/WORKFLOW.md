@@ -70,10 +70,7 @@ codex:
   approval_policy: never
   thread_sandbox: workspace-write
   turn_sandbox_policy:
-    type: workspaceWrite
-    networkAccess: true
-    writableRoots:
-      - /var/run/docker.sock
+    type: dangerFullAccess
 ---
 
 You are working on a Linear ticket `{{ issue.identifier }}`.
