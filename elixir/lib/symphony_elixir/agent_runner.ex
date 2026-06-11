@@ -7,8 +7,6 @@ defmodule SymphonyElixir.AgentRunner do
   alias SymphonyElixir.Codex.AppServer
   alias SymphonyElixir.{Config, Linear.Issue, PromptBuilder, Tracker, Workspace}
 
-  @stop_after_turn_marker Path.join([".symphony", "stop-after-turn"])
-
   @type worker_host :: String.t() | nil
 
   @doc false
@@ -89,7 +87,6 @@ defmodule SymphonyElixir.AgentRunner do
   defp run_codex_turns(workspace, issue, codex_update_recipient, opts, worker_host) do
     max_turns = Keyword.get(opts, :max_turns, Config.settings!().agent.max_turns)
     issue_state_fetcher = Keyword.get(opts, :issue_state_fetcher, &Tracker.fetch_issue_states_by_ids/1)
-    clear_stop_after_turn_marker(workspace)
 
     with {:ok, session} <- AppServer.start_session(workspace, worker_host: worker_host) do
       try do
@@ -112,63 +109,33 @@ defmodule SymphonyElixir.AgentRunner do
            ) do
       Logger.info("Completed agent run for #{issue_context(issue)} session_id=#{turn_session[:session_id]} workspace=#{workspace} turn=#{turn_number}/#{max_turns}")
 
-      if stop_after_turn_marker?(workspace) do
-        Logger.info("Stop-after-turn marker present for #{issue_context(issue)} session_id=#{turn_session[:session_id]} workspace=#{workspace}; returning control to orchestrator")
+      case continue_with_issue?(issue, issue_state_fetcher) do
+        {:continue, refreshed_issue} when turn_number < max_turns ->
+          Logger.info("Continuing agent run for #{issue_context(refreshed_issue)} after normal turn completion turn=#{turn_number}/#{max_turns}")
 
-        :ok
-      else
-        case continue_with_issue?(issue, issue_state_fetcher) do
-          {:continue, refreshed_issue} when turn_number < max_turns ->
-            Logger.info("Continuing agent run for #{issue_context(refreshed_issue)} after normal turn completion turn=#{turn_number}/#{max_turns}")
+          do_run_codex_turns(
+            app_session,
+            workspace,
+            refreshed_issue,
+            codex_update_recipient,
+            opts,
+            issue_state_fetcher,
+            turn_number + 1,
+            max_turns
+          )
 
-            do_run_codex_turns(
-              app_session,
-              workspace,
-              refreshed_issue,
-              codex_update_recipient,
-              opts,
-              issue_state_fetcher,
-              turn_number + 1,
-              max_turns
-            )
+        {:continue, refreshed_issue} ->
+          Logger.info("Reached agent.max_turns for #{issue_context(refreshed_issue)} with issue still active; returning control to orchestrator")
 
-          {:continue, refreshed_issue} ->
-            Logger.info("Reached agent.max_turns for #{issue_context(refreshed_issue)} with issue still active; returning control to orchestrator")
+          :ok
 
-            :ok
+        {:done, _refreshed_issue} ->
+          :ok
 
-          {:done, _refreshed_issue} ->
-            :ok
-
-          {:error, reason} ->
-            {:error, reason}
-        end
+        {:error, reason} ->
+          {:error, reason}
       end
     end
-  end
-
-  defp stop_after_turn_marker?(workspace) when is_binary(workspace) do
-    workspace
-    |> stop_after_turn_marker_path()
-    |> File.exists?()
-  end
-
-  defp clear_stop_after_turn_marker(workspace) when is_binary(workspace) do
-    case workspace |> stop_after_turn_marker_path() |> File.rm() do
-      :ok ->
-        :ok
-
-      {:error, :enoent} ->
-        :ok
-
-      {:error, reason} ->
-        Logger.warning("Failed to clear stop-after-turn marker workspace=#{workspace} reason=#{inspect(reason)}")
-        :ok
-    end
-  end
-
-  defp stop_after_turn_marker_path(workspace) when is_binary(workspace) do
-    Path.join(workspace, @stop_after_turn_marker)
   end
 
   defp build_turn_prompt(issue, opts, 1, _max_turns), do: PromptBuilder.build_prompt(issue, opts)

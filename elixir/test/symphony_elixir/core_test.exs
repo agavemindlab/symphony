@@ -113,26 +113,37 @@ defmodule SymphonyElixir.CoreTest do
     assert String.trim(prompt) != ""
     assert is_binary(Config.workflow_prompt())
     assert Config.workflow_prompt() == prompt
-    assert prompt =~ "## Phase Map"
-    assert prompt =~ "## Main Flow"
-    assert prompt =~ "## Requirements"
-    assert prompt =~ "## Design"
-    assert prompt =~ "## Implementation"
-    assert prompt =~ "## Deployment"
-    assert prompt =~ "closing the artifact, saving the next phase"
-    assert prompt =~ "leaving the issue `In Progress`"
-    assert prompt =~ ".symphony/stop-after-turn"
-    assert prompt =~ "Do **not** open the next phase skill in this session"
-    assert prompt =~ "Phase artifacts and other Linear comments"
-    assert prompt =~ "collapsible sections (`>>>`)"
-    assert prompt =~ "Do **not** use GitHub-style"
-    assert prompt =~ "## Phase Artifact Protocol"
-    assert prompt =~ "### Phase-closing replies"
-    assert prompt =~ "✅ 已批准，进入 [Next Phase]"
-    assert prompt =~ "⏩ 自动进入 [Next Phase]"
-    assert prompt =~ "`Human Review`"
-    assert prompt =~ "`Rework`"
-    assert prompt =~ ">>> 🛠️ 本次激活的 skills"
+    assert prompt =~ "变更摘要（summary）"
+    assert prompt =~ "变更范围（changed areas）"
+    assert prompt =~ "风险/注意（risks）"
+    assert prompt =~ "审核重点（review focus）"
+    assert prompt =~ "后续事项（follow-ups）"
+    assert prompt =~ "一句话陈述意图或结果"
+    assert prompt =~ "（新增）/（修改）/（语义变化: X→Y）/（顺序调整）"
+    assert prompt =~ "映射回 acceptance criteria"
+    assert prompt =~ "| 验收项 | 状态 | 证据 |"
+    assert prompt =~ "validation 表格只列"
+    assert prompt =~ "当前 acceptance criterion 的状态"
+    assert prompt =~ "有限选项"
+    assert prompt =~ "nit"
+    assert prompt =~ "blocker"
+    assert prompt =~ "🚨 blocker"
+    assert prompt =~ "💡 nit"
+    assert prompt =~ "✅ 通过"
+    assert prompt =~ "⚠️ 部分通过"
+    assert prompt =~ "❌ 失败"
+    assert prompt =~ "➖ N/A"
+    assert prompt =~ "📝 变更摘要"
+    assert prompt =~ "📂 变更范围"
+    assert prompt =~ "🔎 审核重点"
+    assert prompt =~ "⚠️ 风险/注意"
+    assert prompt =~ "✅ 验证"
+    assert prompt =~ "📌 后续事项"
+    assert prompt =~ "> 👉 **Human action needed**"
+    assert prompt =~ "<details>"
+    assert prompt =~ "<summary>"
+    assert prompt =~ "> [!WARNING]"
+    assert prompt =~ "> [!IMPORTANT]"
     assert length(String.split(prompt, "---")) >= 4
   end
 
@@ -1153,11 +1164,11 @@ defmodule SymphonyElixir.CoreTest do
     assert prompt =~ "This is an unattended Symphony orchestration session."
     assert prompt =~ "Stop early only for a true blocker"
     assert prompt =~ "Do not include generic \"next steps for user\""
-    assert prompt =~ "Identify the phase awaiting review"
-    assert prompt =~ "standalone top-level **human** comments on the issue"
-    assert prompt =~ "Target phase = Deployment"
-    assert prompt =~ "reachable only via `Merging`"
-    assert prompt =~ ".symphony/stop-after-turn"
+    assert prompt =~ "latest active `## Review Handoff`"
+    assert prompt =~ "human comments after that handoff"
+    assert prompt =~ "guardrail has one Phase 1 exception"
+    assert prompt =~ "When the issue enters `Merging`, open and follow"
+    assert prompt =~ ".agents/skills/phase-merge-and-confirm/SKILL.md"
     assert prompt =~ "Continuation context:"
     assert prompt =~ "retry attempt #2"
 
@@ -1551,136 +1562,6 @@ defmodule SymphonyElixir.CoreTest do
       assert Enum.at(turn_texts, 1) =~ "continuation turn #2 of 3"
     after
       System.delete_env("SYMP_TEST_CODEx_TRACE")
-      File.rm_rf(test_root)
-    end
-  end
-
-  test "agent runner stops same-session continuation when stop-after-turn marker is written" do
-    test_root =
-      Path.join(
-        System.tmp_dir!(),
-        "symphony-elixir-agent-runner-stop-after-turn-#{System.unique_integer([:positive])}"
-      )
-
-    try do
-      template_repo = Path.join(test_root, "source")
-      workspace_root = Path.join(test_root, "workspaces")
-      workspace = Path.join(workspace_root, "MT-249")
-      stop_marker = Path.join([workspace, ".symphony", "stop-after-turn"])
-      codex_binary = Path.join(test_root, "fake-codex")
-      trace_file = Path.join(test_root, "codex.trace")
-
-      File.mkdir_p!(template_repo)
-      File.write!(Path.join(template_repo, "README.md"), "# test")
-      System.cmd("git", ["-C", template_repo, "init", "-b", "main"])
-      System.cmd("git", ["-C", template_repo, "config", "user.name", "Test User"])
-      System.cmd("git", ["-C", template_repo, "config", "user.email", "test@example.com"])
-      System.cmd("git", ["-C", template_repo, "add", "README.md"])
-      System.cmd("git", ["-C", template_repo, "commit", "-m", "initial"])
-
-      File.write!(codex_binary, """
-      #!/bin/sh
-      trace_file="${SYMP_TEST_CODEx_TRACE:-/tmp/codex.trace}"
-      stop_marker="${SYMP_TEST_STOP_MARKER:?}"
-      run_id="$(date +%s%N)-$$"
-      printf 'RUN:%s\\n' "$run_id" >> "$trace_file"
-      count=0
-
-      while IFS= read -r line; do
-        count=$((count + 1))
-        printf 'JSON:%s\\n' "$line" >> "$trace_file"
-        case "$count" in
-          1)
-            printf '%s\\n' '{"id":1,"result":{}}'
-            ;;
-          2)
-            ;;
-          3)
-            printf '%s\\n' '{"id":2,"result":{"thread":{"id":"thread-stop-marker"}}}'
-            ;;
-          4)
-            mkdir -p "$(dirname "$stop_marker")"
-            : > "$stop_marker"
-            printf '%s\\n' '{"id":3,"result":{"turn":{"id":"turn-stop-marker-1"}}}'
-            printf '%s\\n' '{"method":"turn/completed"}'
-            ;;
-          5)
-            printf '%s\\n' '{"id":3,"result":{"turn":{"id":"turn-stop-marker-2"}}}'
-            printf '%s\\n' '{"method":"turn/completed"}'
-            ;;
-        esac
-      done
-      """)
-
-      File.chmod!(codex_binary, 0o755)
-      System.put_env("SYMP_TEST_CODEx_TRACE", trace_file)
-      System.put_env("SYMP_TEST_STOP_MARKER", stop_marker)
-
-      on_exit(fn ->
-        System.delete_env("SYMP_TEST_CODEx_TRACE")
-        System.delete_env("SYMP_TEST_STOP_MARKER")
-      end)
-
-      write_workflow_file!(Workflow.workflow_file_path(),
-        workspace_root: workspace_root,
-        hook_after_create: "cp #{Path.join(template_repo, "README.md")} README.md",
-        codex_command: "#{codex_binary} app-server",
-        max_turns: 3
-      )
-
-      parent = self()
-
-      state_fetcher = fn [_issue_id] ->
-        attempt = Process.get(:agent_stop_marker_fetch_count, 0) + 1
-        Process.put(:agent_stop_marker_fetch_count, attempt)
-        send(parent, {:issue_state_fetch, attempt})
-
-        state =
-          if attempt == 1 do
-            "In Progress"
-          else
-            "Done"
-          end
-
-        {:ok,
-         [
-           %Issue{
-             id: "issue-stop-marker",
-             identifier: "MT-249",
-             title: "Stop after auto-advance",
-             description: "Marker asks runner to yield to the scheduler",
-             state: state
-           }
-         ]}
-      end
-
-      issue = %Issue{
-        id: "issue-stop-marker",
-        identifier: "MT-249",
-        title: "Stop after auto-advance",
-        description: "Marker asks runner to yield to the scheduler",
-        state: "In Progress",
-        url: "https://example.org/issues/MT-249",
-        labels: []
-      }
-
-      assert :ok = AgentRunner.run(issue, nil, issue_state_fetcher: state_fetcher)
-      refute_received {:issue_state_fetch, _}
-
-      lines = File.read!(trace_file) |> String.split("\n", trim: true)
-
-      turn_starts =
-        lines
-        |> Enum.filter(&String.starts_with?(&1, "JSON:"))
-        |> Enum.map(&String.trim_leading(&1, "JSON:"))
-        |> Enum.map(&Jason.decode!/1)
-        |> Enum.count(&(&1["method"] == "turn/start"))
-
-      assert turn_starts == 1
-      assert File.exists?(stop_marker)
-    after
-      System.delete_env("SYMP_TEST_CODEx_TRACE")
-      System.delete_env("SYMP_TEST_STOP_MARKER")
       File.rm_rf(test_root)
     end
   end
