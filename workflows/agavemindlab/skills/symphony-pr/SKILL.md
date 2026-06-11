@@ -17,6 +17,9 @@ description:
 
 - Push current branch changes to `origin` safely.
 - Create a PR if none exists for the branch, otherwise update the existing PR.
+- Refuse to publish a PR branch diff that contains agent-only cleanup files
+  such as `.symphony/workpad.md`; those files are persisted through Linear
+  issue attachments instead.
 - Request code review for the latest PR head per the project's reviewer
   configuration and handle review feedback before handoff.
 - Preserve pending human reviewer requests. Never remove or replace a human
@@ -39,9 +42,21 @@ the automated review request and proceed directly to human handoff.
 
 1. Identify current branch and confirm remote state.
 2. Run scope-appropriate local validation from `AGENTS.md` before pushing.
-3. Push branch to `origin` with upstream tracking if needed, using whatever
+3. Ensure agent state is recoverable and the PR branch is clean before pushing:
+   - If `.symphony/workpad.md` exists, read its `cleanup` frontmatter list.
+   - Confirm the latest cleanup paths have been uploaded as a
+     `Symphony agent state` Linear issue attachment.
+   - Keep those paths out of the PR branch index. If any cleanup path is
+     already tracked on the PR branch, stop and remove it from the PR branch
+     history or index before publishing; do not auto-delete the working copy.
+   - Do not write review-request timestamps or timeout metadata back into
+     `.symphony/workpad.md` after publishing; put those details in the
+     Implementation artifact instead.
+   - Verify `git diff --name-only upstream/${SYMPHONY_BASE_BRANCH:-main}...HEAD`
+     does not list any cleanup path.
+4. Push branch to `origin` with upstream tracking if needed, using whatever
    remote URL is already configured.
-4. If push is not clean/rejected:
+5. If push is not clean/rejected:
    - If the failure is a non-fast-forward or sync problem, run the `symphony-pull`
      skill to merge `upstream/${SYMPHONY_BASE_BRANCH:-main}`, resolve
      conflicts, and rerun validation.
@@ -50,14 +65,14 @@ the automated review request and proceed directly to human handoff.
      the configured remote, stop and surface the exact error instead of
      rewriting remotes or switching protocols as a workaround.
 
-5. Ensure a PR exists for the branch:
+6. Ensure a PR exists for the branch:
    - If no PR exists, create one.
    - If a PR exists and is open, update it.
    - If branch is tied to a closed/merged PR, create a new branch + PR.
    - Write a proper PR title that clearly describes the change outcome.
    - For branch updates, explicitly reconsider whether current PR title still
      matches the latest scope; update it if it no longer does.
-6. Write/update PR body from `.github/pull_request_template.md` if the
+7. Write/update PR body from `.github/pull_request_template.md` if the
    repository provides one:
    - Treat the template as the source of truth for required PR content.
    - Fill every section with concrete content for this change.
@@ -66,7 +81,7 @@ the automated review request and proceed directly to human handoff.
    - If PR already exists, refresh body content so it reflects the total PR
      scope, not just the newest commits.
    - Do not reuse stale description text from earlier iterations.
-7. Request code review per the project's reviewer configuration:
+8. Request code review per the project's reviewer configuration:
    - Request review after every PR create/update with a code, test, or
      documentation diff, unless no reviewer is configured.
    - Before requesting an automated reviewer, inspect existing PR review
@@ -76,7 +91,8 @@ the automated review request and proceed directly to human handoff.
    - Do not use `--remove-reviewer`, do not rewrite the requested-reviewer
      set, and do not treat replacing a human reviewer with an automated
      reviewer as acceptable.
-   - Record the request timestamp and head SHA in the workpad (`.symphony/workpad.md`).
+   - Record the request timestamp and head SHA in the Implementation artifact
+     notes, not in cleanup files that are kept out of the PR branch.
    - Wait up to 20 minutes for automated review feedback, polling about once
      per minute.
    - If the automated reviewer leaves actionable comments or requests
@@ -88,12 +104,11 @@ the automated review request and proceed directly to human handoff.
      review again after code/test/docs changes.
    - If automated review does not arrive before the timeout, do not block
      forever and do not mark the review as passed. Record the timeout in the
-     workpad and surface it so the `## Implementation` artifact's `风险/注意`
-     notes the missing automated review result.
+     `## Implementation` artifact's `风险/注意`.
    - If automated review is skipped to preserve a pending human reviewer
      request, do not treat that as success or failure; record the preserved
      reviewer and continue to human PR review handoff.
-8. Reply with the PR URL from `gh pr view`.
+9. Reply with the PR URL from `gh pr view`.
 
 ## Commands
 
@@ -104,6 +119,66 @@ branch=$(git branch --show-current)
 # Scope-appropriate validation gates from AGENTS.md.
 # Run the commands that match the files changed; record exactly what ran
 # in the PR template.
+
+# Keep cleanup files out of the PR.
+# Prefer the cleanup list from .symphony/workpad.md when it exists.
+if [ -f .symphony/workpad.md ]; then
+  cleanup_paths=$(
+    awk '
+      BEGIN { in_yaml=0; in_cleanup=0 }
+      NR == 1 && $0 == "---" { in_yaml=1; next }
+      in_yaml && $0 == "---" { exit }
+      in_yaml && /^cleanup:/ { in_cleanup=1; next }
+      in_yaml && in_cleanup && /^  - / { sub(/^  - /, ""); print; next }
+      in_yaml && in_cleanup && /^[^[:space:]]/ { in_cleanup=0 }
+    ' .symphony/workpad.md
+  )
+
+  if [ -n "$cleanup_paths" ]; then
+    tracked_cleanup=$(
+      printf '%s\n' "$cleanup_paths" | while IFS= read -r cleanup_path; do
+        [ -n "$cleanup_path" ] || continue
+        git ls-files --error-unmatch "$cleanup_path" >/dev/null 2>&1 && printf '%s\n' "$cleanup_path"
+      done
+    )
+    if [ -n "$tracked_cleanup" ]; then
+      echo "Refusing to publish PR with cleanup files tracked on the PR branch:" >&2
+      echo "$tracked_cleanup" >&2
+      echo "Upload them as a Linear state attachment and remove them from the PR branch index/history before publishing." >&2
+      exit 1
+    fi
+
+    staged_cleanup=$(
+      printf '%s\n' "$cleanup_paths" | while IFS= read -r cleanup_path; do
+        [ -n "$cleanup_path" ] || continue
+        git diff --cached --name-only -- "$cleanup_path" | sed '/^$/d'
+      done
+    )
+    if [ -n "$staged_cleanup" ]; then
+      echo "Refusing to publish PR with cleanup files staged:" >&2
+      echo "$staged_cleanup" >&2
+      exit 1
+    fi
+  fi
+fi
+
+base_ref="upstream/${SYMPHONY_BASE_BRANCH:-main}"
+if git rev-parse --verify "$base_ref" >/dev/null 2>&1 && [ -n "${cleanup_paths:-}" ]; then
+  pr_files=$(git diff --name-only "$base_ref"...HEAD)
+  cleanup_file=$(mktemp)
+  pr_file=$(mktemp)
+  printf '%s\n' "$cleanup_paths" | sort -u >"$cleanup_file"
+  printf '%s\n' "$pr_files" | sort -u >"$pr_file"
+  leaked_cleanup=$(
+    comm -12 "$cleanup_file" "$pr_file"
+  )
+  rm -f "$cleanup_file" "$pr_file"
+  if [ -n "$leaked_cleanup" ]; then
+    echo "Refusing to publish PR with cleanup files in diff:" >&2
+    echo "$leaked_cleanup" >&2
+    exit 1
+  fi
+fi
 
 # Initial push: push feature branches to the fork (`origin`).
 git push -u origin HEAD

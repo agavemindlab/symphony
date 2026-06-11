@@ -172,9 +172,15 @@ Symphony only starts the agent when the issue is in an active state (`Todo`, `In
 
 1. Open and follow `.agents/skills/symphony-linear/SKILL.md` to fetch the issue, its current Linear state, and its active (unresolved) Phase artifacts.
 
-2. Ensure the feature branch exists so `.symphony/workpad.md` is readable and writable:
+2. Ensure the feature branch exists and restore agent state:
    - Read the issue's `branchName` field from Linear.
    - If already on that branch, continue. Otherwise check it out — preferring an existing branch on `origin`, then a local branch, then creating a new one from `upstream/${SYMPHONY_BASE_BRANCH:-main}`.
+   - Restore the latest `Symphony agent state` Linear issue attachment into
+     `.symphony/` when present. If no attachment exists, continue with a new
+     workpad. Never require `.symphony/` to be tracked on the PR branch.
+   - Ensure `.symphony/` is listed in local `.git/info/exclude` so agent state
+     does not dirty `git status` or get staged by broad git commands. This is a
+     local workspace setting, not a repository change.
 
 3. Route by Linear state:
    - `Todo` → move to `In Progress`, then continue as `In Progress`.
@@ -300,7 +306,13 @@ dedup, and the workpad record live in `symphony-issue`.
 
 ## Workpad
 
-Agent execution state lives in `.symphony/workpad.md` on the feature branch, committed to git. Machine-read fields (`current_phase`, `cleanup`) go in the YAML frontmatter; the rest is markdown. It is excluded from the final merge via the `cleanup` field.
+Agent execution state lives in `.symphony/workpad.md` in the workspace while a
+phase is active. Machine-read fields (`current_phase`, `cleanup`) go in the
+YAML frontmatter; the rest is markdown. Files listed in `cleanup` are
+dev-cycle state: persist them as a Linear issue attachment named
+`Symphony agent state`, not to the PR branch. A GitHub PR diff is computed from
+the base tree and PR head tree, so any tracked file present in the PR head
+appears in the PR; there is no same-branch hide list.
 
 ```markdown
 ---
@@ -332,7 +344,17 @@ cleanup:
 
 ### Persistence
 
-Commit and push the agent state — the workpad and, once Design has written it, `.symphony/design.md` — so origin always holds the latest and a recreated workspace recovers via `git pull`. Whenever that state changes materially, and always before returning the issue to `Human Review`, run `git add .symphony/ && git commit && git push origin <branch>`.
+Persist the agent state — the workpad and, once Design has written it,
+`.symphony/design.md` — during active Requirements / Design / Implementation
+work so a recreated workspace can recover it. Create a tarball of the cleanup
+paths, upload it with Linear `fileUpload`, and attach/link it to the issue with
+title `Symphony agent state (<branch>, <timestamp>)`. On resume, download the
+latest such attachment and unpack it into the workspace. Keep cleanup paths out
+of the PR branch index; before returning Implementation to `Human Review`,
+verify the PR diff contains none of them. If rework changes the workpad, upload
+a new Linear state attachment and refresh the PR branch separately. Do not
+create or update a Linear comment for state pointers; attachments metadata is
+the state index.
 
 ## Guardrails
 

@@ -26,10 +26,14 @@ description:
 1. Read session history to identify scope, intent, and rationale.
 2. Inspect the working tree and staged changes (`git status`, `git diff`,
    `git diff --staged`).
-3. Stage intended changes, including new files (`git add -A`) after confirming
-   scope.
-4. Sanity-check newly added files; if anything looks random or likely ignored
-   (build artifacts, logs, temp files), flag it to the user before committing.
+3. Stage intended changes, including new files, after confirming scope. If
+   `.symphony/workpad.md` exists, read its `cleanup` list and keep those paths
+   out of the PR branch index; they are persisted through the Linear
+   `Symphony agent state` attachment instead of git commits. Do not use a blind
+   `git add -A` that stages cleanup paths.
+4. Sanity-check newly added files; if anything looks random, likely ignored, or
+   agent-only state (build artifacts, logs, temp files, `.symphony/`), remove it
+   from the index before committing.
 5. If staging is incomplete or includes unrelated files, fix the index or ask
    for confirmation.
 6. Choose a conventional type and optional scope that match the change (e.g.,

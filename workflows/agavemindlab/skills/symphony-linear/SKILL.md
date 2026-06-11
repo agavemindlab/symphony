@@ -175,6 +175,7 @@ query IssueDetails($id: String!) {
         title
         url
         sourceType
+        createdAt
       }
     }
   }
@@ -537,6 +538,46 @@ mutation FileUpload(
   }
 }
 ```
+
+### Persist and restore Symphony agent state
+
+Use Linear attachments for agent-only files that must survive session loss but
+must not enter the GitHub PR diff, such as `.symphony/workpad.md`,
+`.symphony/design.md`, and other paths listed in the workpad `cleanup`
+frontmatter.
+
+Persist:
+
+1. Create a tarball containing agent state:
+
+   ```sh
+   tar -czf /tmp/symphony-agent-state.tgz .symphony/
+   ```
+
+2. Upload it with `fileUpload` using filename
+   `symphony-agent-state-<issue-identifier>-<timestamp>.tgz`,
+   content type `application/gzip`, and `makePublic: false` when supported.
+3. Upload the file bytes to the returned `uploadUrl` with the exact headers
+   returned by `fileUpload`.
+4. Attach/link the returned `assetUrl` to the issue with title
+   `Symphony agent state (<branch>, <timestamp>)` using `attachmentLinkURL`.
+   Do not create or update a Linear comment for state pointers; the attachment
+   title and `createdAt` are the index.
+
+Restore:
+
+1. Query issue attachments and select the latest attachment whose title starts
+   with `Symphony agent state (`. Prefer the greatest `createdAt`.
+2. Download its `url` to a temporary file.
+3. Unpack it into the workspace root:
+
+   ```sh
+   tar -xzf /tmp/symphony-agent-state.tgz
+   grep -qxF '.symphony/' .git/info/exclude || printf '\n.symphony/\n' >> .git/info/exclude
+   ```
+
+Do not include secrets or credentials in state attachments. Keep the tarball
+limited to files listed in the workpad `cleanup` field.
 
 ## Usage rules
 
