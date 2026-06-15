@@ -1152,6 +1152,7 @@ defmodule SymphonyElixir.CoreTest do
     assert prompt =~ "## Phase Map"
     assert prompt =~ "## Main Flow"
     assert prompt =~ "Scan **every** unresolved artifact"
+    assert prompt =~ "inspect each artifact's `children` / thread replies"
     assert prompt =~ "retain each comment's `parent { id }`"
     assert prompt =~ "reply node as standalone top-level feedback"
     assert prompt =~ "feedback keeps the phase intent of that artifact"
