@@ -7,7 +7,7 @@ defmodule SymphonyElixir.Orchestrator do
   require Logger
   import Bitwise, only: [<<<: 2]
 
-  alias SymphonyElixir.{AgentRunner, Config, StatusDashboard, Tracker, Workspace}
+  alias SymphonyElixir.{AgentRunner, Analytics, Config, StatusDashboard, Tracker, Workspace}
   alias SymphonyElixir.Linear.Issue
 
   @continuation_retry_delay_ms 1_000
@@ -110,6 +110,7 @@ defmodule SymphonyElixir.Orchestrator do
   def handle_info(:run_poll_cycle, state) do
     state = refresh_runtime_config(state)
     state = maybe_dispatch(state)
+    record_capacity_snapshot(state)
     state = schedule_tick(state, state.poll_interval_ms)
     state = %{state | poll_check_in_progress: false}
 
@@ -127,7 +128,7 @@ defmodule SymphonyElixir.Orchestrator do
 
       issue_id ->
         {running_entry, state} = pop_running_entry(state, issue_id)
-        state = record_session_completion_totals(state, running_entry)
+        state = complete_running_entry(state, issue_id, running_entry, reason)
         session_id = running_entry_session_id(running_entry)
 
         state = handle_agent_down(reason, state, issue_id, running_entry, session_id)
@@ -166,6 +167,7 @@ defmodule SymphonyElixir.Orchestrator do
 
       running_entry ->
         {updated_running_entry, token_delta} = integrate_codex_update(running_entry, update)
+        record_codex_usage_event(issue_id, updated_running_entry, token_delta, update)
 
         state =
           state
@@ -549,7 +551,7 @@ defmodule SymphonyElixir.Orchestrator do
         release_issue_claim(state, issue_id)
 
       %{pid: pid, ref: ref, identifier: identifier} = running_entry ->
-        state = record_session_completion_totals(state, running_entry)
+        state = complete_running_entry(state, issue_id, running_entry, {:reconciled, cleanup_workspace})
         worker_host = Map.get(running_entry, :worker_host)
 
         if cleanup_workspace do
@@ -611,7 +613,7 @@ defmodule SymphonyElixir.Orchestrator do
         Logger.warning("Issue blocked: issue_id=#{issue_id} issue_identifier=#{identifier} session_id=#{session_id} elapsed_ms=#{elapsed_ms}; #{error}")
 
         state
-        |> record_session_completion_totals(running_entry)
+        |> complete_running_entry(issue_id, running_entry, {:stalled, :input_required, elapsed_ms})
         |> stop_and_block_issue(issue_id, running_entry, error)
       else
         Logger.warning("Issue stalled: issue_id=#{issue_id} issue_identifier=#{identifier} session_id=#{session_id} elapsed_ms=#{elapsed_ms}; restarting with backoff")
@@ -756,6 +758,8 @@ defmodule SymphonyElixir.Orchestrator do
       last_codex_event: Map.get(running_entry, :last_codex_event),
       last_codex_timestamp: Map.get(running_entry, :last_codex_timestamp)
     }
+
+    record_blocked_event(issue_id, blocked_entry)
 
     %{
       state
@@ -972,6 +976,8 @@ defmodule SymphonyElixir.Orchestrator do
             started_at: DateTime.utc_now()
           })
 
+        record_run_started_event(issue.id, Map.fetch!(running, issue.id))
+
         %{
           state
           | running: running,
@@ -1043,6 +1049,17 @@ defmodule SymphonyElixir.Orchestrator do
     error_suffix = if is_binary(error), do: " error=#{error}", else: ""
 
     Logger.warning("Retrying issue_id=#{issue_id} issue_identifier=#{identifier} in #{delay_ms}ms (attempt #{next_attempt})#{error_suffix}")
+
+    record_retry_scheduled_event(issue_id, %{
+      identifier: identifier,
+      issue_url: issue_url,
+      attempt: next_attempt,
+      delay_ms: delay_ms,
+      due_at_ms: due_at_ms,
+      error: error,
+      worker_host: worker_host,
+      workspace_path: workspace_path
+    })
 
     %{
       state
@@ -1588,6 +1605,145 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   defp record_session_completion_totals(state, _running_entry), do: state
+
+  defp complete_running_entry(state, issue_id, running_entry, reason) do
+    state = record_session_completion_totals(state, running_entry)
+    record_run_completed_event(issue_id, running_entry, reason)
+    state
+  end
+
+  defp record_run_started_event(issue_id, running_entry) when is_map(running_entry) do
+    Analytics.record_event(
+      %{
+        event_type: :run_started,
+        issue_id: issue_id,
+        issue_identifier: Map.get(running_entry, :identifier),
+        issue_url: issue_url(running_entry),
+        state: issue_state(running_entry),
+        run_id: run_id(issue_id, Map.get(running_entry, :started_at)),
+        attempt: Map.get(running_entry, :retry_attempt, 0),
+        worker_host: Map.get(running_entry, :worker_host),
+        workspace_path: Map.get(running_entry, :workspace_path)
+      },
+      recorded_at: Map.get(running_entry, :started_at)
+    )
+  end
+
+  defp record_run_started_event(_issue_id, _running_entry), do: :ok
+
+  defp record_codex_usage_event(issue_id, running_entry, token_delta, update)
+       when is_map(running_entry) and is_map(token_delta) do
+    if positive_token_delta?(token_delta) do
+      Analytics.record_event(
+        %{
+          event_type: :cost_snapshot,
+          issue_id: issue_id,
+          issue_identifier: Map.get(running_entry, :identifier),
+          issue_url: issue_url(running_entry),
+          state: issue_state(running_entry),
+          run_id: run_id(issue_id, Map.get(running_entry, :started_at)),
+          session_id: Map.get(running_entry, :session_id),
+          source: "codex_usage",
+          tokens: %{
+            input_tokens: Map.get(running_entry, :codex_input_tokens, 0),
+            output_tokens: Map.get(running_entry, :codex_output_tokens, 0),
+            total_tokens: Map.get(running_entry, :codex_total_tokens, 0)
+          },
+          token_delta: %{
+            input_tokens: Map.get(token_delta, :input_tokens, 0),
+            output_tokens: Map.get(token_delta, :output_tokens, 0),
+            total_tokens: Map.get(token_delta, :total_tokens, 0)
+          }
+        },
+        recorded_at: Map.get(update, :timestamp)
+      )
+    end
+  end
+
+  defp record_codex_usage_event(_issue_id, _running_entry, _token_delta, _update), do: :ok
+
+  defp record_run_completed_event(issue_id, running_entry, reason) when is_map(running_entry) do
+    Analytics.record_event(%{
+      event_type: :run_completed,
+      issue_id: issue_id,
+      issue_identifier: Map.get(running_entry, :identifier),
+      issue_url: issue_url(running_entry),
+      state: issue_state(running_entry),
+      run_id: run_id(issue_id, Map.get(running_entry, :started_at)),
+      session_id: running_entry_session_id(running_entry),
+      attempt: Map.get(running_entry, :retry_attempt, 0),
+      runtime_seconds: running_seconds(Map.get(running_entry, :started_at), DateTime.utc_now()),
+      completion_reason: inspect(reason),
+      tokens: %{
+        input_tokens: Map.get(running_entry, :codex_input_tokens, 0),
+        output_tokens: Map.get(running_entry, :codex_output_tokens, 0),
+        total_tokens: Map.get(running_entry, :codex_total_tokens, 0)
+      }
+    })
+  end
+
+  defp record_run_completed_event(_issue_id, _running_entry, _reason), do: :ok
+
+  defp record_retry_scheduled_event(issue_id, retry_entry) when is_map(retry_entry) do
+    Analytics.record_event(%{
+      event_type: :retry_scheduled,
+      issue_id: issue_id,
+      issue_identifier: Map.get(retry_entry, :identifier),
+      issue_url: Map.get(retry_entry, :issue_url),
+      attempt: Map.get(retry_entry, :attempt),
+      delay_ms: Map.get(retry_entry, :delay_ms),
+      due_at_ms: Map.get(retry_entry, :due_at_ms),
+      reason: Map.get(retry_entry, :error),
+      worker_host: Map.get(retry_entry, :worker_host),
+      workspace_path: Map.get(retry_entry, :workspace_path)
+    })
+  end
+
+  defp record_blocked_event(issue_id, blocked_entry) when is_map(blocked_entry) do
+    Analytics.record_event(
+      %{
+        event_type: :blocked,
+        issue_id: issue_id,
+        issue_identifier: Map.get(blocked_entry, :identifier),
+        issue_url: blocked_issue_url(blocked_entry),
+        state: blocked_issue_state(blocked_entry),
+        session_id: Map.get(blocked_entry, :session_id),
+        reason: Map.get(blocked_entry, :error),
+        worker_host: Map.get(blocked_entry, :worker_host),
+        workspace_path: Map.get(blocked_entry, :workspace_path),
+        last_codex_event: Map.get(blocked_entry, :last_codex_event)
+      },
+      recorded_at: Map.get(blocked_entry, :blocked_at)
+    )
+  end
+
+  defp record_capacity_snapshot(%State{} = state) do
+    Analytics.record_event(%{
+      event_type: :capacity_snapshot,
+      running_count: map_size(state.running),
+      retrying_count: map_size(state.retry_attempts),
+      blocked_count: map_size(state.blocked),
+      configured_capacity: state.max_concurrent_agents || Config.settings!().agent.max_concurrent_agents
+    })
+  end
+
+  defp positive_token_delta?(token_delta) do
+    Enum.any?([:input_tokens, :output_tokens, :total_tokens], fn key ->
+      Map.get(token_delta, key, 0) > 0
+    end)
+  end
+
+  defp issue_url(%{issue: %Issue{url: url}}), do: url
+  defp issue_url(_running_entry), do: nil
+
+  defp issue_state(%{issue: %Issue{state: state}}), do: state
+  defp issue_state(_running_entry), do: nil
+
+  defp run_id(issue_id, %DateTime{} = started_at) when is_binary(issue_id) do
+    "#{issue_id}-#{DateTime.to_unix(started_at, :millisecond)}"
+  end
+
+  defp run_id(issue_id, _started_at), do: issue_id
 
   defp refresh_runtime_config(%State{} = state) do
     config = Config.settings!()

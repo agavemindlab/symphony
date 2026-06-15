@@ -952,6 +952,40 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert Config.settings!().codex.command == "codex app-server"
   end
 
+  test "config reads observability analytics path from workflow" do
+    previous_analytics_file = Application.get_env(:symphony_elixir, :analytics_file)
+
+    on_exit(fn ->
+      if is_nil(previous_analytics_file) do
+        Application.delete_env(:symphony_elixir, :analytics_file)
+      else
+        Application.put_env(:symphony_elixir, :analytics_file, previous_analytics_file)
+      end
+    end)
+
+    Application.delete_env(:symphony_elixir, :analytics_file)
+
+    analytics_path =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-analytics-#{System.unique_integer([:positive])}.ndjson"
+      )
+
+    write_workflow_file!(Workflow.workflow_file_path(), observability_analytics_path: analytics_path)
+
+    config = Config.settings!()
+    assert config.observability.analytics_path == analytics_path
+    assert SymphonyElixir.Analytics.file_path() == analytics_path
+
+    home_relative_path = Path.join(["~", "symphony", "events.ndjson"])
+
+    write_workflow_file!(Workflow.workflow_file_path(), observability_analytics_path: home_relative_path)
+
+    config = Config.settings!()
+    assert config.observability.analytics_path == Path.expand(home_relative_path)
+    assert SymphonyElixir.Analytics.file_path() == Path.expand(home_relative_path)
+  end
+
   test "config resolves $VAR references for env-backed secret and path values" do
     workspace_env_var = "SYMP_WORKSPACE_ROOT_#{System.unique_integer([:positive])}"
     api_key_env_var = "SYMP_LINEAR_API_KEY_#{System.unique_integer([:positive])}"
@@ -1040,6 +1074,8 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     original_workflow_path = Workflow.workflow_file_path()
 
     try do
+      configure_fake_gh_clone!(test_root)
+
       canonical_workflow = Path.expand("../workflows/agavemindlab/WORKFLOW.md", File.cwd!())
       canonical_skills = Path.expand("../workflows/agavemindlab/skills", File.cwd!())
       canonical_dir = Path.join(test_root, "agavemindlab")
@@ -1083,11 +1119,11 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
 
       assert {:ok, workspace} = Workspace.create_for_issue("MT-SKILL-INSTALL")
 
-      assert File.exists?(Path.join([workspace, ".agents", "skills", "commit", "SKILL.md"]))
+      assert File.exists?(Path.join([workspace, ".agents", "skills", "symphony-commit", "SKILL.md"]))
       assert File.read!(Path.join([workspace, ".agents", "skills", "linear", "SKILL.md"])) == "repo version\n"
 
       exclude = File.read!(Path.join([workspace, ".git", "info", "exclude"]))
-      assert exclude =~ ".agents/skills/commit/"
+      assert exclude =~ ".agents/skills/symphony-commit/"
       refute exclude =~ ".agents/skills/linear/"
 
       assert {"", 0} = System.cmd("git", ["-C", workspace, "status", "--short"])
@@ -1113,6 +1149,8 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     original_workflow_path = Workflow.workflow_file_path()
 
     try do
+      configure_fake_gh_clone!(test_root)
+
       canonical_workflow = Path.expand("../workflows/agavemindlab/WORKFLOW.md", File.cwd!())
       canonical_skills = Path.expand("../workflows/agavemindlab/skills", File.cwd!())
       canonical_dir = Path.join(test_root, "agavemindlab")
@@ -1150,7 +1188,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
 
       assert output =~ "setup failed"
 
-      refute File.exists?(Path.join([workspace, ".agents", "skills", "commit", "SKILL.md"]))
+      refute File.exists?(Path.join([workspace, ".agents", "skills", "symphony-commit", "SKILL.md"]))
     after
       Workflow.set_workflow_file_path(original_workflow_path)
       restore_env(workflow_root_env_var, previous_workflow_root)
@@ -1585,5 +1623,62 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     after
       File.rm_rf(test_root)
     end
+  end
+
+  defp configure_fake_gh_clone!(test_root) do
+    source_repo = Path.join(test_root, "source-repo")
+    fake_bin = Path.join(test_root, "bin")
+    fake_gh = Path.join(fake_bin, "gh")
+
+    File.mkdir_p!(source_repo)
+    File.mkdir_p!(fake_bin)
+    File.write!(Path.join(source_repo, "README.md"), "source repo\n")
+    System.cmd("git", ["-C", source_repo, "init", "-b", "main"])
+    System.cmd("git", ["-C", source_repo, "config", "user.name", "Test User"])
+    System.cmd("git", ["-C", source_repo, "config", "user.email", "test@example.com"])
+    System.cmd("git", ["-C", source_repo, "add", "README.md"])
+    System.cmd("git", ["-C", source_repo, "commit", "-m", "initial"])
+
+    File.write!(fake_gh, """
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    case "${1:-} ${2:-}" in
+      "repo clone")
+        destination="${4:-.}"
+        git clone --depth 1 "$SYMPHONY_TEST_SOURCE_REPO" "$destination" >/dev/null 2>&1
+        git -C "$destination" remote add upstream "$SYMPHONY_TEST_SOURCE_REPO" >/dev/null 2>&1 || true
+        ;;
+      "api user")
+        printf 'test-owner\\n'
+        ;;
+      *)
+        printf 'unexpected gh invocation: %s\\n' "$*" >&2
+        exit 2
+        ;;
+    esac
+    """)
+
+    File.chmod!(fake_gh, 0o755)
+
+    previous_path = System.get_env("PATH")
+    previous_repo = System.get_env("SYMPHONY_REPO")
+    previous_source_repo = System.get_env("SYMPHONY_TEST_SOURCE_REPO")
+    previous_fork_owner = System.get_env("GITHUB_FORK_OWNER")
+    previous_base_branch = System.get_env("SYMPHONY_BASE_BRANCH")
+
+    System.put_env("PATH", fake_bin <> ":" <> (previous_path || ""))
+    System.put_env("SYMPHONY_REPO", "source-repo")
+    System.put_env("SYMPHONY_TEST_SOURCE_REPO", source_repo)
+    System.put_env("GITHUB_FORK_OWNER", "test-owner")
+    System.put_env("SYMPHONY_BASE_BRANCH", "main")
+
+    on_exit(fn ->
+      restore_env("PATH", previous_path)
+      restore_env("SYMPHONY_REPO", previous_repo)
+      restore_env("SYMPHONY_TEST_SOURCE_REPO", previous_source_repo)
+      restore_env("GITHUB_FORK_OWNER", previous_fork_owner)
+      restore_env("SYMPHONY_BASE_BRANCH", previous_base_branch)
+    end)
   end
 end
