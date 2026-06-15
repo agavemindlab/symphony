@@ -433,7 +433,9 @@ Choose **`advance`** only when **all** of these hold:
   bet, and no non-obvious risk a reviewer would balk at.
 
 On `advance`, record `confidence: advance` in the workpad notes; Main Flow
-writes the `⏩` reply and opens `phase-implementation` in the same session.
+writes the `⏩` reply, sets `current_phase: Implementation`, persists state,
+and stops this agent run. The next Symphony dispatch opens
+`phase-implementation`.
 
 Otherwise choose **`stop`** — Main Flow moves the issue to `Human Review`.
 This is the right outcome for a rework, for a human already in the thread,

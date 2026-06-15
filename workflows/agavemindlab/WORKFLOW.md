@@ -267,7 +267,10 @@ When the target phase is a rework of its own artifact:
 2. Do the rework.
 3. Resolve the old artifact via `commentResolve` — its outdated content collapses out of the way.
 4. Post a fresh artifact comment with the updated content.
-5. Add a reply on the **new** artifact summarizing what changed since the last version and how each piece of human feedback was addressed (`🔧 本轮修改：...`, pointing back to the specific feedback). The changelog must live on the new artifact, not the resolved old one, so the human can review the update without expanding collapsed history.
+5. Add a reply on the **new** artifact summarizing what changed since the last version and how each piece of human feedback was addressed (`🔧 本轮修改：...`, pointing back to the specific feedback).
+   - Requirements rework must also state: ``当前停在 `Human Review`；下游 Design/Implementation/PR 还未按本轮 artifact 更新，确认 Requirements 后才会继续。``
+   - Design rework must also state: ``当前停在 `Human Review`；下游 Implementation/PR 还未按本轮 artifact 更新，确认 Design 后才会继续。``
+   - The changelog must live on the new artifact, not the resolved old one, so the human can review the update without expanding collapsed history.
 
 ### Cross-phase rework
 

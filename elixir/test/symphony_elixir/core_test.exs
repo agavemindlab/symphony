@@ -113,38 +113,36 @@ defmodule SymphonyElixir.CoreTest do
     assert String.trim(prompt) != ""
     assert is_binary(Config.workflow_prompt())
     assert Config.workflow_prompt() == prompt
-    assert prompt =~ "变更摘要（summary）"
-    assert prompt =~ "变更范围（changed areas）"
-    assert prompt =~ "风险/注意（risks）"
-    assert prompt =~ "审核重点（review focus）"
-    assert prompt =~ "后续事项（follow-ups）"
-    assert prompt =~ "一句话陈述意图或结果"
-    assert prompt =~ "（新增）/（修改）/（语义变化: X→Y）/（顺序调整）"
-    assert prompt =~ "映射回 acceptance criteria"
-    assert prompt =~ "| 验收项 | 状态 | 证据 |"
-    assert prompt =~ "validation 表格只列"
-    assert prompt =~ "当前 acceptance criterion 的状态"
-    assert prompt =~ "有限选项"
-    assert prompt =~ "nit"
-    assert prompt =~ "blocker"
-    assert prompt =~ "🚨 blocker"
-    assert prompt =~ "💡 nit"
-    assert prompt =~ "✅ 通过"
-    assert prompt =~ "⚠️ 部分通过"
-    assert prompt =~ "❌ 失败"
-    assert prompt =~ "➖ N/A"
-    assert prompt =~ "📝 变更摘要"
-    assert prompt =~ "📂 变更范围"
-    assert prompt =~ "🔎 审核重点"
-    assert prompt =~ "⚠️ 风险/注意"
-    assert prompt =~ "✅ 验证"
-    assert prompt =~ "📌 后续事项"
-    assert prompt =~ "> 👉 **Human action needed**"
-    assert prompt =~ "<details>"
-    assert prompt =~ "<summary>"
-    assert prompt =~ "> [!WARNING]"
-    assert prompt =~ "> [!IMPORTANT]"
+    assert prompt =~ "## Phase Map"
+    assert prompt =~ "| Requirements | `phase-requirements` |"
+    assert prompt =~ "| Design | `phase-design` |"
+    assert prompt =~ "| Implementation | `phase-implementation` |"
+    assert prompt =~ "| Deployment | `phase-deployment` |"
+    assert prompt =~ "## Main Flow"
+    assert prompt =~ "Open and follow `.agents/skills/symphony-linear/SKILL.md`"
+    assert prompt =~ "Do **not** open the next phase skill in this session"
+    assert prompt =~ "### Rework cycle (same phase)"
+    assert prompt =~ "Requirements rework must also state"
+    assert prompt =~ "reachable only via `Merging`"
+    assert prompt =~ "## Workpad"
     assert length(String.split(prompt, "---")) >= 4
+  end
+
+  test "shared phase prompts explain rework handoff gates" do
+    repo_root = Path.expand("..", File.cwd!())
+    workflow = File.read!(Path.join(repo_root, "workflows/agavemindlab/WORKFLOW.md"))
+
+    assert workflow =~ "当前停在 `Human Review`"
+    assert workflow =~ "下游 Design/Implementation/PR 还未按本轮 artifact 更新"
+
+    requirements_skill =
+      File.read!(Path.join(repo_root, "workflows/agavemindlab/skills/phase-requirements/SKILL.md"))
+
+    design_skill =
+      File.read!(Path.join(repo_root, "workflows/agavemindlab/skills/phase-design/SKILL.md"))
+
+    refute requirements_skill =~ "opens `phase-design` in the same session"
+    refute design_skill =~ "opens `phase-implementation` in the same session"
   end
 
   test "linear api token resolves from LINEAR_API_KEY env var" do
@@ -1164,11 +1162,10 @@ defmodule SymphonyElixir.CoreTest do
     assert prompt =~ "This is an unattended Symphony orchestration session."
     assert prompt =~ "Stop early only for a true blocker"
     assert prompt =~ "Do not include generic \"next steps for user\""
-    assert prompt =~ "latest active `## Review Handoff`"
-    assert prompt =~ "human comments after that handoff"
-    assert prompt =~ "guardrail has one Phase 1 exception"
-    assert prompt =~ "When the issue enters `Merging`, open and follow"
-    assert prompt =~ ".agents/skills/phase-merge-and-confirm/SKILL.md"
+    assert prompt =~ "Open and follow `.agents/skills/symphony-linear/SKILL.md`"
+    assert prompt =~ "When the target phase is a rework of its own artifact"
+    assert prompt =~ "Requirements rework must also state"
+    assert prompt =~ "reachable only via `Merging`"
     assert prompt =~ "Continuation context:"
     assert prompt =~ "retry attempt #2"
 
