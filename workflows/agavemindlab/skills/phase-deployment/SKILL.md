@@ -27,7 +27,7 @@ action after reading the `## Deployment` artifact.
 - **Merge entry** (issue in `Merging`). Main Flow detected the merge approval,
   wrote the approval reply on `## Implementation`, and set
   `current_phase: Deployment`. Read the `## Implementation` artifact and PR,
-  then run the full path below: cleanup → land → verify → post artifact.
+  then run the full path below: leak check → land → verify → post artifact.
 - **Verification re-entry** (issue in `In Progress`, a concluded `## Deployment`
   artifact already exists with unresolved `⚠️ 待观察` items). The PR has long
   since merged. **Skip cleanup and land entirely** — do not touch the working
@@ -37,22 +37,24 @@ action after reading the `## Deployment` artifact.
   Deployment-in-`In Progress` means: continue verifying what could not be
   confirmed at deploy time.
 
-## Cleanup before merge (merge entry only)
+## Cleanup leak check before merge (merge entry only)
 
-Before landing the PR, remove all files listed in the workpad `cleanup`
-field. At minimum this includes `.symphony/workpad.md`, `.symphony/design.md`
-(Design's agent-facing design doc), and any plan docs generated during
-brainstorming (e.g., `docs/superpowers/specs/`).
+Implementation should already have kept all files listed in the workpad
+`cleanup` field out of the PR branch and persisted them through the
+`Symphony agent state` Linear attachment. Before landing, verify the PR diff is
+still clean. If any cleanup path is present because legacy state or rework
+tracked it accidentally, stop and return to Implementation rework; do not merge
+agent-only files. At minimum the cleanup list includes `.symphony/workpad.md`,
+`.symphony/design.md` (Design's agent-facing design doc), and any plan docs
+generated during brainstorming (e.g., `docs/superpowers/specs/`).
 
 ```sh
-# Example — actual paths come from workpad cleanup field
-git rm .symphony/workpad.md .symphony/design.md
-git rm -r docs/superpowers/specs/
-git commit -m "chore: remove agent scaffolding before merge"
+# Actual paths come from the restored workpad cleanup field
+git diff --name-only upstream/${SYMPHONY_BASE_BRANCH:-main}...HEAD
 ```
 
-Do not remove files that belong in the repository. Only remove files
-explicitly listed in the `cleanup` field.
+Do not remove files that belong in the repository. Only reject paths explicitly
+listed in the `cleanup` field.
 
 ## Land (merge entry only)
 

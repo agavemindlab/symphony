@@ -4,7 +4,8 @@ description:
   Run the Implementation phase of the Symphony workflow. Turn approved
   Requirements and Design into working code, tests, and a PR. Post the
   `## Implementation` artifact when the work is ready for human review.
-  Workpad lives in `.symphony/workpad.md` on the feature branch.
+  Workpad lives in workspace `.symphony/workpad.md` and is persisted through
+  the Linear state attachment, not the PR branch.
 ---
 
 # Phase: Implementation
@@ -113,9 +114,10 @@ markdown sections).
 
 Frontmatter fields:
 - `current_phase`: must be `Implementation`.
-- `cleanup`: list all files that must not be merged into main (at minimum
-  `.symphony/workpad.md`, `.symphony/design.md`, and any plan docs from
-  brainstorming).
+- `cleanup`: list all files that must not appear in the PR branch diff or
+  merge result (at minimum `.symphony/workpad.md`, `.symphony/design.md`, and
+  any plan docs from brainstorming). Persist these files as Linear issue
+  attachments, not to the PR branch.
 
 Markdown sections:
 - `## Plan`: hierarchical checklist mirroring the implementation plan.
@@ -133,18 +135,24 @@ Markdown sections:
 3. **Implement with TDD** — for new behavior: failing test → minimal code
    → green → refactor.
 4. **Commit** — invoke `symphony-commit` skill for each logical change.
-5. **Push** — invoke `symphony-pr` skill to publish to `origin` and request code
+5. **Persist agent state** — after the final workpad update, upload
+   `.symphony/workpad.md`, `.symphony/design.md`, and any other cleanup paths as
+   a `Symphony agent state` Linear issue attachment. Keep them untracked on the
+   PR branch. This is required before any PR publish / refresh so agent-only
+   state can be restored for rework without appearing in the GitHub Files
+   changed view.
+6. **Push** — invoke `symphony-pr` skill to publish to `origin` and request code
    review.
-6. **Local runtime acceptance** — execute the `## Design` 验收方案's **pre-PR
+7. **Local runtime acceptance** — execute the `## Design` 验收方案's **pre-PR
    本地验收** for each `S<N>`: exercise the feature against the running service
    per `AGENTS.md` and produce the evidence form the design named — a 截屏 for a
    single state, a 录屏 / GIF for an interactive flow — recorded readably (a
    verdict line + the artifact, raw output folded in `>>>`). If local acceptance
    is impossible, record the reason and closest safe alternative proof; surface
    the caveat in the artifact `风险/注意`.
-7. **Verify** — invoke `verification-before-completion`.
-8. **PR feedback sweep** — see protocol below.
-9. **Post artifact** — write the `## Implementation` artifact and move to
+8. **Verify** — invoke `verification-before-completion`.
+9. **PR feedback sweep** — see protocol below.
+10. **Post artifact** — write the `## Implementation` artifact and move to
    `Human Review`.
 
 ## PR feedback sweep protocol

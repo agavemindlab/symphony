@@ -70,10 +70,7 @@ codex:
   approval_policy: never
   thread_sandbox: workspace-write
   turn_sandbox_policy:
-    type: workspaceWrite
-    networkAccess: true
-    writableRoots:
-      - /var/run/docker.sock
+    type: dangerFullAccess
 ---
 
 You are working on a Linear ticket `{{ issue.identifier }}`.
@@ -162,7 +159,7 @@ The workflow progresses through four sequential phases. Each phase has a dedicat
 | Implementation | `phase-implementation` | Design approved |
 | Deployment | `phase-deployment` | Human approves merge (`Merging` state) |
 
-When the agent finishes **Requirements** or **Design** on a fresh run and is confident a human would very likely approve the artifact as-is, it **auto-advances** to the next phase in the same session instead of stopping for review; if the artifact is complete but the agent is not confident, it stops for human review. See Main Flow step 6. **Implementation** always stops at `Human Review` (the PR is up), and **Deployment** is reachable only via `Merging`.
+When the agent finishes **Requirements** or **Design** on a fresh run and is confident a human would very likely approve the artifact as-is, it **auto-advances** by closing the artifact, saving the next phase, leaving the issue `In Progress`, and ending this agent run; the next Symphony dispatch continues from that saved phase. If the artifact is complete but the agent is not confident, it stops for human review. See Main Flow step 6. **Implementation** always stops at `Human Review` (the PR is up), and **Deployment** is reachable only via `Merging`.
 
 Most issues ship code through all four phases. A `Type:Spike` (investigation / research) issue is the exception: its deliverable is a documented decision, so it rides the same phases (Design becomes an investigation plan, Implementation produces a findings artifact) but normally terminates at `Human Review` after Implementation — the human moves it to `Done` without `Merging` / Deployment. See the phase skills' `Type:Spike` notes. A sub-issue inherits its parent's scope and acceptance criteria rather than re-deriving them (see `phase-requirements`).
 
@@ -172,9 +169,15 @@ Symphony only starts the agent when the issue is in an active state (`Todo`, `In
 
 1. Open and follow `.agents/skills/symphony-linear/SKILL.md` to fetch the issue, its current Linear state, and its active (unresolved) Phase artifacts.
 
-2. Ensure the feature branch exists so `.symphony/workpad.md` is readable and writable:
+2. Ensure the feature branch exists and restore agent state:
    - Read the issue's `branchName` field from Linear.
    - If already on that branch, continue. Otherwise check it out — preferring an existing branch on `origin`, then a local branch, then creating a new one from `upstream/${SYMPHONY_BASE_BRANCH:-main}`.
+   - Restore the latest `Symphony agent state` Linear issue attachment into
+     `.symphony/` when present. If no attachment exists, continue with a new
+     workpad. Never require `.symphony/` to be tracked on the PR branch.
+   - Ensure `.symphony/` is listed in local `.git/info/exclude` so agent state
+     does not dirty `git status` or get staged by broad git commands. This is a
+     local workspace setting, not a repository change.
 
 3. Route by Linear state:
    - `Todo` → move to `In Progress`, then continue as `In Progress`.
@@ -211,12 +214,12 @@ Symphony only starts the agent when the issue is in an active state (`Todo`, `In
 
 6. Set the workpad `current_phase` to the target phase and open the matching phase skill (per the Phase Map). The skill does its phase work, posts or updates its own artifact, and on a **clean** exit hands back one of two outcomes — the skill alone decides which (see its "Exit"); only the Requirements and Design skills ever choose `advance`:
 
-   - **`advance`** → write the `⏩ 自动进入 [Next Phase]` reply on the just-posted artifact, set the workpad `current_phase` to the next phase, and loop back to the start of step 6 with that as the target.
+   - **`advance`** → write the `⏩ 自动进入 [Next Phase]` reply on the just-posted artifact, set the workpad `current_phase` to the next phase, keep the issue in `In Progress`, persist the agent state, and stop this agent run. Do **not** open the next phase skill in this session; the next Symphony dispatch targets the saved phase.
    - **`stop`** → move the issue to `Human Review` and stop.
 
    (A skill that stops **blocked** — unresolved `[NEEDS CLARIFICATION]` / escalated high-impact decision — moves the issue to `Human Review` itself; the session ends there.)
 
-   This is the only auto-advance mechanism, and Main Flow does not second-guess the skill's choice. A single confident session may chain Requirements → Design → Implementation, but the Implementation skill always returns `stop` (the PR awaits the human's merge decision), so the chain always ends at `Human Review`; Deployment is reached only via `Merging` (step 3).
+   This is the only auto-advance mechanism, and Main Flow does not second-guess the skill's choice. A confident issue may progress Requirements → Design → Implementation across successive active dispatches, but the Implementation skill always returns `stop` (the PR awaits the human's merge decision), so the chain still ends at `Human Review`; Deployment is reached only via `Merging` (step 3).
 
 ## Skill Interaction Protocol
 
@@ -248,7 +251,7 @@ For Implementation, this footer mirrors the workpad `notes` record of invoked / 
 A phase artifact is **closed** (no longer awaiting review) once its thread carries a Main-Flow-written closing reply. Two kinds exist:
 
 - `✅ 已批准，进入 [Next Phase]（[timestamp]）` — **human approval**. Main Flow writes it (step 5, or the `Merging` branch of step 3) when a human accepted the phase.
-- `⏩ 自动进入 [Next Phase]（agent 自评通过，未经人工评审，[timestamp]）` — **agent auto-advance**. Main Flow writes it when it advances a fresh, clean Requirements/Design phase without stopping (step 6).
+- `⏩ 自动进入 [Next Phase]（agent 自评通过，未经人工评审，[timestamp]）` — **agent auto-advance**. Main Flow writes it when it advances a fresh, clean Requirements/Design phase before stopping the current run (step 6).
 
 Both are equivalent for routing: an artifact with **no** closing reply is the one still awaiting human review. The distinction is for humans — a `⏩` artifact was never human-gated, so the human is free to comment on it and set `Rework` to pull the chain back via cross-phase rework.
 
@@ -300,7 +303,13 @@ dedup, and the workpad record live in `symphony-issue`.
 
 ## Workpad
 
-Agent execution state lives in `.symphony/workpad.md` on the feature branch, committed to git. Machine-read fields (`current_phase`, `cleanup`) go in the YAML frontmatter; the rest is markdown. It is excluded from the final merge via the `cleanup` field.
+Agent execution state lives in `.symphony/workpad.md` in the workspace while a
+phase is active. Machine-read fields (`current_phase`, `cleanup`) go in the
+YAML frontmatter; the rest is markdown. Files listed in `cleanup` are
+dev-cycle state: persist them as a Linear issue attachment named
+`Symphony agent state`, not to the PR branch. A GitHub PR diff is computed from
+the base tree and PR head tree, so any tracked file present in the PR head
+appears in the PR; there is no same-branch hide list.
 
 ```markdown
 ---
@@ -332,7 +341,17 @@ cleanup:
 
 ### Persistence
 
-Commit and push the agent state — the workpad and, once Design has written it, `.symphony/design.md` — so origin always holds the latest and a recreated workspace recovers via `git pull`. Whenever that state changes materially, and always before returning the issue to `Human Review`, run `git add .symphony/ && git commit && git push origin <branch>`.
+Persist the agent state — the workpad and, once Design has written it,
+`.symphony/design.md` — during active Requirements / Design / Implementation
+work so a recreated workspace can recover it. Create a tarball of the cleanup
+paths, upload it with Linear `fileUpload`, and attach/link it to the issue with
+title `Symphony agent state (<branch>, <timestamp>)`. On resume, download the
+latest such attachment and unpack it into the workspace. Keep cleanup paths out
+of the PR branch index; before returning Implementation to `Human Review`,
+verify the PR diff contains none of them. If rework changes the workpad, upload
+a new Linear state attachment and refresh the PR branch separately. Do not
+create or update a Linear comment for state pointers; attachments metadata is
+the state index.
 
 ## Guardrails
 
