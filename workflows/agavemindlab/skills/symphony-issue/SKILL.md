@@ -7,7 +7,7 @@ description:
   for human consent. Uses symphony-linear for the raw GraphQL.
 ---
 
-# Spawn a related issue
+# Spawn a Linear issue
 
 Use this when, while working an issue, you find work that belongs in its
 **own** Linear ticket. Two entry modes:
@@ -153,9 +153,11 @@ record it and move on. Both paths coexist.
 
 ## Worked examples
 
-- **follow-up during Implementation** → `related` issue created in the intake
-  state, assignee = creator, listed in the `## Implementation` artifact;
-  workpad `已创建 ENG-123`.
+- **independent follow-up during Implementation** → `related` issue created in
+  the intake state, assignee = creator, listed in the `## Implementation`
+  artifact; workpad `已创建 ENG-123`.
+- **implementation ticket that depends on the current artifact** → `downstream
+  blocked`, linked as current `blocks` new.
 - **blocking dependency found** → proposal comment + blocker callout on the
   artifact + `Human Review`; nothing created until consent.
 - **consent reply in a proposal thread** → issue created, `已创建 ENG-123`
