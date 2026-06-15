@@ -1,6 +1,6 @@
 ---
 name: symphony-pr
-description:
+description: |
   Publish the current branch as a pull request: push to origin, create or
   update the PR, write its body, and request code review. Use when the
   implementation is ready to open or refresh a PR for review.
