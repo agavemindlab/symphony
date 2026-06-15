@@ -1,18 +1,16 @@
 ---
 name: maestro
-description: Use when the user invokes `$maestro ISSUE-1234` such as `$maestro DEV-1234` to get a subagent-assisted recommendation for how to reply to a Symphony issue currently in Human Review. The skill inspects the issue, latest Review Handoff, human comments, and linked PR evidence, then suggests the reply method and draft response without changing Linear or GitHub state.
+description: Use when the user invokes `$maestro ISSUE-1234` such as `$maestro DEV-1234` to get a subagent-assisted recommendation for how to reply to a Symphony issue currently in Human Review. The skill inspects the issue, active unresolved phase artifacts, human comments, and linked PR evidence when Implementation is awaiting review, then suggests the reply method and draft response without changing Linear or GitHub state.
 ---
 
 # Maestro
 
 ## Goal
 
-Advise how to reply to a Symphony issue in `Human Review`. Use exactly one
-subagent for the independent judgment, then synthesize the recommendation for
-the user. Do not post comments, update Linear state, edit code, push commits, or
-change GitHub unless the user explicitly asks after seeing the recommendation.
-Do not let the subagent inherit the current conversation context; its judgment
-must come only from this skill's prompt and the explicit issue evidence.
+Launch an isolated Maestro reviewer subagent for a Symphony issue in
+`Human Review`, then relay its recommendation. The skill is only the adapter:
+collect evidence, start the subagent, and synthesize the result. Do not make the
+review judgment in the parent agent.
 
 ## Workflow
 
@@ -22,15 +20,25 @@ must come only from this skill's prompt and the explicit issue evidence.
      comments, attachments, and links.
    - If direct Linear tools are unavailable, use local project CLIs or logs only
      when they provide reliable evidence; otherwise report the blocker.
-3. Find the latest active `## Review Handoff` comment and any later human
-   comments.
-4. Inspect linked PRs when relevant:
+3. Read active unresolved Phase artifacts: `## Requirements`, `## Design`,
+   `## Implementation`, and `## Deployment`.
+   - Drop resolved artifacts by default; read a resolved artifact only when a
+     current human comment explicitly refers back to it.
+   - The awaiting-review artifact is the most recent phase artifact whose thread
+     has no closing reply: neither `✅ 已批准，进入 ...` nor `⏩ 自动进入 ...`.
+   - Gather new human feedback from every unresolved artifact thread and from
+     standalone top-level human comments. Attribute unclear standalone comments
+     to the awaiting-review phase.
+4. Inspect linked PRs only when `## Implementation` is awaiting review:
    - `gh pr view <pr> --json number,title,url,state,isDraft,mergeable,reviewDecision,statusCheckRollup,reviews,comments`
    - `gh pr diff <pr>`
    - `gh pr checks <pr>` when available
-5. Spawn exactly one fresh subagent with context forking disabled. Pass only
-   this skill and the evidence needed to decide how the human should reply. Ask
-   for a recommendation only; forbid mutations.
+   - Treat only human PR reviews/comments as phase feedback; ignore bot approval
+     as a human approval signal.
+5. Read `agents/maestro-reviewer.md` and spawn exactly one fresh subagent with
+   context forking disabled. Pass only that reviewer prompt and the explicit
+   evidence pack. Do not pass current conversation history, prior `$maestro`
+   results, or your own expected answer.
 6. Compare the subagent's recommendation with the evidence. If it is unsupported
    or misses later comments, correct it in the final answer and explain why.
 7. Return a concise Chinese recommendation with:
@@ -40,28 +48,31 @@ must come only from this skill's prompt and the explicit issue evidence.
    - `依据`: 2-5 evidence bullets.
    - `注意`: only if there is uncertainty or missing evidence.
 
-## Subagent Prompt
+## Evidence Pack
 
-Use a prompt shaped like this, filling in the issue evidence already gathered:
+Send the subagent a prompt shaped like this, after the contents of
+`agents/maestro-reviewer.md`:
 
 ```text
-Use $maestro to advise on the issue below. Rely only on this prompt, the
-attached skill instructions, and the explicit evidence here; ignore any prior
-conversation context.
-
-You are advising how a human should reply to a Symphony Linear issue in Human
-Review. Do not mutate Linear, GitHub, files, or issue state.
+Use the Maestro reviewer prompt above to advise on the issue below. Rely only
+on that prompt and this explicit evidence; ignore any prior conversation
+context. Do not mutate Linear, GitHub, files, or issue state.
 
 Issue: <KEY> <title>
 Current state: <state>
-Latest Review Handoff:
-<handoff text>
+Issue type/context: <Type:Spike / normal / unknown>
+Awaiting-review phase: <Requirements | Design | Implementation | Deployment>
+Awaiting-review artifact:
+<current unresolved phase artifact text>
 
-Later human comments:
-<comments or "none">
+Other unresolved phase artifacts and feedback:
+<artifact summaries, thread replies, standalone human comments, or "none">
 
-Linked PR evidence:
-<PR metadata, checks, review state, and important diff summary or "none">
+Clarification markers:
+<unresolved [NEEDS CLARIFICATION] markers and human answers, or "none">
+
+Linked PR evidence, only for Implementation review:
+<PR metadata, checks, human review state/comments, important diff summary, or "none">
 
 Task:
 1. Decide the best reply method: approve, request changes, ask clarification,
@@ -71,19 +82,3 @@ Task:
 Keep the answer concise and do not recommend changing state directly unless the
 human's reply should explicitly instruct that.
 ```
-
-## Decision Guide
-
-- Approve when the handoff asks for review and the evidence satisfies the Spec,
-  PR/check/review expectations, and later comments do not introduce blockers.
-- Request changes when the next action is agent-actionable: missing acceptance
-  evidence, failing relevant checks, unaddressed review comments, stale handoff,
-  or implementation/spec mismatch.
-- Ask clarification when the next action requires human judgment, product scope,
-  or risk acceptance rather than agent work.
-- Use a merge nudge when Implementation appears accepted but the workflow
-  requires the human to move the issue to `Merging`.
-- Use completion confirmation when the handoff is waiting for proof that merge,
-  deployment, or post-merge validation completed.
-- Say no reply yet when evidence is unavailable or the issue is not actually in
-  `Human Review`.
