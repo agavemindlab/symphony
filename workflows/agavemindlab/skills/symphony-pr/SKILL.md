@@ -16,7 +16,8 @@ description:
 ## Goals
 
 - Push current branch changes to `origin` safely.
-- Create a PR if none exists for the branch, otherwise update the existing PR.
+- Create a PR against `upstream` if none exists for the branch, otherwise update
+  the existing PR.
 - Refuse to publish a PR branch diff that contains agent-only cleanup files
   such as `.symphony/workpad.md`; those files are persisted through Linear
   issue attachments instead.
@@ -66,6 +67,8 @@ the automated review request and proceed directly to human handoff.
      rewriting remotes or switching protocols as a workaround.
 
 6. Ensure a PR exists for the branch:
+   - Create and update PRs in the `upstream` repository, with the branch pushed
+     to the fork (`origin`) as the PR head.
    - If no PR exists, create one.
    - If a PR exists and is open, update it.
    - If branch is tied to a closed/merged PR, create a new branch + PR.
@@ -108,13 +111,29 @@ the automated review request and proceed directly to human handoff.
    - If automated review is skipped to preserve a pending human reviewer
      request, do not treat that as success or failure; record the preserved
      reviewer and continue to human PR review handoff.
-9. Reply with the PR URL from `gh pr view`.
+9. Reply with the PR URL from `gh pr view --repo "$upstream_repo"`.
 
 ## Commands
 
 ```sh
 # Identify branch
 branch=$(git branch --show-current)
+
+repo_slug_from_remote_url() {
+  printf '%s\n' "$1" |
+    sed -E \
+      -e 's#^git@github.com:#https://github.com/#' \
+      -e 's#^ssh://git@github.com/##' \
+      -e 's#^https://github.com/##' \
+      -e 's#\.git$##'
+}
+
+upstream_url=$(git remote get-url upstream)
+origin_url=$(git remote get-url origin)
+upstream_repo=$(repo_slug_from_remote_url "$upstream_url")
+origin_repo=$(repo_slug_from_remote_url "$origin_url")
+fork_owner=${origin_repo%%/*}
+pr_head="$fork_owner:$branch"
 
 # Scope-appropriate validation gates from AGENTS.md.
 # Run the commands that match the files changed; record exactly what ran
@@ -193,8 +212,24 @@ git push -u origin HEAD
 # Only if history was rewritten locally:
 git push --force-with-lease origin HEAD
 
-# Ensure a PR exists (create only if missing)
-pr_state=$(gh pr view --json state -q .state 2>/dev/null || true)
+if [ -z "$upstream_repo" ] || [ "$upstream_repo" = "$upstream_url" ]; then
+  echo "Could not derive GitHub upstream repo from remote URL: $upstream_url" >&2
+  exit 1
+fi
+
+if [ -z "$fork_owner" ] || [ "$fork_owner" = "$origin_repo" ]; then
+  echo "Could not derive fork owner from origin remote URL: $origin_url" >&2
+  exit 1
+fi
+
+# Ensure a PR exists in upstream (create only if missing)
+pr_lookup=$(
+  gh pr list --repo "$upstream_repo" --head "$branch" --state all \
+    --json number,state,headRepositoryOwner \
+    --jq "map(select(.headRepositoryOwner.login == \"$fork_owner\"))[0] // empty"
+)
+pr_number=$(printf '%s\n' "$pr_lookup" | jq -r '.number // ""')
+pr_state=$(printf '%s\n' "$pr_lookup" | jq -r '.state // ""')
 if [ "$pr_state" = "MERGED" ] || [ "$pr_state" = "CLOSED" ]; then
   echo "Current branch is tied to a closed PR; create a new branch + PR." >&2
   exit 1
@@ -210,15 +245,18 @@ fi
 # and no placeholder comments remain.
 
 if [ -z "$pr_state" ]; then
-  gh pr create --title "$pr_title" --body-file "$tmp_pr_body"
+  pr_url=$(gh pr create --repo "$upstream_repo" --base "${SYMPHONY_BASE_BRANCH:-main}" \
+    --head "$pr_head" --title "$pr_title" --body-file "$tmp_pr_body"
+  )
+  pr_number=$(gh pr view "$pr_url" --repo "$upstream_repo" --json number -q .number)
 else
   # Reconsider title on every branch update; edit if scope shifted.
-  gh pr edit --title "$pr_title" --body-file "$tmp_pr_body"
+  gh pr edit "$pr_number" --repo "$upstream_repo" --title "$pr_title" \
+    --body-file "$tmp_pr_body"
 fi
 rm -f "$tmp_pr_body"
 
-pr_number=$(gh pr view --json number -q .number)
-pr_head_sha=$(gh pr view --json headRefOid -q .headRefOid)
+pr_head_sha=$(gh pr view "$pr_number" --repo "$upstream_repo" --json headRefOid -q .headRefOid)
 review_requested_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
 # Request review from the project's configured automated reviewer.
@@ -231,7 +269,7 @@ if [ -z "$automated_reviewer" ]; then
   echo "No automated reviewer configured; proceeding to human handoff." >&2
 else
   human_reviewers=$(
-    gh pr view "$pr_number" --json reviewRequests --jq \
+    gh pr view "$pr_number" --repo "$upstream_repo" --json reviewRequests --jq \
       ".reviewRequests[] | (.login // .slug // .name // \"\") | select(. != \"\" and . != \"$automated_reviewer\" and (. | test(\"(\\\\[bot\\\\]|-bot)\$\") | not))" \
       2>/dev/null || true
   )
@@ -239,13 +277,13 @@ else
   if [ -n "$human_reviewers" ]; then
     echo "Pending human reviewer request(s) already exist; preserving them and skipping automated review request." >&2
     echo "$human_reviewers" >&2
-    gh pr view --json url -q .url
+    gh pr view "$pr_number" --repo "$upstream_repo" --json url -q .url
     exit 6
   fi
 
   review_request_error=$(mktemp)
-  if ! gh pr edit "$pr_number" --add-reviewer "$automated_reviewer" 2>"$review_request_error"; then
-    if gh pr view "$pr_number" --json reviewRequests --jq '.reviewRequests[].login' | grep -qx "$automated_reviewer"; then
+  if ! gh pr edit "$pr_number" --repo "$upstream_repo" --add-reviewer "$automated_reviewer" 2>"$review_request_error"; then
+    if gh pr view "$pr_number" --repo "$upstream_repo" --json reviewRequests --jq '.reviewRequests[].login' | grep -qx "$automated_reviewer"; then
       echo "Automated review was already requested"
     else
       cat "$review_request_error" >&2
@@ -265,7 +303,7 @@ fi
 # Implement or adapt a polling loop appropriate to the project's CI setup.
 
 # Show PR URL for the reply
-gh pr view --json url -q .url
+gh pr view "$pr_number" --repo "$upstream_repo" --json url -q .url
 ```
 
 ## Notes
