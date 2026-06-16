@@ -1083,11 +1083,11 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
 
       assert {:ok, workspace} = Workspace.create_for_issue("MT-SKILL-INSTALL")
 
-      assert File.exists?(Path.join([workspace, ".agents", "skills", "commit", "SKILL.md"]))
+      assert File.exists?(Path.join([workspace, ".agents", "skills", "symphony-commit", "SKILL.md"]))
       assert File.read!(Path.join([workspace, ".agents", "skills", "linear", "SKILL.md"])) == "repo version\n"
 
       exclude = File.read!(Path.join([workspace, ".git", "info", "exclude"]))
-      assert exclude =~ ".agents/skills/commit/"
+      assert exclude =~ ".agents/skills/symphony-commit/"
       refute exclude =~ ".agents/skills/linear/"
 
       assert {"", 0} = System.cmd("git", ["-C", workspace, "status", "--short"])
@@ -1099,6 +1099,23 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       restore_env(workflow_root_env_var, previous_workflow_root)
       File.rm_rf(test_root)
     end
+  end
+
+  test "canonical workflow skills expose string metadata for Codex" do
+    skills_dir = Path.expand("../workflows/agavemindlab/skills", File.cwd!())
+
+    skills_dir
+    |> Path.join("*/SKILL.md")
+    |> Path.wildcard()
+    |> Enum.each(fn skill_path ->
+      metadata = read_skill_front_matter(skill_path)
+
+      assert {:ok, %{"name" => name, "description" => description}} = metadata,
+             "#{skill_path} has invalid skill metadata: #{inspect(metadata)}"
+
+      assert is_binary(name), "#{skill_path} has non-string name metadata"
+      assert is_binary(description), "#{skill_path} has non-string description metadata"
+    end)
   end
 
   test "canonical workflow surfaces setup failures before installing shared skills" do
@@ -1585,5 +1602,11 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     after
       File.rm_rf(test_root)
     end
+  end
+
+  defp read_skill_front_matter(path) do
+    ["---" | lines] = File.read!(path) |> String.split(["\r\n", "\n", "\r"], trim: false)
+    {front_matter_lines, _rest} = Enum.split_while(lines, &(&1 != "---"))
+    YamlElixir.read_from_string(Enum.join(front_matter_lines, "\n"))
   end
 end

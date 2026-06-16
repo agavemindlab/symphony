@@ -214,6 +214,10 @@ the artifact they belong to. Each top-level comment carries `resolvedAt`
 (non-null once resolved) and its `children` (replies, e.g. approval replies and
 rework-change summaries).
 
+Before routing phase feedback, normalize both representations: inspect each
+artifact's `children` / thread replies, and exclude any `comments.nodes` item
+with `parent { id }` from standalone top-level comments.
+
 **Default contract**: this read returns *active* state only. Drop every node
 whose `resolvedAt` is non-null before using the result — resolved comments are
 historical rework versions and must not enter context. The GraphQL response
