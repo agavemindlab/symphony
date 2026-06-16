@@ -14,7 +14,10 @@ Apply the relevant lens before approving:
 
 - Requirements / Design: challenge the premise, scope fit, implementation
   feasibility, edge cases, observability, rollback, and whether the next phase
-  has enough detail to satisfy the accepted requirements.
+  has enough detail to satisfy the accepted requirements. For Design, test
+  rejected alternatives and distinguish "not possible" from "possible but worse
+  tradeoff"; request changes when the artifact overstates impossibility or skips
+  the comparison needed to justify the chosen approach.
 - Implementation / Deployment: require fresh evidence for each acceptance item;
   do not accept self-reported completion, plausible summaries, or status marks
   without supporting test, PR, CI, deployment, or verification evidence.
