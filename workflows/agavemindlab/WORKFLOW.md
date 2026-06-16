@@ -235,7 +235,7 @@ When content conflicts, precedence is: human reply in artifact thread > current 
 
 ### Skills-activated footer
 
-Every phase artifact ends with a collapsible footer listing the current Codex session id and the skills this phase run actually activated, so a human can audit what drove the work. Read the session id from `symphony_session_context` when available; if unavailable, write `n/a`. Use the workflow's own skills (the phase skill's `Skills to invoke`, `office-hours`, `plan-eng-review`, `brainstorming`, `symphony-*`, etc.) — not Linear/git mechanics or `symphony_session_context`. On a rework re-post, list the session id and skills of that run, not the original. The exact block (keep the heading verbatim; omit any line that does not apply):
+Every phase artifact ends with a collapsible footer listing the current Codex session id and the skills this phase run actually activated, so a human can audit what drove the work. Read the session id from `CODEX_THREAD_ID` when available; if unavailable, write `n/a`. Use the workflow's own skills (the phase skill's `Skills to invoke`, `office-hours`, `plan-eng-review`, `brainstorming`, `symphony-*`, etc.) — not Linear/git mechanics. On a rework re-post, list the session id and skills of that run, not the original. The exact block (keep the heading verbatim; omit any line that does not apply):
 
 ```md
 >>> 🛠️ 本次激活的 skills

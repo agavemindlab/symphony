@@ -3,33 +3,23 @@ defmodule SymphonyElixir.Codex.DynamicToolTest do
 
   alias SymphonyElixir.Codex.DynamicTool
 
-  test "tool_specs advertises supported tool input contracts" do
-    tool_specs = DynamicTool.tool_specs()
-
-    assert %{
-             "description" => linear_description,
-             "inputSchema" => %{
-               "properties" => %{
-                 "query" => _,
-                 "variables" => _
+  test "tool_specs advertises the linear_graphql input contract" do
+    assert [
+             %{
+               "description" => description,
+               "inputSchema" => %{
+                 "properties" => %{
+                   "query" => _,
+                   "variables" => _
+                 },
+                 "required" => ["query"],
+                 "type" => "object"
                },
-               "required" => ["query"],
-               "type" => "object"
+               "name" => "linear_graphql"
              }
-           } = Enum.find(tool_specs, &(&1["name"] == "linear_graphql"))
+           ] = DynamicTool.tool_specs()
 
-    assert linear_description =~ "Linear"
-
-    assert %{
-             "description" => session_description,
-             "inputSchema" => %{
-               "additionalProperties" => false,
-               "properties" => %{},
-               "type" => "object"
-             }
-           } = Enum.find(tool_specs, &(&1["name"] == "symphony_session_context"))
-
-    assert session_description =~ "Codex session"
+    assert description =~ "Linear"
   end
 
   test "unsupported tools return a failure payload with the supported tool list" do
@@ -40,7 +30,7 @@ defmodule SymphonyElixir.Codex.DynamicToolTest do
     assert Jason.decode!(response["output"]) == %{
              "error" => %{
                "message" => ~s(Unsupported dynamic tool: "not_a_real_tool".),
-               "supportedTools" => ["linear_graphql", "symphony_session_context"]
+               "supportedTools" => ["linear_graphql"]
              }
            }
 
@@ -50,37 +40,6 @@ defmodule SymphonyElixir.Codex.DynamicToolTest do
                "text" => response["output"]
              }
            ]
-  end
-
-  test "symphony_session_context returns current Codex session metadata" do
-    response =
-      DynamicTool.execute(
-        "symphony_session_context",
-        %{},
-        session_id: "thread-123-turn-456",
-        thread_id: "thread-123",
-        turn_id: "turn-456"
-      )
-
-    assert response["success"] == true
-
-    assert Jason.decode!(response["output"]) == %{
-             "session_id" => "thread-123-turn-456",
-             "thread_id" => "thread-123",
-             "turn_id" => "turn-456"
-           }
-  end
-
-  test "symphony_session_context falls back to n/a when metadata is unavailable" do
-    response = DynamicTool.execute("symphony_session_context", %{})
-
-    assert response["success"] == true
-
-    assert Jason.decode!(response["output"]) == %{
-             "session_id" => "n/a",
-             "thread_id" => "n/a",
-             "turn_id" => "n/a"
-           }
   end
 
   test "linear_graphql returns successful GraphQL responses as tool text" do

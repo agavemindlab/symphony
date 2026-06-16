@@ -125,12 +125,27 @@ defmodule SymphonyElixir.CoreTest do
     assert prompt =~ "## Deployment"
     assert prompt =~ "Skills-activated footer"
     assert prompt =~ "Codex session id"
-    assert prompt =~ "symphony_session_context"
+    assert prompt =~ "CODEX_THREAD_ID"
+    refute prompt =~ "symphony_session_context"
     assert prompt =~ "`n/a`"
     assert prompt =~ "✅ 已批准"
     assert prompt =~ "⏩ 自动进入"
     assert prompt =~ "Human Review"
     assert length(String.split(prompt, "---")) >= 4
+
+    phase_skill_paths = [
+      "../workflows/agavemindlab/skills/phase-requirements/SKILL.md",
+      "../workflows/agavemindlab/skills/phase-design/SKILL.md",
+      "../workflows/agavemindlab/skills/phase-implementation/SKILL.md",
+      "../workflows/agavemindlab/skills/phase-deployment/SKILL.md"
+    ]
+
+    for phase_skill_path <- phase_skill_paths do
+      phase_skill = File.read!(Path.expand(phase_skill_path, File.cwd!()))
+
+      assert phase_skill =~ ">>> 🛠️ 本次激活的 skills"
+      assert phase_skill =~ "- Codex session id: `<session_id | n/a>`"
+    end
   end
 
   test "linear api token resolves from LINEAR_API_KEY env var" do
@@ -1151,7 +1166,8 @@ defmodule SymphonyElixir.CoreTest do
     assert prompt =~ "Stop early only for a true blocker"
     assert prompt =~ "Do not include generic \"next steps for user\""
     assert prompt =~ "Codex session id"
-    assert prompt =~ "symphony_session_context"
+    assert prompt =~ "CODEX_THREAD_ID"
+    refute prompt =~ "symphony_session_context"
     assert prompt =~ "`n/a`"
     assert prompt =~ "Phase Map"
     assert prompt =~ "`phase-implementation`"
