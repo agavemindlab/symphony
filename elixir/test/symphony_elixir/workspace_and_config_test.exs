@@ -1125,6 +1125,55 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     end
   end
 
+  test "startup terminal workspace cleanup preserves Linear project environment" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-terminal-cleanup-project-env-#{System.unique_integer([:positive])}"
+      )
+
+    previous_memory_issues = Application.get_env(:symphony_elixir, :memory_tracker_issues)
+    orchestrator_name = Module.concat(__MODULE__, :"TerminalCleanupProjectEnv#{System.unique_integer([:positive])}")
+
+    issue = %Issue{
+      id: "issue-terminal-project-hook",
+      identifier: "MT-TERMINAL-PROJECT-HOOK",
+      title: "Terminal project hook env",
+      state: "Closed",
+      project: %{id: "terminal-project-id", slug_id: "terminal-project-slug", name: "Terminal Project"}
+    }
+
+    try do
+      workspace_root = Path.join(test_root, "workspaces")
+      before_remove_marker = Path.join(test_root, "startup-before-remove-project-env.txt")
+      File.mkdir_p!(Path.join(workspace_root, issue.identifier))
+
+      write_workflow_file!(Workflow.workflow_file_path(),
+        tracker_kind: "memory",
+        workspace_root: workspace_root,
+        tracker_terminal_states: ["Closed"],
+        hook_before_remove: "printf '%s\\n%s\\n%s\\n' \"$SYMPHONY_LINEAR_PROJECT_ID\" \"$SYMPHONY_LINEAR_PROJECT_SLUG\" \"$SYMPHONY_LINEAR_PROJECT_NAME\" > #{before_remove_marker}"
+      )
+
+      Application.put_env(:symphony_elixir, :memory_tracker_issues, [issue])
+
+      assert {:ok, _pid} = Orchestrator.start_link(name: orchestrator_name)
+
+      assert File.read!(before_remove_marker) ==
+               "terminal-project-id\nterminal-project-slug\nTerminal Project\n"
+
+      refute File.exists?(Path.join(workspace_root, issue.identifier))
+    after
+      restore_app_env(:memory_tracker_issues, previous_memory_issues)
+
+      if pid = Process.whereis(orchestrator_name) do
+        Process.exit(pid, :normal)
+      end
+
+      File.rm_rf(test_root)
+    end
+  end
+
   test "canonical workflow installs missing skills and preserves repo-owned skills" do
     test_root =
       Path.join(
@@ -1801,4 +1850,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
 
     File.chmod!(fake_gh, 0o755)
   end
+
+  defp restore_app_env(key, nil), do: Application.delete_env(:symphony_elixir, key)
+  defp restore_app_env(key, value), do: Application.put_env(:symphony_elixir, key, value)
 end
