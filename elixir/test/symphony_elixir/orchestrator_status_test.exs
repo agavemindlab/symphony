@@ -981,6 +981,87 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
     assert due_at_ms <= after_retry_ms + 10_500
   end
 
+  test "orchestrator restarts stalled workers when issue stopped hook times out" do
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_api_token: nil,
+      codex_stall_timeout_ms: 1_000,
+      hook_issue_stopped: "sleep 1",
+      hook_timeout_ms: 10
+    )
+
+    issue_id = "issue-stall-hook-timeout"
+    orchestrator_name = Module.concat(__MODULE__, :StallHookTimeoutOrchestrator)
+    {:ok, pid} = Orchestrator.start_link(name: orchestrator_name)
+
+    on_exit(fn ->
+      if Process.alive?(pid) do
+        Process.exit(pid, :normal)
+      end
+    end)
+
+    worker_pid =
+      spawn(fn ->
+        receive do
+          :done -> :ok
+        end
+      end)
+
+    stale_activity_at = DateTime.add(DateTime.utc_now(), -5, :second)
+    initial_state = :sys.get_state(pid)
+
+    running_entry = %{
+      pid: worker_pid,
+      ref: make_ref(),
+      identifier: "MT-STALL-TIMEOUT",
+      issue: %Issue{
+        id: issue_id,
+        identifier: "MT-STALL-TIMEOUT",
+        state: "In Progress",
+        url: "https://example.org/issues/MT-STALL-TIMEOUT"
+      },
+      session_id: "thread-stall-timeout-turn-stall",
+      last_codex_message: nil,
+      last_codex_timestamp: stale_activity_at,
+      last_codex_event: :notification,
+      started_at: stale_activity_at
+    }
+
+    :sys.replace_state(pid, fn _ ->
+      initial_state
+      |> Map.put(:running, %{issue_id => running_entry})
+      |> Map.put(:claimed, MapSet.put(initial_state.claimed, issue_id))
+    end)
+
+    before_retry_ms = System.monotonic_time(:millisecond)
+
+    log =
+      capture_log(fn ->
+        send(pid, :tick)
+        Process.sleep(100)
+      end)
+
+    state = :sys.get_state(pid)
+    after_retry_ms = System.monotonic_time(:millisecond)
+
+    refute Process.alive?(worker_pid)
+    refute Map.has_key?(state.running, issue_id)
+
+    assert %{
+             attempt: 1,
+             due_at_ms: due_at_ms,
+             identifier: "MT-STALL-TIMEOUT",
+             issue_url: "https://example.org/issues/MT-STALL-TIMEOUT",
+             error: "stalled for " <> _
+           } = state.retry_attempts[issue_id]
+
+    assert is_integer(due_at_ms)
+    assert due_at_ms >= before_retry_ms + 9_500
+    assert due_at_ms <= after_retry_ms + 10_500
+    assert log =~ "Issue run hook timed out"
+    assert log =~ "hook=issue_stopped"
+    assert log =~ "timeout_ms=10"
+  end
+
   test "orchestrator blocks stalled workers that are waiting on MCP elicitation" do
     write_workflow_file!(Workflow.workflow_file_path(),
       tracker_api_token: nil,
@@ -1127,6 +1208,70 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
              identifier: "MT-INPUT",
              error: "codex turn requires operator input"
            } = state.blocked[issue_id]
+  end
+
+  test "orchestrator blocks input-required workers when issue stopped hook fails" do
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_api_token: nil,
+      hook_issue_stopped: "printf 'input-required marker failed' && exit 23"
+    )
+
+    issue_id = "issue-input-required-hook-fails"
+    orchestrator_name = Module.concat(__MODULE__, :InputRequiredHookFailureOrchestrator)
+    {:ok, pid} = Orchestrator.start_link(name: orchestrator_name)
+
+    on_exit(fn ->
+      if Process.alive?(pid) do
+        Process.exit(pid, :normal)
+      end
+    end)
+
+    ref = make_ref()
+    started_at = DateTime.utc_now()
+    initial_state = :sys.get_state(pid)
+
+    running_entry = %{
+      pid: self(),
+      ref: ref,
+      identifier: "MT-INPUT-FAIL",
+      issue: %Issue{id: issue_id, identifier: "MT-INPUT-FAIL", state: "In Progress"},
+      session_id: "thread-input-fail-turn-input",
+      last_codex_message: %{
+        event: :turn_input_required,
+        message: %{"method" => "mcpServer/elicitation/request"},
+        timestamp: started_at
+      },
+      last_codex_timestamp: started_at,
+      last_codex_event: :turn_input_required,
+      started_at: started_at
+    }
+
+    :sys.replace_state(pid, fn _ ->
+      initial_state
+      |> Map.put(:running, %{issue_id => running_entry})
+      |> Map.put(:claimed, MapSet.put(initial_state.claimed, issue_id))
+    end)
+
+    log =
+      capture_log(fn ->
+        send(pid, {:DOWN, ref, :process, self(), {:shutdown, :input_required}})
+        Process.sleep(50)
+      end)
+
+    state = :sys.get_state(pid)
+
+    refute Map.has_key?(state.running, issue_id)
+    refute Map.has_key?(state.retry_attempts, issue_id)
+    assert MapSet.member?(state.claimed, issue_id)
+
+    assert %{
+             identifier: "MT-INPUT-FAIL",
+             error: "codex turn requires operator input"
+           } = state.blocked[issue_id]
+
+    assert log =~ "Issue run hook failed"
+    assert log =~ "hook=issue_stopped"
+    assert log =~ "status=23"
   end
 
   test "orchestrator blocks normal worker exits after input required completion" do

@@ -778,6 +778,69 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert log =~ "status=17"
   end
 
+  test "issue run hook ignores unsupported events" do
+    issue = %Issue{
+      id: "issue-hook-unsupported",
+      identifier: "MT-HOOK-UNSUPPORTED",
+      title: "Unsupported hook",
+      state: "In Progress"
+    }
+
+    refute SymphonyElixir.IssueRunHook.configured?(:unsupported)
+    assert :ok = SymphonyElixir.IssueRunHook.run(:unsupported, issue, reason: "dispatch")
+  end
+
+  test "issue run hook stringifies non-binary option values" do
+    marker =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-issue-hook-non-binary-env-#{System.unique_integer([:positive])}.log"
+      )
+
+    on_exit(fn -> File.rm(marker) end)
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      hook_issue_running: "printf '%s|%s' \"$SYMPHONY_HOOK_REASON\" \"$SYMPHONY_WORKER_HOST\" > #{marker}"
+    )
+
+    issue = %Issue{
+      id: "issue-hook-non-binary",
+      identifier: "MT-HOOK-NON-BINARY",
+      title: "Non-binary hook opts",
+      state: "In Progress"
+    }
+
+    assert :ok =
+             SymphonyElixir.IssueRunHook.run(:running, issue,
+               reason: :dispatch,
+               worker_host: 123
+             )
+
+    assert File.read!(marker) == "dispatch|123"
+  end
+
+  test "issue run hook truncates long failure output in logs" do
+    write_workflow_file!(Workflow.workflow_file_path(),
+      hook_issue_running: "python3 -c 'import sys; sys.stdout.write(\"x\" * 3000); sys.exit(17)'"
+    )
+
+    issue = %Issue{
+      id: "issue-hook-long-failure",
+      identifier: "MT-HOOK-LONG-FAILURE",
+      title: "Long hook failure",
+      state: "In Progress"
+    }
+
+    log =
+      capture_log(fn ->
+        assert :ok = SymphonyElixir.IssueRunHook.run(:running, issue, reason: "dispatch")
+      end)
+
+    assert log =~ "Issue run hook failed"
+    assert log =~ "hook=issue_running"
+    assert log =~ "... (truncated)"
+  end
+
   test "workspace remove continues when before_remove hook fails" do
     test_root =
       Path.join(
