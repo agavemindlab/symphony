@@ -131,7 +131,7 @@ defmodule SymphonyElixir.Orchestrator do
         state = record_session_completion_totals(state, running_entry)
         session_id = running_entry_session_id(running_entry)
 
-        run_issue_stopped_hook(running_entry, agent_down_hook_reason(reason))
+        run_issue_stopped_hook(running_entry, issue_stopped_hook_reason(reason, running_entry))
         state = handle_agent_down(reason, state, issue_id, running_entry, session_id)
 
         Logger.info("Agent task finished for issue_id=#{issue_id} session_id=#{session_id} reason=#{inspect(reason)}")
@@ -1032,6 +1032,14 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   defp run_issue_stopped_hook(_running_entry, _reason), do: :ok
+
+  defp issue_stopped_hook_reason(reason, running_entry) do
+    if input_required_blocker?(running_entry) do
+      "input_required_blocked"
+    else
+      agent_down_hook_reason(reason)
+    end
+  end
 
   defp agent_down_hook_reason(:normal), do: "agent_down_normal"
   defp agent_down_hook_reason(_reason), do: "agent_down_abnormal"
