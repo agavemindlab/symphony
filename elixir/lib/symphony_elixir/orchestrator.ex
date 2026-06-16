@@ -449,7 +449,7 @@ defmodule SymphonyElixir.Orchestrator do
     cond do
       terminal_issue_state?(issue.state, terminal_states) ->
         Logger.info("Blocked issue moved to terminal state: #{issue_context(issue)} state=#{issue.state}; releasing block")
-        cleanup_issue_workspace(issue.identifier, blocked_issue_worker_host(state, issue.id))
+        cleanup_issue_workspace(issue, blocked_issue_worker_host(state, issue.id))
         release_issue_claim(state, issue.id)
 
       !issue_routable?(issue) ->
@@ -553,7 +553,7 @@ defmodule SymphonyElixir.Orchestrator do
         worker_host = Map.get(running_entry, :worker_host)
 
         if cleanup_workspace do
-          cleanup_issue_workspace(identifier, worker_host)
+          cleanup_issue_workspace(Map.get(running_entry, :issue) || identifier, worker_host)
         end
 
         stop_running_task(pid, ref)
@@ -1106,7 +1106,7 @@ defmodule SymphonyElixir.Orchestrator do
       terminal_issue_state?(issue.state, terminal_states) ->
         Logger.info("Issue state is terminal: issue_id=#{issue_id} issue_identifier=#{issue.identifier} state=#{issue.state}; removing associated workspace")
 
-        cleanup_issue_workspace(issue.identifier, metadata[:worker_host])
+        cleanup_issue_workspace(issue, metadata[:worker_host])
         {:noreply, release_issue_claim(state, issue_id)}
 
       retry_candidate_issue?(issue, terminal_states) ->
@@ -1125,6 +1125,10 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   defp cleanup_issue_workspace(identifier, worker_host \\ nil)
+
+  defp cleanup_issue_workspace(%Issue{} = issue, worker_host) do
+    Workspace.remove_issue_workspaces(issue, worker_host)
+  end
 
   defp cleanup_issue_workspace(identifier, worker_host) when is_binary(identifier) do
     Workspace.remove_issue_workspaces(identifier, worker_host)

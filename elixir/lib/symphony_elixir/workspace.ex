@@ -85,15 +85,20 @@ defmodule SymphonyElixir.Workspace do
   end
 
   @spec remove(Path.t()) :: {:ok, [String.t()]} | {:error, term(), String.t()}
-  def remove(workspace), do: remove(workspace, nil)
+  def remove(workspace), do: remove(workspace, nil, nil)
 
   @spec remove(Path.t(), worker_host()) :: {:ok, [String.t()]} | {:error, term(), String.t()}
-  def remove(workspace, nil) do
+  def remove(workspace, worker_host), do: remove(workspace, worker_host, nil)
+
+  @spec remove(Path.t(), worker_host(), map() | String.t() | nil) :: {:ok, [String.t()]} | {:error, term(), String.t()}
+  def remove(workspace, nil, issue_or_identifier) do
+    issue_context = before_remove_issue_context(issue_or_identifier, workspace)
+
     case File.exists?(workspace) do
       true ->
         case validate_workspace_path(workspace, nil) do
           :ok ->
-            maybe_run_before_remove_hook(workspace, nil)
+            maybe_run_before_remove_hook(workspace, nil, issue_context)
             File.rm_rf(workspace)
 
           {:error, reason} ->
@@ -105,8 +110,9 @@ defmodule SymphonyElixir.Workspace do
     end
   end
 
-  def remove(workspace, worker_host) when is_binary(worker_host) do
-    maybe_run_before_remove_hook(workspace, worker_host)
+  def remove(workspace, worker_host, issue_or_identifier) when is_binary(worker_host) do
+    issue_context = before_remove_issue_context(issue_or_identifier, workspace)
+    maybe_run_before_remove_hook(workspace, worker_host, issue_context)
 
     script =
       [
@@ -131,29 +137,37 @@ defmodule SymphonyElixir.Workspace do
   def remove_issue_workspaces(identifier), do: remove_issue_workspaces(identifier, nil)
 
   @spec remove_issue_workspaces(term(), worker_host()) :: :ok
-  def remove_issue_workspaces(identifier, worker_host) when is_binary(identifier) and is_binary(worker_host) do
-    safe_id = safe_identifier(identifier)
+  def remove_issue_workspaces(issue_or_identifier, worker_host) when is_binary(worker_host) do
+    with %{issue_identifier: identifier} = issue_context when is_binary(identifier) <-
+           removable_issue_context(issue_or_identifier) do
+      safe_id = safe_identifier(identifier)
 
-    case workspace_path_for_issue(safe_id, worker_host) do
-      {:ok, workspace} -> remove(workspace, worker_host)
-      {:error, _reason} -> :ok
+      case workspace_path_for_issue(safe_id, worker_host) do
+        {:ok, workspace} -> remove(workspace, worker_host, issue_context)
+        {:error, _reason} -> :ok
+      end
+    else
+      _ -> :ok
     end
 
     :ok
   end
 
-  def remove_issue_workspaces(identifier, nil) when is_binary(identifier) do
-    safe_id = safe_identifier(identifier)
+  def remove_issue_workspaces(issue_or_identifier, nil) do
+    with %{issue_identifier: identifier} = issue_context when is_binary(identifier) <-
+           removable_issue_context(issue_or_identifier) do
+      safe_id = safe_identifier(identifier)
 
-    case Config.settings!().worker.ssh_hosts do
-      [] ->
-        case workspace_path_for_issue(safe_id, nil) do
-          {:ok, workspace} -> remove(workspace, nil)
-          {:error, _reason} -> :ok
-        end
+      case Config.settings!().worker.ssh_hosts do
+        [] ->
+          case workspace_path_for_issue(safe_id, nil) do
+            {:ok, workspace} -> remove(workspace, nil, issue_context)
+            {:error, _reason} -> :ok
+          end
 
-      worker_hosts ->
-        Enum.each(worker_hosts, &remove_issue_workspaces(identifier, &1))
+        worker_hosts ->
+          Enum.each(worker_hosts, &remove_issue_workspaces(issue_or_identifier, &1))
+      end
     end
 
     :ok
@@ -225,7 +239,7 @@ defmodule SymphonyElixir.Workspace do
     end
   end
 
-  defp maybe_run_before_remove_hook(workspace, nil) do
+  defp maybe_run_before_remove_hook(workspace, nil, issue_context) do
     hooks = Config.settings!().hooks
 
     case File.dir?(workspace) do
@@ -238,7 +252,7 @@ defmodule SymphonyElixir.Workspace do
             run_hook(
               command,
               workspace,
-              %{issue_id: nil, issue_identifier: Path.basename(workspace)},
+              issue_context,
               "before_remove",
               nil
             )
@@ -250,7 +264,7 @@ defmodule SymphonyElixir.Workspace do
     end
   end
 
-  defp maybe_run_before_remove_hook(workspace, worker_host) when is_binary(worker_host) do
+  defp maybe_run_before_remove_hook(workspace, worker_host, issue_context) when is_binary(worker_host) do
     hooks = Config.settings!().hooks
 
     case hooks.before_remove do
@@ -260,6 +274,7 @@ defmodule SymphonyElixir.Workspace do
       command ->
         script =
           [
+            remote_hook_env_exports(issue_context),
             remote_shell_assign("workspace", workspace),
             "if [ -d \"$workspace\" ]; then",
             "  cd \"$workspace\"",
@@ -274,7 +289,7 @@ defmodule SymphonyElixir.Workspace do
             handle_hook_command_result(
               {output, status},
               workspace,
-              %{issue_id: nil, issue_identifier: Path.basename(workspace)},
+              issue_context,
               "before_remove"
             )
 
@@ -300,7 +315,7 @@ defmodule SymphonyElixir.Workspace do
       Task.async(fn ->
         System.cmd("sh", ["-lc", command],
           cd: workspace,
-          env: local_hook_env(),
+          env: local_hook_env(issue_context),
           stderr_to_stdout: true
         )
       end)
@@ -323,7 +338,16 @@ defmodule SymphonyElixir.Workspace do
 
     Logger.info("Running workspace hook hook=#{hook_name} #{issue_log_context(issue_context)} workspace=#{workspace} worker_host=#{worker_host}")
 
-    case run_remote_command(worker_host, "cd #{shell_escape(workspace)} && #{command}", timeout_ms) do
+    script =
+      [
+        remote_hook_env_exports(issue_context),
+        "cd #{shell_escape(workspace)}",
+        command
+      ]
+      |> Enum.reject(&(&1 == ""))
+      |> Enum.join("\n")
+
+    case run_remote_command(worker_host, script, timeout_ms) do
       {:ok, cmd_result} ->
         handle_hook_command_result(cmd_result, workspace, issue_context, hook_name)
 
@@ -335,8 +359,9 @@ defmodule SymphonyElixir.Workspace do
     end
   end
 
-  defp local_hook_env do
-    [{"SYMPHONY_WORKFLOW_DIR", Path.dirname(Workflow.workflow_file_path())}]
+  defp local_hook_env(issue_context) do
+    issue_context
+    |> hook_env()
   end
 
   defp handle_hook_command_result({_output, 0}, _workspace, _issue_id, _hook_name) do
@@ -464,26 +489,70 @@ defmodule SymphonyElixir.Workspace do
   defp worker_host_for_log(nil), do: "local"
   defp worker_host_for_log(worker_host), do: worker_host
 
-  defp issue_context(%{id: issue_id, identifier: identifier}) do
+  defp before_remove_issue_context(nil, workspace) do
+    %{issue_id: nil, issue_identifier: Path.basename(workspace), project: nil}
+  end
+
+  defp before_remove_issue_context(%{issue_identifier: _issue_identifier} = issue_context, _workspace),
+    do: issue_context
+
+  defp before_remove_issue_context(issue_or_identifier, _workspace), do: issue_context(issue_or_identifier)
+
+  defp removable_issue_context(%{identifier: identifier} = issue) when is_binary(identifier), do: issue_context(issue)
+  defp removable_issue_context(identifier) when is_binary(identifier), do: issue_context(identifier)
+  defp removable_issue_context(_issue_or_identifier), do: nil
+
+  defp issue_context(%{id: issue_id, identifier: identifier} = issue) do
     %{
       issue_id: issue_id,
-      issue_identifier: identifier || "issue"
+      issue_identifier: identifier || "issue",
+      project: normalize_issue_project(Map.get(issue, :project))
     }
   end
 
   defp issue_context(identifier) when is_binary(identifier) do
     %{
       issue_id: nil,
-      issue_identifier: identifier
+      issue_identifier: identifier,
+      project: nil
     }
   end
 
   defp issue_context(_identifier) do
     %{
       issue_id: nil,
-      issue_identifier: "issue"
+      issue_identifier: "issue",
+      project: nil
     }
   end
+
+  defp hook_env(issue_context) do
+    [{"SYMPHONY_WORKFLOW_DIR", Path.dirname(Workflow.workflow_file_path())}]
+    |> Kernel.++(project_hook_env(Map.get(issue_context, :project)))
+  end
+
+  defp remote_hook_env_exports(issue_context) do
+    issue_context
+    |> hook_env()
+    |> Enum.map_join("\n", fn {name, value} ->
+      "#{name}=#{shell_escape(value)}\nexport #{name}"
+    end)
+  end
+
+  defp project_hook_env(%{id: id, slug_id: slug_id, name: name}) do
+    []
+    |> maybe_put_hook_env("SYMPHONY_LINEAR_PROJECT_ID", id)
+    |> maybe_put_hook_env("SYMPHONY_LINEAR_PROJECT_SLUG", slug_id)
+    |> maybe_put_hook_env("SYMPHONY_LINEAR_PROJECT_NAME", name)
+  end
+
+  defp project_hook_env(_project), do: []
+
+  defp maybe_put_hook_env(env, name, value) when is_binary(value), do: env ++ [{name, value}]
+  defp maybe_put_hook_env(env, _name, _value), do: env
+
+  defp normalize_issue_project(%{id: _id, slug_id: _slug_id, name: _name} = project), do: project
+  defp normalize_issue_project(_project), do: nil
 
   defp issue_log_context(%{issue_id: issue_id, issue_identifier: issue_identifier}) do
     "issue_id=#{issue_id || "n/a"} issue_identifier=#{issue_identifier || "issue"}"

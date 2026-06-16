@@ -327,6 +327,11 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       "description" => "Needs dependency",
       "priority" => 2,
       "state" => %{"name" => "Todo"},
+      "project" => %{
+        "id" => "project-1",
+        "slugId" => "project-one",
+        "name" => "Project One"
+      },
       "branchName" => "mt-1",
       "url" => "https://example.org/issues/MT-1",
       "assignee" => %{
@@ -365,6 +370,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert issue.state == "Todo"
     assert issue.assignee_id == "user-1"
     assert issue.assigned_to_worker
+    assert issue.project == %{id: "project-1", slug_id: "project-one", name: "Project One"}
   end
 
   test "linear client marks explicitly unassigned issues as not routed to worker" do
@@ -506,6 +512,38 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       ])
 
     assert Enum.map(sorted, & &1.identifier) == ["MT-200", "MT-201", "MT-199"]
+  end
+
+  test "orchestrator global concurrency is shared across project issues" do
+    running_issue = %Issue{
+      id: "issue-project-a",
+      identifier: "MT-A",
+      title: "Project A issue",
+      state: "Todo",
+      project: %{id: "project-a-id", slug_id: "project-a", name: "Project A"}
+    }
+
+    next_issue = %Issue{
+      id: "issue-project-b",
+      identifier: "MT-B",
+      title: "Project B issue",
+      state: "Todo",
+      project: %{id: "project-b-id", slug_id: "project-b", name: "Project B"}
+    }
+
+    state = %Orchestrator.State{
+      max_concurrent_agents: 1,
+      running: %{
+        running_issue.id => %{issue: running_issue, worker_host: nil}
+      },
+      claimed: MapSet.new([running_issue.id]),
+      blocked: %{},
+      retry_attempts: %{},
+      codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0}
+    }
+
+    refute Orchestrator.should_dispatch_issue_for_test(next_issue, state)
+    assert Orchestrator.should_dispatch_issue_for_test(next_issue, %{state | max_concurrent_agents: 2})
   end
 
   test "todo issue with non-terminal blocker is not dispatch-eligible" do
@@ -956,6 +994,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     workspace_env_var = "SYMP_WORKSPACE_ROOT_#{System.unique_integer([:positive])}"
     api_key_env_var = "SYMP_LINEAR_API_KEY_#{System.unique_integer([:positive])}"
     project_slug_env_var = "SYMP_LINEAR_PROJECT_SLUG_#{System.unique_integer([:positive])}"
+    project_slugs_env_var = "SYMP_LINEAR_PROJECT_SLUGS_#{System.unique_integer([:positive])}"
     workspace_root = Path.join("/tmp", "symphony-workspace-root")
     api_key = "resolved-secret"
     project_slug = "resolved-project-slug"
@@ -964,15 +1003,18 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     previous_workspace_root = System.get_env(workspace_env_var)
     previous_api_key = System.get_env(api_key_env_var)
     previous_project_slug = System.get_env(project_slug_env_var)
+    previous_project_slugs = System.get_env(project_slugs_env_var)
 
     System.put_env(workspace_env_var, workspace_root)
     System.put_env(api_key_env_var, api_key)
     System.put_env(project_slug_env_var, project_slug)
+    System.put_env(project_slugs_env_var, " project-a,project-b,project-a ")
 
     on_exit(fn ->
       restore_env(workspace_env_var, previous_workspace_root)
       restore_env(api_key_env_var, previous_api_key)
       restore_env(project_slug_env_var, previous_project_slug)
+      restore_env(project_slugs_env_var, previous_project_slugs)
     end)
 
     write_workflow_file!(Workflow.workflow_file_path(),
@@ -987,6 +1029,18 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert config.tracker.project_slug == project_slug
     assert config.workspace.root == Path.expand(workspace_root)
     assert config.codex.command == "#{codex_bin} app-server"
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_api_token: "$#{api_key_env_var}",
+      tracker_project_slug: nil,
+      tracker_project_slugs: "$#{project_slugs_env_var}",
+      workspace_root: "$#{workspace_env_var}"
+    )
+
+    config = Config.settings!()
+    assert config.tracker.project_slug == nil
+    assert config.tracker.project_slugs == ["project-a", "project-b"]
+    assert :ok = Config.validate!()
   end
 
   test "local workspace hooks receive workflow directory from symlinked workflow path" do
@@ -1023,6 +1077,49 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
 
       assert {:ok, _removed} = Workspace.remove(workspace)
       assert File.read!(before_remove_marker) == Path.expand(project_dir)
+    after
+      File.rm_rf(test_root)
+    end
+  end
+
+  test "local workspace hooks receive Linear project environment" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-project-hook-env-#{System.unique_integer([:positive])}"
+      )
+
+    try do
+      workspace_root = Path.join(test_root, "workspaces")
+      before_remove_marker = Path.join(test_root, "before-remove-project-env.txt")
+      File.mkdir_p!(workspace_root)
+
+      write_workflow_file!(Workflow.workflow_file_path(),
+        workspace_root: workspace_root,
+        hook_after_create: "printf '%s\\n%s\\n%s\\n' \"$SYMPHONY_LINEAR_PROJECT_ID\" \"$SYMPHONY_LINEAR_PROJECT_SLUG\" \"$SYMPHONY_LINEAR_PROJECT_NAME\" > after-create-project-env.txt",
+        hook_before_run: "printf '%s\\n%s\\n%s\\n' \"$SYMPHONY_LINEAR_PROJECT_ID\" \"$SYMPHONY_LINEAR_PROJECT_SLUG\" \"$SYMPHONY_LINEAR_PROJECT_NAME\" > before-run-project-env.txt",
+        hook_before_remove: "printf '%s\\n%s\\n%s\\n' \"$SYMPHONY_LINEAR_PROJECT_ID\" \"$SYMPHONY_LINEAR_PROJECT_SLUG\" \"$SYMPHONY_LINEAR_PROJECT_NAME\" > #{before_remove_marker}"
+      )
+
+      issue = %Issue{
+        id: "issue-project-hook",
+        identifier: "MT-PROJECT-HOOK",
+        title: "Project hook env",
+        state: "Todo",
+        project: %{id: "project-id", slug_id: "project-slug", name: "Project Name"}
+      }
+
+      assert {:ok, workspace} = Workspace.create_for_issue(issue)
+      assert :ok = Workspace.run_before_run_hook(workspace, issue)
+
+      assert File.read!(Path.join(workspace, "after-create-project-env.txt")) ==
+               "project-id\nproject-slug\nProject Name\n"
+
+      assert File.read!(Path.join(workspace, "before-run-project-env.txt")) ==
+               "project-id\nproject-slug\nProject Name\n"
+
+      assert :ok = Workspace.remove_issue_workspaces(issue)
+      assert File.read!(before_remove_marker) == "project-id\nproject-slug\nProject Name\n"
     after
       File.rm_rf(test_root)
     end
@@ -1565,18 +1662,36 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
         hook_before_remove: "echo before-remove"
       )
 
+      issue = %Issue{
+        id: "issue-ssh-ws",
+        identifier: "MT-SSH-WS",
+        title: "Remote workspace project env",
+        state: "Todo",
+        project: %{id: "remote-project-id", slug_id: "remote-project", name: "Remote 'Project"}
+      }
+
       assert Config.settings!().worker.ssh_hosts == ["worker-01:2200"]
       assert Config.settings!().workspace.root == workspace_root
-      assert {:ok, ^workspace_path} = Workspace.create_for_issue("MT-SSH-WS", "worker-01:2200")
-      assert :ok = Workspace.run_before_run_hook(workspace_path, "MT-SSH-WS", "worker-01:2200")
-      assert :ok = Workspace.run_after_run_hook(workspace_path, "MT-SSH-WS", "worker-01:2200")
-      assert :ok = Workspace.remove_issue_workspaces("MT-SSH-WS", "worker-01:2200")
+      assert {:ok, ^workspace_path} = Workspace.create_for_issue(issue, "worker-01:2200")
+      assert :ok = Workspace.run_before_run_hook(workspace_path, issue, "worker-01:2200")
+      assert :ok = Workspace.run_after_run_hook(workspace_path, issue, "worker-01:2200")
+      assert :ok = Workspace.remove_issue_workspaces(issue, "worker-01:2200")
 
       trace = File.read!(trace_file)
       assert trace =~ "-p 2200 worker-01 bash -lc"
       assert trace =~ "__SYMPHONY_WORKSPACE__"
       assert trace =~ "~/.symphony-remote-workspaces/MT-SSH-WS"
       assert trace =~ "${workspace#~/}"
+      assert trace =~ "SYMPHONY_LINEAR_PROJECT_ID="
+      assert trace =~ "remote-project-id"
+      assert trace =~ "export SYMPHONY_LINEAR_PROJECT_ID"
+      assert trace =~ "SYMPHONY_LINEAR_PROJECT_SLUG="
+      assert trace =~ "remote-project"
+      assert trace =~ "export SYMPHONY_LINEAR_PROJECT_SLUG"
+      assert trace =~ "SYMPHONY_LINEAR_PROJECT_NAME="
+      assert trace =~ "Remote "
+      assert trace =~ "Project"
+      assert trace =~ "export SYMPHONY_LINEAR_PROJECT_NAME"
       assert trace =~ "echo before-run"
       assert trace =~ "echo after-run"
       assert trace =~ "echo before-remove"
