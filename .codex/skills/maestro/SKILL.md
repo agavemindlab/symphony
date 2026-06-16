@@ -29,6 +29,9 @@ review judgment in the parent agent.
    - Gather new human feedback from every unresolved artifact thread and from
      standalone top-level human comments. Attribute unclear standalone comments
      to the awaiting-review phase.
+   - When `## Deployment` is awaiting review, include the accepted close test:
+     the `## Requirements` acceptance criteria plus later human-approved scope
+     or verification changes.
 4. Inspect linked PRs only when `## Implementation` is awaiting review:
    - `gh pr view <pr> --json number,title,url,state,isDraft,mergeable,reviewDecision,statusCheckRollup,reviews,comments`
    - `gh pr diff <pr>`
@@ -44,7 +47,12 @@ review judgment in the parent agent.
 7. Return a concise Chinese recommendation with:
    - `建议回复方式`: approve / request changes / ask clarification / merge nudge /
      completion confirmation / no reply yet.
-   - `建议回复`: a ready-to-send Chinese draft.
+   - `回复对象`: next Symphony agent / human.
+   - `建议回复`: a ready-to-send Chinese draft. For approve, request changes,
+     merge nudge, and completion confirmation, set `回复对象` to next Symphony
+     agent and write it as the human's review note for the next run. For ask
+     clarification and no reply yet, set `回复对象` to human and write it for
+     the human, explaining what Maestro cannot decide.
    - `依据`: 2-5 evidence bullets.
    - `注意`: only if there is uncertainty or missing evidence.
 
@@ -71,14 +79,26 @@ Other unresolved phase artifacts and feedback:
 Clarification markers:
 <unresolved [NEEDS CLARIFICATION] markers and human answers, or "none">
 
+Acceptance source of truth for all phases:
+<approved Requirements acceptance criteria and later human-approved changes, or "unknown">
+
 Linked PR evidence, only for Implementation review:
 <PR metadata, checks, human review state/comments, important diff summary, or "none">
 
 Task:
 1. Decide the best reply method: approve, request changes, ask clarification,
    merge nudge, completion confirmation, or no reply yet.
-2. Draft the exact Chinese reply the human could post.
-3. Cite the decisive evidence and call out missing evidence or uncertainty.
+2. State the reply audience: next Symphony agent or human.
+3. Draft the exact Chinese reply the human could post. For approve, request
+   changes, merge nudge, and completion confirmation, address the next Symphony
+   agent run. For ask clarification and no reply yet, address the human.
+4. For every phase, compare the artifact's evidence with the acceptance source
+   of truth; do not rely only on the Symphony agent's self-assessment or `✅`
+   statuses.
+5. Apply the relevant review lens from the reviewer prompt: Requirements /
+   Design rigor, Implementation / Deployment verification, or bugfix / rework
+   root cause.
+6. Cite the decisive evidence and call out missing evidence or uncertainty.
 Keep the answer concise and do not recommend changing state directly unless the
 human's reply should explicitly instruct that.
 ```
