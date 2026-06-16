@@ -72,6 +72,38 @@ main work — but also re-confirm any earlier `✅` you judge was only a
 point-in-time proxy for a criterion whose real intent is sustained or needs
 fresh confirmation; do not mechanically trust a prior pass.
 
+### Authenticated production acceptance accounts
+
+Some projects provide a dedicated acceptance account for production checks that
+need logged-in user state. This is optional and project-scoped. If the current
+project does not expose the metadata below, keep using the normal verification
+path.
+
+Projects opt in by setting non-secret metadata in their workflow environment:
+
+- `SYMPHONY_ACCEPTANCE_USER_EMAIL_ENV`: name of the environment variable that
+  contains the account email.
+- `SYMPHONY_ACCEPTANCE_USER_CODE_ENV`: name of the environment variable that
+  contains the login code, PIN, or equivalent short credential.
+- `SYMPHONY_ACCEPTANCE_USER_PURPOSE`: optional human-readable scope for when
+  the account should be used.
+
+When a post-merge acceptance check requires logged-in user state:
+
+1. Resolve the metadata variable names from the inherited environment, then
+   resolve the actual credential values from those named variables. Use the
+   values only in the browser/API interaction needed for verification.
+2. Do **not** print, quote, screenshot, persist, or copy credential values into
+   Linear comments, PR comments, commit messages, workpad notes, logs, or
+   artifacts. Evidence should state that the configured acceptance account was
+   used, not what its values were.
+3. If metadata is present but one of the named credential variables is missing,
+   mark the affected acceptance item as blocked and report only the missing
+   variable name(s).
+4. If metadata is absent and the acceptance check genuinely requires a logged-in
+   production user, mark that specific check blocked; do not search unrelated
+   files or secret stores.
+
 1. **Verify what is checkable now.** For each unresolved `S<N>`, run its check
    and record evidence: immediate signals at deploy (smoke tests, endpoint
    health, error-rate baseline), and any `延迟验收` whose window has already
