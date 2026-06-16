@@ -216,13 +216,19 @@ defmodule SymphonyElixir.Config.Schema do
       field(:before_run, :string)
       field(:after_run, :string)
       field(:before_remove, :string)
+      field(:issue_running, :string)
+      field(:issue_stopped, :string)
       field(:timeout_ms, :integer, default: 60_000)
     end
 
     @spec changeset(%__MODULE__{}, map()) :: Ecto.Changeset.t()
     def changeset(schema, attrs) do
       schema
-      |> cast(attrs, [:after_create, :before_run, :after_run, :before_remove, :timeout_ms], empty_values: [])
+      |> cast(
+        attrs,
+        [:after_create, :before_run, :after_run, :before_remove, :issue_running, :issue_stopped, :timeout_ms],
+        empty_values: []
+      )
       |> validate_number(:timeout_ms, greater_than: 0)
     end
   end

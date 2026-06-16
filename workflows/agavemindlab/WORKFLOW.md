@@ -62,6 +62,14 @@ hooks:
     if [ -f "$SYMPHONY_WORKFLOW_DIR/teardown.sh" ]; then
       "$SYMPHONY_WORKFLOW_DIR/teardown.sh"
     fi
+  issue_running: |
+    set -e
+    : "${SYMPHONY_WORKFLOW_DIR:?SYMPHONY_WORKFLOW_DIR is not set}"
+    sh "$SYMPHONY_WORKFLOW_DIR/mark-running-issue.sh" running
+  issue_stopped: |
+    set -e
+    : "${SYMPHONY_WORKFLOW_DIR:?SYMPHONY_WORKFLOW_DIR is not set}"
+    sh "$SYMPHONY_WORKFLOW_DIR/mark-running-issue.sh" stopped
 agent:
   max_concurrent_agents: 1
   max_turns: 20

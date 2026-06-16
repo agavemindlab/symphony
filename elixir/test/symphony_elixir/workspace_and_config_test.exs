@@ -687,6 +687,160 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     end
   end
 
+  test "config reads issue running and stopped hooks" do
+    write_workflow_file!(Workflow.workflow_file_path(),
+      hook_issue_running: "echo running",
+      hook_issue_stopped: "echo stopped"
+    )
+
+    config = Config.settings!()
+    assert String.trim(config.hooks.issue_running) == "echo running"
+    assert String.trim(config.hooks.issue_stopped) == "echo stopped"
+  end
+
+  test "issue run hook receives issue context and runs from workflow directory" do
+    marker =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-issue-hook-context-#{System.unique_integer([:positive])}.log"
+      )
+
+    on_exit(fn -> File.rm(marker) end)
+
+    command = """
+    printf '%s|%s|%s|%s|%s|%s|%s|%s|%s' \
+      "$PWD" \
+      "$SYMPHONY_WORKFLOW_DIR" \
+      "$SYMPHONY_HOOK_EVENT" \
+      "$SYMPHONY_HOOK_REASON" \
+      "$SYMPHONY_ISSUE_ID" \
+      "$SYMPHONY_ISSUE_IDENTIFIER" \
+      "$SYMPHONY_ISSUE_STATE" \
+      "$SYMPHONY_ISSUE_URL" \
+      "${SYMPHONY_WORKER_HOST:-}" > "#{marker}"
+    """
+
+    write_workflow_file!(Workflow.workflow_file_path(), hook_issue_running: command)
+
+    issue = %Issue{
+      id: "issue-hook-context",
+      identifier: "MT-HOOK",
+      title: "Hook context",
+      state: "In Progress",
+      url: "https://linear.example/MT-HOOK"
+    }
+
+    assert :ok =
+             SymphonyElixir.IssueRunHook.run(:running, issue,
+               worker_host: "worker-a",
+               reason: "dispatch"
+             )
+
+    workflow_dir = Path.dirname(Workflow.workflow_file_path())
+    assert {:ok, canonical_workflow_dir} = SymphonyElixir.PathSafety.canonicalize(workflow_dir)
+
+    assert File.read!(marker) ==
+             Enum.join(
+               [
+                 canonical_workflow_dir,
+                 workflow_dir,
+                 "running",
+                 "dispatch",
+                 "issue-hook-context",
+                 "MT-HOOK",
+                 "In Progress",
+                 "https://linear.example/MT-HOOK",
+                 "worker-a"
+               ],
+               "|"
+             )
+  end
+
+  test "issue run hook failures are logged and ignored" do
+    write_workflow_file!(Workflow.workflow_file_path(),
+      hook_issue_running: "echo marker failed && exit 17"
+    )
+
+    issue = %Issue{
+      id: "issue-hook-fail",
+      identifier: "MT-HOOK-FAIL",
+      title: "Hook failure",
+      state: "In Progress"
+    }
+
+    log =
+      capture_log(fn ->
+        assert :ok = SymphonyElixir.IssueRunHook.run(:running, issue, reason: "dispatch")
+      end)
+
+    assert log =~ "Issue run hook failed"
+    assert log =~ "hook=issue_running"
+    assert log =~ "status=17"
+  end
+
+  test "issue run hook ignores unsupported events" do
+    issue = %Issue{
+      id: "issue-hook-unsupported",
+      identifier: "MT-HOOK-UNSUPPORTED",
+      title: "Unsupported hook",
+      state: "In Progress"
+    }
+
+    refute SymphonyElixir.IssueRunHook.configured?(:unsupported)
+    assert :ok = SymphonyElixir.IssueRunHook.run(:unsupported, issue, reason: "dispatch")
+  end
+
+  test "issue run hook stringifies non-binary option values" do
+    marker =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-issue-hook-non-binary-env-#{System.unique_integer([:positive])}.log"
+      )
+
+    on_exit(fn -> File.rm(marker) end)
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      hook_issue_running: "printf '%s|%s' \"$SYMPHONY_HOOK_REASON\" \"$SYMPHONY_WORKER_HOST\" > #{marker}"
+    )
+
+    issue = %Issue{
+      id: "issue-hook-non-binary",
+      identifier: "MT-HOOK-NON-BINARY",
+      title: "Non-binary hook opts",
+      state: "In Progress"
+    }
+
+    assert :ok =
+             SymphonyElixir.IssueRunHook.run(:running, issue,
+               reason: :dispatch,
+               worker_host: 123
+             )
+
+    assert File.read!(marker) == "dispatch|123"
+  end
+
+  test "issue run hook truncates long failure output in logs" do
+    write_workflow_file!(Workflow.workflow_file_path(),
+      hook_issue_running: "python3 -c 'import sys; sys.stdout.write(\"x\" * 3000); sys.exit(17)'"
+    )
+
+    issue = %Issue{
+      id: "issue-hook-long-failure",
+      identifier: "MT-HOOK-LONG-FAILURE",
+      title: "Long hook failure",
+      state: "In Progress"
+    }
+
+    log =
+      capture_log(fn ->
+        assert :ok = SymphonyElixir.IssueRunHook.run(:running, issue, reason: "dispatch")
+      end)
+
+    assert log =~ "Issue run hook failed"
+    assert log =~ "hook=issue_running"
+    assert log =~ "... (truncated)"
+  end
+
   test "workspace remove continues when before_remove hook fails" do
     test_root =
       Path.join(
