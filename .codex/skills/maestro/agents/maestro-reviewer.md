@@ -35,7 +35,11 @@ Recommend how the human should reply to the current phase artifact. Return:
   newer human feedback does not request concrete changes.
 - Request changes when the next action is agent-actionable: missing acceptance
   evidence, unresolved artifact feedback, failing relevant checks, stale
-  artifact content, or implementation/spec mismatch.
+  artifact content, implementation/spec mismatch, or an unanswered
+  acceptance-critical risk in the artifact or PR evidence (for example
+  concurrency, multi-process writes, persistence completeness, data loss, or
+  deployment topology). If that risk invalidates the approved design, ask for
+  rework of the relevant earlier phase.
 - Ask clarification when the next action requires human judgment, product scope,
   or risk acceptance rather than agent work.
 - Use a merge nudge when normal Implementation appears accepted but the workflow
