@@ -129,7 +129,26 @@ defmodule SymphonyElixir.CoreTest do
     assert prompt =~ "**`Human Review` is not an agent state**"
     assert prompt =~ "Do **not** use GitHub-style `> [!NOTE]`"
     assert prompt =~ "collapsible sections (`>>>`)"
+    assert prompt =~ "Skills-activated footer"
+    assert prompt =~ "Codex session id"
+    assert prompt =~ "CODEX_THREAD_ID"
+    refute prompt =~ "symphony_session_context"
+    assert prompt =~ "`n/a`"
     assert length(String.split(prompt, "---")) >= 4
+
+    phase_skill_paths = [
+      "../workflows/agavemindlab/skills/phase-requirements/SKILL.md",
+      "../workflows/agavemindlab/skills/phase-design/SKILL.md",
+      "../workflows/agavemindlab/skills/phase-implementation/SKILL.md",
+      "../workflows/agavemindlab/skills/phase-deployment/SKILL.md"
+    ]
+
+    for phase_skill_path <- phase_skill_paths do
+      phase_skill = File.read!(Path.expand(phase_skill_path, File.cwd!()))
+
+      assert phase_skill =~ ">>> 🛠️ 本次激活的 skills"
+      assert phase_skill =~ "- Codex session id: `<session_id | n/a>`"
+    end
   end
 
   test "requirements skill publishes reworked clarification artifacts through workflow protocol" do
@@ -1160,6 +1179,10 @@ defmodule SymphonyElixir.CoreTest do
     assert prompt =~ "This is an unattended Symphony orchestration session."
     assert prompt =~ "Stop early only for a true blocker"
     assert prompt =~ "Do not include generic \"next steps for user\""
+    assert prompt =~ "Codex session id"
+    assert prompt =~ "CODEX_THREAD_ID"
+    refute prompt =~ "symphony_session_context"
+    assert prompt =~ "`n/a`"
     assert prompt =~ "## Phase Map"
     assert prompt =~ "## Main Flow"
     assert prompt =~ "Scan **every** unresolved artifact"
