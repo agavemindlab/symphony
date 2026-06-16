@@ -901,9 +901,18 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
   end
 
   test "orchestrator restarts stalled workers with retry backoff" do
+    marker =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-stalled-retry-marker-#{System.unique_integer([:positive])}.log"
+      )
+
+    on_exit(fn -> File.rm(marker) end)
+
     write_workflow_file!(Workflow.workflow_file_path(),
       tracker_api_token: nil,
-      codex_stall_timeout_ms: 1_000
+      codex_stall_timeout_ms: 1_000,
+      hook_issue_stopped: "printf '%s|%s|%s' \"$SYMPHONY_HOOK_EVENT\" \"$SYMPHONY_HOOK_REASON\" \"$SYMPHONY_ISSUE_IDENTIFIER\" > #{marker}"
     )
 
     issue_id = "issue-stall"
@@ -957,6 +966,7 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
 
     refute Process.alive?(worker_pid)
     refute Map.has_key?(state.running, issue_id)
+    assert File.read!(marker) == "stopped|stalled_restart|MT-STALL"
 
     assert %{
              attempt: 1,
@@ -1055,7 +1065,18 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
   end
 
   test "orchestrator blocks failed workers after app-server reports input required" do
-    write_workflow_file!(Workflow.workflow_file_path(), tracker_api_token: nil)
+    marker =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-input-required-marker-#{System.unique_integer([:positive])}.log"
+      )
+
+    on_exit(fn -> File.rm(marker) end)
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_api_token: nil,
+      hook_issue_stopped: "printf '%s|%s|%s' \"$SYMPHONY_HOOK_EVENT\" \"$SYMPHONY_HOOK_REASON\" \"$SYMPHONY_ISSUE_IDENTIFIER\" > #{marker}"
+    )
 
     issue_id = "issue-input-required"
     orchestrator_name = Module.concat(__MODULE__, :InputRequiredBlockOrchestrator)
@@ -1100,6 +1121,7 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
     refute Map.has_key?(state.running, issue_id)
     refute Map.has_key?(state.retry_attempts, issue_id)
     assert MapSet.member?(state.claimed, issue_id)
+    assert File.read!(marker) == "stopped|input_required_blocked|MT-INPUT"
 
     assert %{
              identifier: "MT-INPUT",

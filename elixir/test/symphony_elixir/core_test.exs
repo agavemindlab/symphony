@@ -376,11 +376,20 @@ defmodule SymphonyElixir.CoreTest do
     issue_identifier = "MT-556"
     workspace = Path.join(test_root, issue_identifier)
 
+    marker =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-terminal-reconcile-marker-#{System.unique_integer([:positive])}.log"
+      )
+
+    on_exit(fn -> File.rm(marker) end)
+
     try do
       write_workflow_file!(Workflow.workflow_file_path(),
         workspace_root: test_root,
         tracker_active_states: ["Todo", "In Progress", "In Review"],
-        tracker_terminal_states: ["Closed", "Cancelled", "Canceled", "Duplicate"]
+        tracker_terminal_states: ["Closed", "Cancelled", "Canceled", "Duplicate"],
+        hook_issue_stopped: "printf '%s|%s|%s' \"$SYMPHONY_HOOK_EVENT\" \"$SYMPHONY_HOOK_REASON\" \"$SYMPHONY_ISSUE_IDENTIFIER\" > #{marker}"
       )
 
       File.mkdir_p!(test_root)
@@ -423,6 +432,7 @@ defmodule SymphonyElixir.CoreTest do
       refute MapSet.member?(updated_state.claimed, issue_id)
       refute Process.alive?(agent_pid)
       refute File.exists?(workspace)
+      assert File.read!(marker) == "stopped|terminal_state|MT-556"
     after
       File.rm_rf(test_root)
     end
