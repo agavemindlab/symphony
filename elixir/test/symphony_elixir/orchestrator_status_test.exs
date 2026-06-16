@@ -375,6 +375,43 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
            end)
   end
 
+  test "orchestrator records capacity snapshots only when counts change" do
+    path = analytics_tmp_path("capacity-snapshots.ndjson")
+    previous_analytics_file = Application.get_env(:symphony_elixir, :analytics_file)
+
+    on_exit(fn ->
+      if is_nil(previous_analytics_file) do
+        Application.delete_env(:symphony_elixir, :analytics_file)
+      else
+        Application.put_env(:symphony_elixir, :analytics_file, previous_analytics_file)
+      end
+    end)
+
+    Application.put_env(:symphony_elixir, :analytics_file, path)
+
+    state = %Orchestrator.State{
+      running: %{},
+      retry_attempts: %{},
+      blocked: %{},
+      max_concurrent_agents: 4,
+      codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0}
+    }
+
+    state = Orchestrator.record_capacity_snapshot_for_test(state)
+    state = Orchestrator.record_capacity_snapshot_for_test(state)
+
+    assert [%{"event_type" => "capacity_snapshot", "running_count" => 0}] =
+             capacity_events(path)
+
+    %{state | running: %{"issue-running" => %{}}}
+    |> Orchestrator.record_capacity_snapshot_for_test()
+
+    assert [
+             %{"event_type" => "capacity_snapshot", "running_count" => 0},
+             %{"event_type" => "capacity_snapshot", "running_count" => 1}
+           ] = capacity_events(path)
+  end
+
   test "orchestrator snapshot tracks turn completed usage when present" do
     issue_id = "issue-turn-completed-usage"
 
@@ -1938,6 +1975,13 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
     File.mkdir_p!(root)
     on_exit(fn -> File.rm_rf(root) end)
     Path.join(root, name)
+  end
+
+  defp capacity_events(path) do
+    [path: path]
+    |> SymphonyElixir.Analytics.read_events()
+    |> Map.fetch!(:events)
+    |> Enum.filter(&(&1["event_type"] == "capacity_snapshot"))
   end
 
   defp assert_eventually(fun, attempts \\ 20)

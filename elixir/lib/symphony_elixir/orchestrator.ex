@@ -33,6 +33,7 @@ defmodule SymphonyElixir.Orchestrator do
       :poll_check_in_progress,
       :tick_timer_ref,
       :tick_token,
+      :last_capacity_snapshot,
       running: %{},
       completed: MapSet.new(),
       claimed: MapSet.new(),
@@ -110,7 +111,7 @@ defmodule SymphonyElixir.Orchestrator do
   def handle_info(:run_poll_cycle, state) do
     state = refresh_runtime_config(state)
     state = maybe_dispatch(state)
-    record_capacity_snapshot(state)
+    state = record_capacity_snapshot(state)
     state = schedule_tick(state, state.poll_interval_ms)
     state = %{state | poll_check_in_progress: false}
 
@@ -399,6 +400,12 @@ defmodule SymphonyElixir.Orchestrator do
   @spec select_worker_host_for_test(term(), String.t() | nil) :: String.t() | nil | :no_worker_capacity
   def select_worker_host_for_test(%State{} = state, preferred_worker_host) do
     select_worker_host(state, preferred_worker_host)
+  end
+
+  @doc false
+  @spec record_capacity_snapshot_for_test(term()) :: term()
+  def record_capacity_snapshot_for_test(%State{} = state) do
+    record_capacity_snapshot(state)
   end
 
   defp reconcile_running_issue_states([], state, _active_states, _terminal_states), do: state
@@ -1718,13 +1725,23 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   defp record_capacity_snapshot(%State{} = state) do
-    Analytics.record_event(%{
-      event_type: :capacity_snapshot,
+    snapshot = capacity_snapshot(state)
+
+    if snapshot == state.last_capacity_snapshot do
+      state
+    else
+      Analytics.record_event(Map.put(snapshot, :event_type, :capacity_snapshot))
+      %{state | last_capacity_snapshot: snapshot}
+    end
+  end
+
+  defp capacity_snapshot(%State{} = state) do
+    %{
       running_count: map_size(state.running),
       retrying_count: map_size(state.retry_attempts),
       blocked_count: map_size(state.blocked),
       configured_capacity: state.max_concurrent_agents || Config.settings!().agent.max_concurrent_agents
-    })
+    }
   end
 
   defp positive_token_delta?(token_delta) do

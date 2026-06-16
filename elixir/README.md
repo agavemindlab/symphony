@@ -173,6 +173,8 @@ codex:
 - Multiple Symphony OS processes that share one `observability.analytics_path` serialize append and
   retention through a `<path>.lock` directory. Processes configured with different files are separate
   data sources and are not merged in v1.
+- Capacity snapshots are written only when running/retry/blocked counts change, so idle polling does
+  not evict lifecycle or cost history from the retained event window.
 - `server.port` or CLI `--port` enables the optional Phoenix LiveView dashboard and JSON API at
   `/`, `/api/v1/state`, `/api/v1/<issue_identifier>`, and `/api/v1/refresh`.
 
