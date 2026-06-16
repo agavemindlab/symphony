@@ -16,8 +16,9 @@ Apply the relevant lens before approving:
   feasibility, edge cases, observability, rollback, and whether the next phase
   has enough detail to satisfy the accepted requirements. For Design, test
   rejected alternatives and distinguish "not possible" from "possible but worse
-  tradeoff"; request changes when the artifact overstates impossibility or skips
-  the comparison needed to justify the chosen approach.
+  tradeoff"; request changes when the artifact overstates impossibility, uses an
+  unverified assumption as the reason to dismiss a plausible option, or skips a
+  small proof check that could materially change the chosen approach.
 - Implementation / Deployment: require fresh evidence for each acceptance item;
   do not accept self-reported completion, plausible summaries, or status marks
   without supporting test, PR, CI, deployment, or verification evidence.
@@ -90,6 +91,15 @@ Reply locations:
   acceptance criteria plus later human-approved scope changes. Request changes
   when the artifact would leave the next phase unable to satisfy that source of
   truth.
+- Before approving Design, scan its rationale and rejected alternatives for
+  uncertainty words such as "untested", "unverified", "assumed", "unclear",
+  "unsupported", "未测试", "未验证", "假设", "不明确", or "不支持". If such
+  uncertainty is used to rule out a plausible option, the recommendation must
+  either require a small proof check or explain why that check would not be
+  cheap enough to affect the design. Do not approve with a caution or defer
+  this to Implementation when the proof check belongs in Design rationale.
+  Calling the chosen path "conservative", "low risk", or "更稳" is not evidence
+  when the alternative was rejected because it was not checked.
 
 ## Decision Guide
 
@@ -104,6 +114,12 @@ Reply locations:
   concurrency, multi-process writes, persistence completeness, data loss, or
   deployment topology). If that risk invalidates the approved design, ask for
   rework of the relevant earlier phase.
+- For Design, request changes when a plausible simpler, cheaper, or lower-risk
+  alternative is rejected because it is "untested", "unverified", or assumed
+  unsupported, including the same claim in Chinese, and a small spike, API
+  probe, or local proof would be cheap enough to settle whether the alternative
+  is viable. This is a blocking Design issue, not an Implementation follow-up
+  note.
 - Ask clarification when the next action requires human judgment, product scope,
   or risk acceptance rather than agent work.
 - Use a merge nudge when normal Implementation appears accepted but the workflow
