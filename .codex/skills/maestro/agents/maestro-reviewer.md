@@ -85,6 +85,14 @@ Reply locations:
   their own. If Deployment weakens or substitutes required verification, require
   changes when an agent can add evidence, or ask clarification when only the
   human can accept the risk.
+- For secret or runtime-env contract work, distinguish committed metadata from
+  actual non-git secret provisioning. If the issue's purpose is for future
+  agents to use a dedicated credential automatically, require evidence that the
+  runtime value is configured before recommending `Done`. Without that evidence,
+  recommend no reply yet to the agent and tell the human to configure the
+  project-local secret layer, such as `workflows/<project>/project.env.local`,
+  or the selected operator profile, then manually mark `Done` after confirming
+  the variables are present. Never print the secret values.
 - If the artifact has unresolved `[NEEDS CLARIFICATION]`, treat a human reply as
   an answer for the same phase, not as approval.
 - For every phase, compare the artifact against the accepted `## Requirements`

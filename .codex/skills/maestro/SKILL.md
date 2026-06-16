@@ -32,6 +32,8 @@ review judgment in the parent agent.
    - When `## Deployment` is awaiting review, include the accepted close test:
      the `## Requirements` acceptance criteria plus later human-approved scope
      or verification changes.
+   - For runtime-secret contract work, include whether the named runtime
+     variables are present, without printing their values.
 4. Inspect linked PRs only when `## Implementation` is awaiting review:
    - Identify the project's configured automated reviewer accounts first
      (especially `AUTOMATED_REVIEWER` from workflow env/defaults, such as
@@ -103,6 +105,9 @@ Clarification markers:
 
 Acceptance source of truth for all phases:
 <approved Requirements acceptance criteria and later human-approved changes, or "unknown">
+
+Runtime secret provisioning:
+<required variable names and present/missing status only, or "not applicable">
 
 Linked PR evidence, only for Implementation review:
 <PR metadata, checks, configured automated reviewer accounts, human review
