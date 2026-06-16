@@ -170,6 +170,9 @@ codex:
 - `observability.analytics_path` optionally sets the persisted NDJSON event file used by the v1
   efficiency analytics panels. When unset, Symphony writes `symphony-analytics.ndjson` next to the
   runtime log file. Path values support `~` and `$VAR` resolution.
+- Multiple Symphony OS processes that share one `observability.analytics_path` serialize append and
+  retention through a `<path>.lock` directory. Processes configured with different files are separate
+  data sources and are not merged in v1.
 - `server.port` or CLI `--port` enables the optional Phoenix LiveView dashboard and JSON API at
   `/`, `/api/v1/state`, `/api/v1/<issue_identifier>`, and `/api/v1/refresh`.
 

@@ -113,10 +113,16 @@ defmodule SymphonyElixir.CoreTest do
     assert String.trim(prompt) != ""
     assert is_binary(Config.workflow_prompt())
     assert Config.workflow_prompt() == prompt
+    assert prompt =~ "## Phase Map"
     assert prompt =~ "| Requirements | `phase-requirements` |"
     assert prompt =~ "| Design | `phase-design` |"
     assert prompt =~ "| Implementation | `phase-implementation` |"
     assert prompt =~ "| Deployment | `phase-deployment` |"
+    assert prompt =~ "## Main Flow"
+    assert prompt =~ "retain each comment's `parent { id }`"
+    assert prompt =~ "reply node as standalone top-level feedback"
+    assert prompt =~ "## Phase Artifact Protocol"
+    assert prompt =~ "## Workpad"
     assert prompt =~ "⏩ 自动进入 [Next Phase]"
     assert prompt =~ "✅ 已批准，进入 [Next Phase]"
     assert prompt =~ ">>> 🛠️ 本次激活的 skills"
@@ -128,6 +134,8 @@ defmodule SymphonyElixir.CoreTest do
     assert prompt =~ "Rework cycle"
     assert prompt =~ "Cross-phase rework"
     assert prompt =~ "Agent never moves to `Done`"
+    assert prompt =~ "**`Human Review` is not an agent state**"
+    assert prompt =~ "collapsible sections (`>>>`)"
     assert length(String.split(prompt, "---")) >= 4
   end
 
@@ -1150,9 +1158,16 @@ defmodule SymphonyElixir.CoreTest do
     assert prompt =~ "Do not include generic \"next steps for user\""
     assert prompt =~ "active (unresolved) Phase artifacts"
     assert prompt =~ "most recent artifact with no closing reply"
+    assert prompt =~ "Scan **every** unresolved artifact"
+    assert prompt =~ "inspect each artifact's `children` / thread replies"
+    assert prompt =~ "retain each comment's `parent { id }`"
+    assert prompt =~ "reply node as standalone top-level feedback"
+    assert prompt =~ "feedback keeps the phase intent of that artifact"
     assert prompt =~ "Implementation → Deployment is gated by `Merging`"
     assert prompt =~ "open the matching phase skill"
     assert prompt =~ ".agents/skills/symphony-linear/SKILL.md"
+    assert prompt =~ "## Phase Map"
+    assert prompt =~ "## Main Flow"
     assert prompt =~ "Continuation context:"
     assert prompt =~ "retry attempt #2"
 

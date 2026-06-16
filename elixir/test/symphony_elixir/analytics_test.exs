@@ -195,6 +195,13 @@ defmodule SymphonyElixir.AnalyticsTest do
                recorded_at: "2026-06-15T11:00:00Z"
              )
 
+    assert :ok =
+             Analytics.record_event(
+               %{event_type: :run_started, issue_id: "issue-invalid-lock-timeout"},
+               path: path,
+               lock_timeout_ms: :invalid
+             )
+
     assert :ok = Analytics.record_event(%{event_type: :run_completed, runtime_seconds: 2.8}, recorded_at: :bad)
 
     assert %{events: events} = Analytics.read_events()
@@ -290,6 +297,54 @@ defmodule SymphonyElixir.AnalyticsTest do
            } = Analytics.read_events(path: path, max_events: :all)
 
     assert List.last(events)["issue_id"] == "issue-505"
+  end
+
+  test "serializes analytics writes with a filesystem lock" do
+    path = tmp_path("locked-events.ndjson")
+    lock_path = path <> ".lock"
+    File.mkdir!(lock_path)
+
+    task =
+      Task.async(fn ->
+        Analytics.record_event(
+          %{event_type: :run_started, issue_id: "issue-locked"},
+          path: path,
+          lock_timeout_ms: 1_000
+        )
+      end)
+
+    Process.sleep(50)
+    refute File.exists?(path)
+
+    File.rmdir!(lock_path)
+    assert :ok = Task.await(task, 1_000)
+
+    assert %{
+             events: [%{"event_type" => "run_started", "issue_id" => "issue-locked"}],
+             warnings: [],
+             truncated?: false
+           } = Analytics.read_events(path: path)
+  end
+
+  test "skips analytics events when the filesystem lock times out" do
+    path = tmp_path("locked-timeout-events.ndjson")
+    lock_path = path <> ".lock"
+    File.mkdir!(lock_path)
+
+    try do
+      assert capture_log(fn ->
+               assert :ok =
+                        Analytics.record_event(
+                          %{event_type: :run_started, issue_id: "issue-timeout"},
+                          path: path,
+                          lock_timeout_ms: 0
+                        )
+             end) =~ "Failed to acquire analytics event file lock: timed out"
+
+      refute File.exists?(path)
+    after
+      File.rmdir!(lock_path)
+    end
   end
 
   defp panel(summary, id) do

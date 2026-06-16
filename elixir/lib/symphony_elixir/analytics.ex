@@ -9,6 +9,8 @@ defmodule SymphonyElixir.Analytics do
 
   @default_max_events 500
   @retained_event_lines @default_max_events
+  @lock_retry_ms 10
+  @lock_timeout_ms 5_000
 
   @type event :: map()
   @type read_result :: %{
@@ -21,13 +23,14 @@ defmodule SymphonyElixir.Analytics do
   def record_event(event, opts \\ []) when is_map(event) do
     path = Keyword.get(opts, :path, file_path())
     recorded_at = Keyword.get(opts, :recorded_at, DateTime.utc_now())
+    lock_timeout_ms = Keyword.get(opts, :lock_timeout_ms, @lock_timeout_ms)
 
     event
     |> normalize_event(recorded_at)
     |> Jason.encode()
     |> case do
       {:ok, json} ->
-        write_event_line(path, json)
+        write_event_line(path, json, lock_timeout_ms)
 
       {:error, reason} ->
         Logger.warning("Skipping analytics event that cannot be encoded: #{inspect(reason)}")
@@ -108,25 +111,63 @@ defmodule SymphonyElixir.Analytics do
 
   defp stringify_event_type(event), do: event
 
-  defp write_event_line(path, json) when is_binary(path) and is_binary(json) do
+  defp write_event_line(path, json, lock_timeout_ms) when is_binary(path) and is_binary(json) do
     path
     |> Path.dirname()
     |> File.mkdir_p()
     |> case do
       :ok ->
-        case File.write(path, json <> "\n", [:append]) do
-          :ok ->
-            retain_event_file(path)
-
-          {:error, reason} ->
-            Logger.warning("Failed to write analytics event: #{inspect(reason)}")
-            :ok
-        end
+        with_event_file_lock(path, lock_timeout_ms, fn -> append_event_line(path, json) end)
 
       {:error, reason} ->
         Logger.warning("Failed to create analytics directory: #{inspect(reason)}")
         :ok
     end
+  end
+
+  defp append_event_line(path, json) do
+    case File.write(path, json <> "\n", [:append]) do
+      :ok ->
+        retain_event_file(path)
+
+      {:error, reason} ->
+        Logger.warning("Failed to write analytics event: #{inspect(reason)}")
+        :ok
+    end
+  end
+
+  defp with_event_file_lock(path, lock_timeout_ms, fun) do
+    lock_path = path <> ".lock"
+    deadline_ms = System.monotonic_time(:millisecond) + normalize_lock_timeout_ms(lock_timeout_ms)
+    acquire_event_file_lock(lock_path, deadline_ms, fun)
+  end
+
+  defp normalize_lock_timeout_ms(timeout_ms) when is_integer(timeout_ms) and timeout_ms >= 0, do: timeout_ms
+  defp normalize_lock_timeout_ms(_timeout_ms), do: @lock_timeout_ms
+
+  defp acquire_event_file_lock(lock_path, deadline_ms, fun) do
+    case File.mkdir(lock_path) do
+      :ok ->
+        try do
+          fun.()
+        after
+          release_event_file_lock(lock_path)
+        end
+
+      {:error, _reason} ->
+        if System.monotonic_time(:millisecond) >= deadline_ms do
+          Logger.warning("Failed to acquire analytics event file lock: timed out")
+          :ok
+        else
+          Process.sleep(@lock_retry_ms)
+          acquire_event_file_lock(lock_path, deadline_ms, fun)
+        end
+    end
+  end
+
+  defp release_event_file_lock(lock_path) do
+    File.rmdir(lock_path)
+    :ok
   end
 
   defp retain_event_file(path) do
@@ -142,7 +183,12 @@ defmodule SymphonyElixir.Analytics do
 
   defp retain_event_lines(path, lines) do
     if length(lines) > @retained_event_lines do
-      File.write(path, Enum.join(Enum.take(lines, -@retained_event_lines), "\n") <> "\n")
+      retained_content = Enum.join(Enum.take(lines, -@retained_event_lines), "\n") <> "\n"
+      tmp_path = path <> ".#{System.unique_integer([:positive])}.tmp"
+
+      File.write(tmp_path, retained_content)
+      File.rename(tmp_path, path)
+      File.rm(tmp_path)
       :ok
     else
       :ok
