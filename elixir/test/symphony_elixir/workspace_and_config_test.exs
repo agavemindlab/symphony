@@ -1037,12 +1037,19 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
 
     workflow_root_env_var = "SYMPHONY_WORKSPACE_ROOT"
     previous_workflow_root = System.get_env(workflow_root_env_var)
+    previous_path = System.get_env("PATH")
+    previous_clone_source = System.get_env("SYMPHONY_TEST_CLONE_SOURCE")
+    previous_fork_owner = System.get_env("GITHUB_FORK_OWNER")
+    previous_repo = System.get_env("SYMPHONY_REPO")
+    previous_base_branch = System.get_env("SYMPHONY_BASE_BRANCH")
     original_workflow_path = Workflow.workflow_file_path()
 
     try do
       canonical_workflow = Path.expand("../workflows/agavemindlab/WORKFLOW.md", File.cwd!())
       canonical_skills = Path.expand("../workflows/agavemindlab/skills", File.cwd!())
       canonical_dir = Path.join(test_root, "agavemindlab")
+      clone_source = Path.join(test_root, "clone-source")
+      fake_bin_dir = Path.join(test_root, "bin")
       project_dir = Path.join(test_root, "symphony")
       project_workflow = Path.join(project_dir, "WORKFLOW.md")
       workspace_root = Path.join(test_root, "workspaces")
@@ -1050,6 +1057,8 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
 
       File.mkdir_p!(canonical_dir)
       File.mkdir_p!(project_dir)
+      create_clone_source_repo!(clone_source)
+      install_fake_gh!(fake_bin_dir)
       File.ln_s!(canonical_workflow, Path.join(canonical_dir, "WORKFLOW.md"))
       File.ln_s!(canonical_skills, Path.join(canonical_dir, "skills"))
       File.ln_s!("../agavemindlab/WORKFLOW.md", project_workflow)
@@ -1079,6 +1088,11 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       File.chmod!(Path.join(project_dir, "teardown.sh"), 0o755)
 
       System.put_env(workflow_root_env_var, workspace_root)
+      System.put_env("PATH", fake_bin_dir <> ":" <> (previous_path || ""))
+      System.put_env("SYMPHONY_TEST_CLONE_SOURCE", clone_source)
+      System.put_env("GITHUB_FORK_OWNER", "test-owner")
+      System.put_env("SYMPHONY_REPO", "symphony")
+      System.put_env("SYMPHONY_BASE_BRANCH", "main")
       Workflow.set_workflow_file_path(Path.expand(project_workflow))
 
       assert {:ok, workspace} = Workspace.create_for_issue("MT-SKILL-INSTALL")
@@ -1097,6 +1111,11 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     after
       Workflow.set_workflow_file_path(original_workflow_path)
       restore_env(workflow_root_env_var, previous_workflow_root)
+      restore_env("PATH", previous_path)
+      restore_env("SYMPHONY_TEST_CLONE_SOURCE", previous_clone_source)
+      restore_env("GITHUB_FORK_OWNER", previous_fork_owner)
+      restore_env("SYMPHONY_REPO", previous_repo)
+      restore_env("SYMPHONY_BASE_BRANCH", previous_base_branch)
       File.rm_rf(test_root)
     end
   end
@@ -1127,12 +1146,19 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
 
     workflow_root_env_var = "SYMPHONY_WORKSPACE_ROOT"
     previous_workflow_root = System.get_env(workflow_root_env_var)
+    previous_path = System.get_env("PATH")
+    previous_clone_source = System.get_env("SYMPHONY_TEST_CLONE_SOURCE")
+    previous_fork_owner = System.get_env("GITHUB_FORK_OWNER")
+    previous_repo = System.get_env("SYMPHONY_REPO")
+    previous_base_branch = System.get_env("SYMPHONY_BASE_BRANCH")
     original_workflow_path = Workflow.workflow_file_path()
 
     try do
       canonical_workflow = Path.expand("../workflows/agavemindlab/WORKFLOW.md", File.cwd!())
       canonical_skills = Path.expand("../workflows/agavemindlab/skills", File.cwd!())
       canonical_dir = Path.join(test_root, "agavemindlab")
+      clone_source = Path.join(test_root, "clone-source")
+      fake_bin_dir = Path.join(test_root, "bin")
       project_dir = Path.join(test_root, "symphony")
       project_workflow = Path.join(project_dir, "WORKFLOW.md")
       workspace_root = Path.join(test_root, "workspaces")
@@ -1140,6 +1166,8 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
 
       File.mkdir_p!(canonical_dir)
       File.mkdir_p!(project_dir)
+      create_clone_source_repo!(clone_source)
+      install_fake_gh!(fake_bin_dir)
       File.ln_s!(canonical_workflow, Path.join(canonical_dir, "WORKFLOW.md"))
       File.ln_s!(canonical_skills, Path.join(canonical_dir, "skills"))
       File.ln_s!("../agavemindlab/WORKFLOW.md", project_workflow)
@@ -1160,6 +1188,11 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       File.chmod!(Path.join(project_dir, "teardown.sh"), 0o755)
 
       System.put_env(workflow_root_env_var, workspace_root)
+      System.put_env("PATH", fake_bin_dir <> ":" <> (previous_path || ""))
+      System.put_env("SYMPHONY_TEST_CLONE_SOURCE", clone_source)
+      System.put_env("GITHUB_FORK_OWNER", "test-owner")
+      System.put_env("SYMPHONY_REPO", "symphony")
+      System.put_env("SYMPHONY_BASE_BRANCH", "main")
       Workflow.set_workflow_file_path(Path.expand(project_workflow))
 
       assert {:error, {:workspace_hook_failed, "after_create", 42, output}} =
@@ -1167,10 +1200,15 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
 
       assert output =~ "setup failed"
 
-      refute File.exists?(Path.join([workspace, ".agents", "skills", "commit", "SKILL.md"]))
+      refute File.exists?(Path.join([workspace, ".agents", "skills", "symphony-commit", "SKILL.md"]))
     after
       Workflow.set_workflow_file_path(original_workflow_path)
       restore_env(workflow_root_env_var, previous_workflow_root)
+      restore_env("PATH", previous_path)
+      restore_env("SYMPHONY_TEST_CLONE_SOURCE", previous_clone_source)
+      restore_env("GITHUB_FORK_OWNER", previous_fork_owner)
+      restore_env("SYMPHONY_REPO", previous_repo)
+      restore_env("SYMPHONY_BASE_BRANCH", previous_base_branch)
       File.rm_rf(test_root)
     end
   end
@@ -1608,5 +1646,44 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     ["---" | lines] = File.read!(path) |> String.split(["\r\n", "\n", "\r"], trim: false)
     {front_matter_lines, _rest} = Enum.split_while(lines, &(&1 != "---"))
     YamlElixir.read_from_string(Enum.join(front_matter_lines, "\n"))
+  end
+
+  defp create_clone_source_repo!(path) do
+    File.mkdir_p!(path)
+    File.write!(Path.join(path, "README.md"), "clone source\n")
+
+    assert {_output, 0} = System.cmd("git", ["init", "-b", "main"], cd: path)
+    assert {_output, 0} = System.cmd("git", ["config", "user.name", "Test User"], cd: path)
+    assert {_output, 0} = System.cmd("git", ["config", "user.email", "test@example.com"], cd: path)
+    assert {_output, 0} = System.cmd("git", ["add", "README.md"], cd: path)
+    assert {_output, 0} = System.cmd("git", ["commit", "-m", "initial"], cd: path)
+  end
+
+  defp install_fake_gh!(fake_bin_dir) do
+    File.mkdir_p!(fake_bin_dir)
+
+    fake_gh = Path.join(fake_bin_dir, "gh")
+
+    File.write!(fake_gh, """
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    if [ "$#" -ge 4 ] && [ "$1" = "repo" ] && [ "$2" = "clone" ]; then
+      destination="$4"
+      git clone "$SYMPHONY_TEST_CLONE_SOURCE" "$destination" >/dev/null 2>&1
+      git -C "$destination" remote add upstream "$SYMPHONY_TEST_CLONE_SOURCE"
+      exit 0
+    fi
+
+    if [ "$#" -ge 2 ] && [ "$1" = "api" ] && [ "$2" = "user" ]; then
+      printf 'test-owner\\n'
+      exit 0
+    fi
+
+    printf 'unexpected fake gh invocation: %s\\n' "$*" >&2
+    exit 1
+    """)
+
+    File.chmod!(fake_gh, 0o755)
   end
 end
