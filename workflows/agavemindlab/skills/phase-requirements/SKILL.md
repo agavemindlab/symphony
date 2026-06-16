@@ -317,6 +317,7 @@ Primary: Type:<Bug|Feature|Refactor|Performance|Migration|Chore|Spike|Other>
 ### 待确认（omit if none; the batched [NEEDS CLARIFICATION] block — see Batched clarification）
 
 >>> 🛠️ 本次激活的 skills
+- Codex session id: `<session_id | n/a>`
 - `<skill>` — <≤6-word purpose>
 >>>
 ```

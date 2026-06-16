@@ -213,6 +213,7 @@ comfort.
 > 👉 **需要人工处理**：审查 PR，批准后将 issue 移至 `Merging`；需要修改则移至 `Rework`。
 
 >>> 🛠️ 本次激活的 skills（mirror workpad notes: invoked + Skipped）
+- Codex session id: `<session_id | n/a>`
 - `<skill>` — <≤6-word purpose>
 - _跳过_ `<skill>` — <reason>
 >>>
