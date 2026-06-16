@@ -13,8 +13,8 @@ description:
 
 ## Goal
 
-Post (or update) the `## Requirements` artifact on the Linear issue with
-these fields locked down:
+Publish the `## Requirements` artifact through the workflow artifact protocol
+with these fields locked down:
 
 - `Primary: Type:<...>` classifier
 - `要解决的问题（what）`
@@ -327,7 +327,7 @@ Primary: Type:<Bug|Feature|Refactor|Performance|Migration|Chore|Spike|Other>
 When a batched `[NEEDS CLARIFICATION]` block remains after honest analysis:
 
 1. Write the batched block at the foot of the `## Requirements` artifact.
-2. Post or update the artifact comment.
+2. Publish the artifact through the workflow artifact protocol.
 3. Move the issue to `Human Review`.
 4. Stop.
 
@@ -381,10 +381,10 @@ about form, not correctness:
   its required bug-specific `S<N>`).
 - No unresolved `[NEEDS CLARIFICATION]` markers.
 
-Post or update the `## Requirements` artifact and set the workpad
-`current_phase: Requirements`. Do **not** move the issue yourself on a clean
-exit — hand back one of two outcomes (`advance` / `stop`) for Main Flow to
-execute. The decision is yours; Main Flow only carries it out.
+Publish the `## Requirements` artifact through the workflow artifact protocol
+and set the workpad `current_phase: Requirements`. Do **not** move the issue
+yourself on a clean exit — hand back one of two outcomes (`advance` / `stop`)
+for Main Flow to execute. The decision is yours; Main Flow only carries it out.
 
 ### Exit decision: advance or stop
 

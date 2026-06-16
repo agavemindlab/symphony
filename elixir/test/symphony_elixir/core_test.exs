@@ -161,6 +161,17 @@ defmodule SymphonyElixir.CoreTest do
     end
   end
 
+  test "requirements skill publishes reworked clarification artifacts through workflow protocol" do
+    skill =
+      File.read!(Path.expand("../workflows/agavemindlab/skills/phase-requirements/SKILL.md", File.cwd!()))
+
+    assert skill =~ ~r/same-phase Rework\s+cycle/
+    assert skill =~ "workflow artifact protocol"
+    refute skill =~ "Post (or update) the `## Requirements` artifact"
+    refute skill =~ "Post or update the artifact comment."
+    refute skill =~ "Post or update the `## Requirements` artifact"
+  end
+
   test "linear api token resolves from LINEAR_API_KEY env var" do
     previous_linear_api_key = System.get_env("LINEAR_API_KEY")
     env_api_key = "test-linear-api-key"
