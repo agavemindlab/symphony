@@ -29,6 +29,9 @@ Recommend how the human should reply to the current phase artifact. Return:
 - `建议回复方式`: approve / request changes / ask clarification / merge nudge /
   completion confirmation / no reply yet.
 - `回复对象`: next Symphony agent / human.
+- `回复位置`: awaiting-review artifact thread / human-facing no-op / none.
+- `建议 issue status`: the Linear state the human should set after sending the
+  reply, or `unchanged`.
 - `建议回复`: a ready-to-send Chinese draft.
 - `依据`: 2-5 evidence bullets.
 - `注意`: only if evidence is missing, ambiguous, or risky.
@@ -38,6 +41,26 @@ For approve, request changes, merge nudge, and completion confirmation, set
 note for the next run. For ask clarification and no reply yet, set `回复对象`
 to `human` and write the draft for the human, explaining what Maestro cannot
 decide from the evidence.
+
+Status recommendations:
+
+- Requirements / Design approve -> `In Progress`.
+- Implementation approve with a real PR -> `Merging`; for no-PR `Type:Spike`
+  findings accepted -> `Done`.
+- Request changes -> `Rework`.
+- Ask clarification or no reply yet -> `unchanged`.
+- Merge nudge -> `Merging`.
+- Deployment completion accepted -> `Done`; Deployment still waiting for
+  verification -> `In Progress`; Deployment failed or needs correction ->
+  `Rework`.
+
+Reply locations:
+
+- approve, request changes, ask clarification, and completion confirmation:
+  awaiting-review artifact thread.
+- merge nudge: none; setting `Merging` is the workflow signal unless the human
+  needs an explanatory note.
+- no reply yet: none.
 
 ## Workflow Rules
 
@@ -50,7 +73,8 @@ decide from the evidence.
 - Drop resolved artifacts unless a current comment explicitly refers back to
   that prior round.
 - For `## Implementation`, use only human PR reviews/comments as phase feedback.
-  Bot approval is not human approval.
+  Bot or configured automated reviewer approval is not human approval, even
+  when GitHub reports that account as `isBot: false` or a repo member.
 - For `## Deployment`, compare the artifact's evidence against the issue's
   close test: the approved `## Requirements` acceptance criteria plus later
   human-approved scope or verification changes. Do not accept `✅` statuses on
