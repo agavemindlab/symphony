@@ -1,0 +1,4 @@
+interface:
+  display_name: "Maestro"
+  short_description: "Advise replies for Human Review issues"
+  default_prompt: "Use $maestro DEV-1234 to recommend how to reply to a Human Review issue."
