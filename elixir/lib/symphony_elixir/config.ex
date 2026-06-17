@@ -98,10 +98,10 @@ defmodule SymphonyElixir.Config do
     end
   end
 
-  @spec configured_project_slugs(Schema.Tracker.t() | nil) :: {:ok, [String.t()]} | {:error, term()}
-  def configured_project_slugs(tracker \\ nil)
+  @spec configured_project_slugs() :: {:ok, [String.t()]} | {:error, term()}
+  def configured_project_slugs, do: Schema.configured_project_slugs(settings!().tracker)
 
-  def configured_project_slugs(nil), do: Schema.configured_project_slugs(settings!().tracker)
+  @spec configured_project_slugs(Schema.Tracker.t()) :: {:ok, [String.t()]} | {:error, term()}
   def configured_project_slugs(%Schema.Tracker{} = tracker), do: Schema.configured_project_slugs(tracker)
 
   @spec codex_runtime_settings(Path.t() | nil, keyword()) ::
