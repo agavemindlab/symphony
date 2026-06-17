@@ -36,8 +36,10 @@ review judgment in the parent agent.
      variables are present, without printing their values.
 4. Inspect spawned or related issues mentioned by the current artifacts and
    Linear relations. Include each related issue's relation type, state, assignee,
-   whether it is blocked by or blocks the reviewed issue, and whether validation
-   or disposable issues have a durable relation plus a terminal cleanup state.
+   whether it is blocked by or blocks the reviewed issue, whether downstream
+   issues have enough context to start safely after the reviewed issue is closed,
+   and whether validation or disposable issues have a durable relation plus a
+   terminal cleanup state.
 5. Inspect linked PRs only when `## Implementation` is awaiting review:
    - Identify the project's configured automated reviewer accounts first
      (especially `AUTOMATED_REVIEWER` from workflow env/defaults, such as
@@ -115,8 +117,9 @@ Runtime secret provisioning:
 
 Spawned or related issue evidence:
 <issue identifiers, relation types, state/assignee, blocker relation status,
-validation/disposable issue cleanup status, and whether any downstream issue can
-be selected before this one is accepted, or "none">
+whether any downstream issue can be selected before this one is accepted,
+whether the downstream issue has enough context to start safely after the
+reviewed issue is closed, validation/disposable issue cleanup status, or "none">
 
 Linked PR evidence, only for Implementation review:
 <PR metadata, checks, configured automated reviewer accounts, human review
@@ -145,7 +148,8 @@ Task:
    root cause.
 8. Check whether spawned or related issues have the dependency relation or
    cleanup disposition needed to prevent unsafe parallel work or orphaned
-   validation artifacts.
+   validation artifacts, and whether downstream issues have enough inherited
+   context to start safely once unblocked.
 9. For bugfixes, reject artifacts that do not explain new failure windows caused
    by moved side effects or durable state before success.
 10. Cite the decisive evidence and call out missing evidence or uncertainty.

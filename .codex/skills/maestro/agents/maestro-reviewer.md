@@ -98,9 +98,12 @@ Reply locations:
   disposable, or cleanup issue as proof for the close test, require a durable
   relation to the reviewed issue and evidence that the helper issue is closed,
   canceled, or otherwise explicitly disposed before recommending `Done` for the
-  reviewed issue. Request changes when the artifact creates prerequisite
-  follow-up work without that gate, or leaves validation artifacts open or
-  unlinked.
+  reviewed issue. Before recommending `Done`, also check whether any downstream
+  issue that becomes selectable after the reviewed issue is closed has enough
+  current context to start safely; if key constraints, accepted facts, or
+  follow-up scope are missing, recommend adding that context first. Request
+  changes when the artifact creates prerequisite follow-up work without that
+  gate, or leaves validation artifacts open or unlinked.
 - For `## Deployment`, compare the artifact's evidence against the issue's
   close test: the approved `## Requirements` acceptance criteria plus later
   human-approved scope or verification changes. Do not accept `✅` statuses on
