@@ -405,7 +405,8 @@ posted artifact for a human to revisit later (a `⏩` artifact remains
 reviewable).
 
 On `advance`, record `confidence: advance` in the workpad notes; Main Flow
-writes the `⏩` reply and opens `phase-design` in the same session.
+writes the `⏩` reply, sets `current_phase: Design`, persists state, and stops
+this agent run. The next Symphony dispatch opens `phase-design`.
 
 Otherwise choose **`stop`** — Main Flow moves the issue to `Human Review`.
 This is the right outcome for a rework, for a human already in the thread,

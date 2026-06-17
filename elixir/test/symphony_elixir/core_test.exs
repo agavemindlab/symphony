@@ -129,6 +129,11 @@ defmodule SymphonyElixir.CoreTest do
     assert prompt =~ "| Implementation | `phase-implementation` |"
     assert prompt =~ "| Deployment | `phase-deployment` |"
     assert prompt =~ "## Main Flow"
+    assert prompt =~ "Open and follow `.agents/skills/symphony-linear/SKILL.md`"
+    assert prompt =~ "Do **not** open the next phase skill in this session"
+    assert prompt =~ "### Rework cycle (same phase)"
+    assert prompt =~ "Requirements rework must also state"
+    assert prompt =~ "reachable only via `Merging`"
     assert prompt =~ "retain each comment's `parent { id }`"
     assert prompt =~ "reply node as standalone top-level feedback"
     assert prompt =~ "## Phase Artifact Protocol"
@@ -170,6 +175,23 @@ defmodule SymphonyElixir.CoreTest do
     refute skill =~ "Post (or update) the `## Requirements` artifact"
     refute skill =~ "Post or update the artifact comment."
     refute skill =~ "Post or update the `## Requirements` artifact"
+  end
+
+  test "shared phase prompts explain rework handoff gates" do
+    repo_root = Path.expand("..", File.cwd!())
+    workflow = File.read!(Path.join(repo_root, "workflows/agavemindlab/WORKFLOW.md"))
+
+    assert workflow =~ "当前停在 `Human Review`"
+    assert workflow =~ "下游 Design/Implementation/PR 还未按本轮 artifact 更新"
+
+    requirements_skill =
+      File.read!(Path.join(repo_root, "workflows/agavemindlab/skills/phase-requirements/SKILL.md"))
+
+    design_skill =
+      File.read!(Path.join(repo_root, "workflows/agavemindlab/skills/phase-design/SKILL.md"))
+
+    refute requirements_skill =~ "opens `phase-design` in the same session"
+    refute design_skill =~ "opens `phase-implementation` in the same session"
   end
 
   test "linear api token resolves from LINEAR_API_KEY env var" do
@@ -1578,6 +1600,10 @@ defmodule SymphonyElixir.CoreTest do
     assert prompt =~ "This is an unattended Symphony orchestration session."
     assert prompt =~ "Stop early only for a true blocker"
     assert prompt =~ "Do not include generic \"next steps for user\""
+    assert prompt =~ "Open and follow `.agents/skills/symphony-linear/SKILL.md`"
+    assert prompt =~ "When the target phase is a rework of its own artifact"
+    assert prompt =~ "Requirements rework must also state"
+    assert prompt =~ "reachable only via `Merging`"
     assert prompt =~ "Codex session id"
     assert prompt =~ "CODEX_THREAD_ID"
     refute prompt =~ "symphony_session_context"
