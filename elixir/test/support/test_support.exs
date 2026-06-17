@@ -146,6 +146,7 @@ defmodule SymphonyElixir.TestSupport do
           tracker_endpoint: "https://api.linear.app/graphql",
           tracker_api_token: "token",
           tracker_project_slug: "project",
+          tracker_project_slugs: nil,
           tracker_assignee: nil,
           tracker_required_labels: [],
           tracker_active_states: ["Todo", "In Progress"],
@@ -169,6 +170,8 @@ defmodule SymphonyElixir.TestSupport do
           hook_before_run: nil,
           hook_after_run: nil,
           hook_before_remove: nil,
+          hook_issue_running: nil,
+          hook_issue_stopped: nil,
           hook_timeout_ms: 60_000,
           observability_enabled: true,
           observability_refresh_ms: 1_000,
@@ -185,6 +188,7 @@ defmodule SymphonyElixir.TestSupport do
     tracker_endpoint = Keyword.get(config, :tracker_endpoint)
     tracker_api_token = Keyword.get(config, :tracker_api_token)
     tracker_project_slug = Keyword.get(config, :tracker_project_slug)
+    tracker_project_slugs = Keyword.get(config, :tracker_project_slugs)
     tracker_assignee = Keyword.get(config, :tracker_assignee)
     tracker_required_labels = Keyword.get(config, :tracker_required_labels)
     tracker_active_states = Keyword.get(config, :tracker_active_states)
@@ -208,6 +212,8 @@ defmodule SymphonyElixir.TestSupport do
     hook_before_run = Keyword.get(config, :hook_before_run)
     hook_after_run = Keyword.get(config, :hook_after_run)
     hook_before_remove = Keyword.get(config, :hook_before_remove)
+    hook_issue_running = Keyword.get(config, :hook_issue_running)
+    hook_issue_stopped = Keyword.get(config, :hook_issue_stopped)
     hook_timeout_ms = Keyword.get(config, :hook_timeout_ms)
     observability_enabled = Keyword.get(config, :observability_enabled)
     observability_refresh_ms = Keyword.get(config, :observability_refresh_ms)
@@ -225,6 +231,7 @@ defmodule SymphonyElixir.TestSupport do
         "  endpoint: #{yaml_value(tracker_endpoint)}",
         "  api_key: #{yaml_value(tracker_api_token)}",
         "  project_slug: #{yaml_value(tracker_project_slug)}",
+        tracker_project_slugs_entry(tracker_project_slugs),
         "  assignee: #{yaml_value(tracker_assignee)}",
         "  required_labels: #{yaml_value(tracker_required_labels)}",
         "  active_states: #{yaml_value(tracker_active_states)}",
@@ -247,7 +254,15 @@ defmodule SymphonyElixir.TestSupport do
         "  turn_timeout_ms: #{yaml_value(codex_turn_timeout_ms)}",
         "  read_timeout_ms: #{yaml_value(codex_read_timeout_ms)}",
         "  stall_timeout_ms: #{yaml_value(codex_stall_timeout_ms)}",
-        hooks_yaml(hook_after_create, hook_before_run, hook_after_run, hook_before_remove, hook_timeout_ms),
+        hooks_yaml(
+          hook_after_create,
+          hook_before_run,
+          hook_after_run,
+          hook_before_remove,
+          hook_issue_running,
+          hook_issue_stopped,
+          hook_timeout_ms
+        ),
         observability_yaml(
           observability_enabled,
           observability_refresh_ms,
@@ -285,16 +300,27 @@ defmodule SymphonyElixir.TestSupport do
 
   defp yaml_value(value), do: yaml_value(to_string(value))
 
-  defp hooks_yaml(nil, nil, nil, nil, timeout_ms), do: "hooks:\n  timeout_ms: #{yaml_value(timeout_ms)}"
+  defp hooks_yaml(nil, nil, nil, nil, nil, nil, timeout_ms),
+    do: "hooks:\n  timeout_ms: #{yaml_value(timeout_ms)}"
 
-  defp hooks_yaml(hook_after_create, hook_before_run, hook_after_run, hook_before_remove, timeout_ms) do
+  defp hooks_yaml(
+         hook_after_create,
+         hook_before_run,
+         hook_after_run,
+         hook_before_remove,
+         hook_issue_running,
+         hook_issue_stopped,
+         timeout_ms
+       ) do
     [
       "hooks:",
       "  timeout_ms: #{yaml_value(timeout_ms)}",
       hook_entry("after_create", hook_after_create),
       hook_entry("before_run", hook_before_run),
       hook_entry("after_run", hook_after_run),
-      hook_entry("before_remove", hook_before_remove)
+      hook_entry("before_remove", hook_before_remove),
+      hook_entry("issue_running", hook_issue_running),
+      hook_entry("issue_stopped", hook_issue_stopped)
     ]
     |> Enum.reject(&is_nil/1)
     |> Enum.join("\n")
@@ -313,6 +339,12 @@ defmodule SymphonyElixir.TestSupport do
     ]
     |> Enum.reject(&(&1 in [nil, false]))
     |> Enum.join("\n")
+  end
+
+  defp tracker_project_slugs_entry(nil), do: nil
+
+  defp tracker_project_slugs_entry(project_slugs) do
+    "  project_slugs: #{yaml_value(project_slugs)}"
   end
 
   defp observability_yaml(enabled, refresh_ms, render_interval_ms, analytics_path) do

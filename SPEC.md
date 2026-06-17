@@ -404,9 +404,15 @@ Fields:
 - `before_remove` (multiline shell script string, OPTIONAL)
   - Runs before workspace deletion if the directory exists.
   - Failure is logged but ignored; cleanup still proceeds.
+- `issue_running` (multiline shell script string, OPTIONAL)
+  - Runs when an issue is claimed into the orchestrator's Running set.
+  - Failure is logged but ignored.
+- `issue_stopped` (multiline shell script string, OPTIONAL)
+  - Runs when an issue leaves Running, and during startup stale-marker recovery.
+  - Failure is logged but ignored.
 - `timeout_ms` (integer, OPTIONAL)
   - Default: `60000`
-  - Applies to all workspace hooks.
+  - Applies to all hooks.
   - Invalid values fail configuration validation.
   - Changes SHOULD be re-applied at runtime for future hook executions.
 
@@ -588,6 +594,8 @@ not require recognizing or validating extension fields unless that extension is 
 - `hooks.before_run`: shell script or null
 - `hooks.after_run`: shell script or null
 - `hooks.before_remove`: shell script or null
+- `hooks.issue_running`: shell script or null
+- `hooks.issue_stopped`: shell script or null
 - `hooks.timeout_ms`: integer, default `60000`
 - `agent.max_concurrent_agents`: integer, default `10`
 - `agent.max_turns`: integer, default `20`
@@ -874,11 +882,15 @@ Supported hooks:
 - `hooks.before_run`
 - `hooks.after_run`
 - `hooks.before_remove`
+- `hooks.issue_running`
+- `hooks.issue_stopped`
 
 Execution contract:
 
 - Execute in a local shell context appropriate to the host OS, with the workspace directory as
   `cwd`.
+- Issue-running hooks execute from the workflow directory and receive issue context in
+  `SYMPHONY_*` environment variables.
 - On POSIX systems, `sh -lc <script>` (or a stricter equivalent such as `bash -lc <script>`) is a
   conforming default.
 - Hook timeout uses `hooks.timeout_ms`; default: `60000 ms`.
@@ -890,6 +902,7 @@ Failure semantics:
 - `before_run` failure or timeout is fatal to the current run attempt.
 - `after_run` failure or timeout is logged and ignored.
 - `before_remove` failure or timeout is logged and ignored.
+- `issue_running` and `issue_stopped` failure or timeout is logged and ignored.
 
 ### 9.5 Safety Invariants
 

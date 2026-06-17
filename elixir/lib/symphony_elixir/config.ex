@@ -98,6 +98,12 @@ defmodule SymphonyElixir.Config do
     end
   end
 
+  @spec configured_project_slugs() :: {:ok, [String.t()]} | {:error, term()}
+  def configured_project_slugs, do: Schema.configured_project_slugs(settings!().tracker)
+
+  @spec configured_project_slugs(Schema.Tracker.t()) :: {:ok, [String.t()]} | {:error, term()}
+  def configured_project_slugs(%Schema.Tracker{} = tracker), do: Schema.configured_project_slugs(tracker)
+
   @spec codex_runtime_settings(Path.t() | nil, keyword()) ::
           {:ok, codex_runtime_settings()} | {:error, term()}
   def codex_runtime_settings(workspace \\ nil, opts \\ []) do
@@ -125,11 +131,23 @@ defmodule SymphonyElixir.Config do
       settings.tracker.kind == "linear" and not is_binary(settings.tracker.api_key) ->
         {:error, :missing_linear_api_token}
 
-      settings.tracker.kind == "linear" and not is_binary(settings.tracker.project_slug) ->
-        {:error, :missing_linear_project_slug}
+      settings.tracker.kind == "linear" ->
+        validate_linear_tracker_semantics(settings.tracker)
 
       true ->
         :ok
+    end
+  end
+
+  defp validate_linear_tracker_semantics(tracker) do
+    if is_binary(tracker.api_key) do
+      case configured_project_slugs(tracker) do
+        {:ok, []} -> {:error, :missing_linear_project_slug}
+        {:ok, _project_slugs} -> :ok
+        {:error, reason} -> {:error, reason}
+      end
+    else
+      {:error, :missing_linear_api_token}
     end
   end
 

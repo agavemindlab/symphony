@@ -105,6 +105,10 @@ workspace:
 hooks:
   after_create: |
     git clone git@github.com:your-org/your-repo.git .
+  issue_running: |
+    sh "$SYMPHONY_WORKFLOW_DIR/mark-running-issue.sh" running
+  issue_stopped: |
+    sh "$SYMPHONY_WORKFLOW_DIR/mark-running-issue.sh" stopped
 agent:
   max_concurrent_agents: 10
   max_turns: 20
@@ -141,6 +145,11 @@ Notes:
   identifier, title, and body.
 - Use `hooks.after_create` to bootstrap a fresh workspace. For a Git-backed repo, you can run
   `git clone ... .` there, along with any other setup commands you need.
+- Use `hooks.issue_running` and `hooks.issue_stopped` to set or clear a tracker-visible
+  "currently handled by Symphony" marker. These hooks run from the workflow directory with
+  `SYMPHONY_WORKFLOW_DIR`, `SYMPHONY_HOOK_EVENT`, `SYMPHONY_HOOK_REASON`,
+  `SYMPHONY_ISSUE_ID`, `SYMPHONY_ISSUE_IDENTIFIER`, `SYMPHONY_ISSUE_STATE`,
+  `SYMPHONY_ISSUE_URL`, and `SYMPHONY_WORKER_HOST` in the environment.
 - If a hook needs `mise exec` inside a freshly cloned workspace, trust the repo config and fetch
   the project dependencies in `hooks.after_create` before invoking `mise` later from other hooks.
 - `tracker.api_key` reads from `LINEAR_API_KEY` when unset or when value is `$LINEAR_API_KEY`.

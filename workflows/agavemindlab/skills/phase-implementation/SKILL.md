@@ -195,11 +195,15 @@ comfort.
 读完 reviewer 应能 30 秒内决定是否批准。>
 
 ### 验收对照（acceptance criteria）
-| 验收项 | 状态 | 证据 |
-|--------|------|------|
-| S1: <criterion> | ✅ 通过 | <命令或检查结果> |
-| S2: <criterion> | ⚠️ 部分通过 | <caveat> |
-| S3: <criterion> | ➖ N/A | <原因> |
+- **S1: <criterion>**
+  - 状态: ✅ 通过
+  - 证据: <命令或检查结果>
+- **S2: <criterion>**
+  - 状态: ⚠️ 部分通过
+  - 证据: <caveat>
+- **S3: <criterion>**
+  - 状态: ➖ N/A
+  - 证据: <原因>
 
 ### 看哪里（optional: non-obvious diff areas only）
 - [`path/file` L120-L145](URL) — <one sentence why reviewer should look here>
@@ -213,12 +217,13 @@ comfort.
 > 👉 **需要人工处理**：审查 PR，批准后将 issue 移至 `Merging`；需要修改则移至 `Rework`。
 
 >>> 🛠️ 本次激活的 skills（mirror workpad notes: invoked + Skipped）
+- Codex session id: `<session_id | n/a>`
 - `<skill>` — <≤6-word purpose>
 - _跳过_ `<skill>` — <reason>
 >>>
 ```
 
-Status column conventions: `✅ 通过`, `⚠️ 部分通过`, `➖ N/A`, `❌ 失败`.
+Status conventions: `✅ 通过`, `⚠️ 部分通过`, `➖ N/A`, `❌ 失败`.
 `❌ 失败` means the criterion is still unmet at handoff time.
 
 For any `S<N>` classified `延迟验收` in Requirements' `关键假设`, `Merge 后验证`
