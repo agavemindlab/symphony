@@ -123,6 +123,11 @@ Linked PR evidence, only for Implementation review:
 state/comments after excluding bots/automated reviewers, important diff summary,
 or "none">
 
+Behavioral diff / new failure windows, only for bugfix Implementation review:
+<side effects moved earlier/later, durable state before success, failure points
+after those side effects, and tests or explanations covering them, or "none
+identified">
+
 Task:
 1. Decide the best reply method: approve, request changes, ask clarification,
    merge nudge, completion confirmation, or no reply yet.
@@ -141,7 +146,9 @@ Task:
 8. Check whether spawned or related issues have the dependency relation or
    cleanup disposition needed to prevent unsafe parallel work or orphaned
    validation artifacts.
-9. Cite the decisive evidence and call out missing evidence or uncertainty.
+9. For bugfixes, reject artifacts that do not explain new failure windows caused
+   by moved side effects or durable state before success.
+10. Cite the decisive evidence and call out missing evidence or uncertainty.
 Keep the answer concise and do not recommend changing state directly unless the
 human's reply should explicitly instruct that.
 ```

@@ -22,9 +22,14 @@ Apply the relevant lens before approving:
 - Implementation / Deployment: require fresh evidence for each acceptance item;
   do not accept self-reported completion, plausible summaries, or status marks
   without supporting test, PR, CI, deployment, or verification evidence.
-- Bugfix / rework: require root cause, the smallest corrective change, and
-  regression or verification evidence. Symptom patches without root cause are
-  not approval-ready.
+- Bugfix / rework: require the artifact to explain why the old code failed,
+  why the changed code fixes that failure, and why the change should not
+  introduce new problems, backed by regression or verification evidence.
+  When a fix moves persistence, resource creation, external calls, or cleanup
+  earlier or later, require evidence for each new failure point after the moved
+  side effect and before the success boundary; durable state left by those
+  failures must be explained as safe or covered by tests.
+  Symptom patches without root cause are not approval-ready.
 
 ## Task
 
