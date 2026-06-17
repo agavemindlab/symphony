@@ -123,7 +123,7 @@ Phase artifacts and other Linear comments are read by Chinese-speaking humans �
 
 - Use Chinese throughout, and use the Markdown Linear actually renders: headings, **bold** / _italic_ / `inline code`, tables (`|--`), fenced code blocks, ` ```mermaid ` diagrams, `___` dividers, `:emoji:`, blockquotes (`>`), and **collapsible sections (`>>>`)** to fold away verbose evidence or logs so the artifact stays scannable. Do **not** use GitHub-style `> [!NOTE]` / `[!WARNING]` alerts — Linear renders the `[!...]` as literal text; for emphasis use a `>` blockquote led by an emoji and a **bold** label.
 - **Reference a Linear issue by its bare identifier** (e.g. `ENG-123`) so Linear renders its native issue chip (status + title preview). Never use GitHub-style `#NNN` or a plain markdown link for a Linear issue; reserve `#NNN` and the PR URL for the GitHub PR. `@`-mention a specific person (`@name`) when you need their attention (e.g. a blocker handoff)
-- Use emoji to signal importance and structure; use tables for acceptance-criteria results and before/after comparisons
+- Use emoji to signal importance and structure; use tables only for compact short-field comparisons. If a cell needs a full sentence, evidence, or rationale, use a list instead.
 - Link to relevant PRs, dashboards, and resources so readers don't have to hunt
 - Keep Phase artifact headings (`## Requirements`, `## Design`, `## Implementation`, `## Deployment`) exactly as written — routing depends on them
 - Use English for code, commit messages, PR titles/bodies, test names, and repository documentation
@@ -135,11 +135,11 @@ issue description) also follows these prose rules.
 
 - **Lead with the conclusion, then the why.** The first sentence is the point: what this phase did, why it matters, and whether to approve. A reviewer should decide in 30 seconds, not read to the end to learn the verdict.
 - **Be concrete and clickable.** Name the PR, `file:line`, functions, key numbers, commands, and dashboards, and link them. Vague is not allowed. Not "optimized performance" but "p99 820ms → 210ms ([dashboard](url))".
-- **Scannable at a glance.** Short sentences and paragraphs; tables for comparisons and acceptance results; put the one action the human must take in its own callout.
+- **Scannable at a glance.** Short sentences and paragraphs; lists for long text; tables only for short comparable fields; put the one action the human must take in its own callout.
 - **Serve the decision and the outcome.** Each paragraph should move the reviewer toward approve / rework / ask, and (Requirements and Design especially) state what the real user or system gains, loses, or waits for. Do not stop at "what changed"; give the effect.
 - **No filler, no slop.** Cut throat-clearing, pleasantries, self-praise, and hedging. If one sentence says it, do not write three. Avoid empty Chinese qualifiers and connectors that signal AI prose over a clear point: 基本上、总的来说、值得注意的是、众所周知、显著地、极大地、进一步、从而、健壮的、全面的、优雅的、丝滑的. Prefer a period or colon over a 破折号 (—) used as a connector crutch.
 
-> Good：「PR #123 修了登录在 cookie 过期时白屏的问题（`auth.ts:47`）：受影响用户从约 5%/天降到 0，验收见下表；请审。」
+> Good：「PR #123 修了登录在 cookie 过期时白屏的问题（`auth.ts:47`）：受影响用户从约 5%/天降到 0，验收见下方；请审。」
 > Bad：「我对认证流程做了一些可能有助于改善特定情况下用户体验的潜在改进。」
 
 ## Prerequisite: Linear MCP or `linear_graphql` tool is available
@@ -276,7 +276,10 @@ When the target phase is a rework of its own artifact:
 2. Do the rework.
 3. Resolve the old artifact via `commentResolve` — its outdated content collapses out of the way.
 4. Post a fresh artifact comment with the updated content.
-5. Add a reply on the **new** artifact summarizing what changed since the last version and how each piece of human feedback was addressed (`🔧 本轮修改：...`, pointing back to the specific feedback). The changelog must live on the new artifact, not the resolved old one, so the human can review the update without expanding collapsed history.
+5. Add a reply on the **new** artifact summarizing what changed since the last version and how each piece of human feedback was addressed (`🔧 本轮修改：...`, pointing back to the specific feedback).
+   - Requirements rework must also state: ``当前停在 `Human Review`；下游 Design/Implementation/PR 还未按本轮 artifact 更新，确认 Requirements 后才会继续。``
+   - Design rework must also state: ``当前停在 `Human Review`；下游 Implementation/PR 还未按本轮 artifact 更新，确认 Design 后才会继续。``
+   - The changelog must live on the new artifact, not the resolved old one, so the human can review the update without expanding collapsed history.
 
 ### Cross-phase rework
 

@@ -59,6 +59,32 @@ defmodule SymphonyElixir.CoreTest do
     assert {:error, :missing_linear_project_slug} = Config.validate!()
 
     write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_api_token: "token",
+      tracker_project_slug: nil,
+      tracker_project_slugs: [" project-a ", "project-b", "project-a"]
+    )
+
+    assert :ok = Config.validate!()
+    assert Config.settings!().tracker.project_slug == nil
+    assert Config.settings!().tracker.project_slugs == ["project-a", "project-b"]
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_api_token: "token",
+      tracker_project_slug: "project",
+      tracker_project_slugs: ["project-b"]
+    )
+
+    assert {:error, :conflicting_linear_project_slug_config} = Config.validate!()
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_api_token: "token",
+      tracker_project_slug: nil,
+      tracker_project_slugs: ["project-a", " "]
+    )
+
+    assert {:error, {:invalid_linear_project_slugs, :blank}} = Config.validate!()
+
+    write_workflow_file!(Workflow.workflow_file_path(),
       tracker_project_slug: "project",
       codex_command: ""
     )
@@ -129,6 +155,11 @@ defmodule SymphonyElixir.CoreTest do
     assert prompt =~ "| Implementation | `phase-implementation` |"
     assert prompt =~ "| Deployment | `phase-deployment` |"
     assert prompt =~ "## Main Flow"
+    assert prompt =~ "Open and follow `.agents/skills/symphony-linear/SKILL.md`"
+    assert prompt =~ "Do **not** open the next phase skill in this session"
+    assert prompt =~ "### Rework cycle (same phase)"
+    assert prompt =~ "Requirements rework must also state"
+    assert prompt =~ "reachable only via `Merging`"
     assert prompt =~ "retain each comment's `parent { id }`"
     assert prompt =~ "reply node as standalone top-level feedback"
     assert prompt =~ "## Phase Artifact Protocol"
@@ -170,6 +201,23 @@ defmodule SymphonyElixir.CoreTest do
     refute skill =~ "Post (or update) the `## Requirements` artifact"
     refute skill =~ "Post or update the artifact comment."
     refute skill =~ "Post or update the `## Requirements` artifact"
+  end
+
+  test "shared phase prompts explain rework handoff gates" do
+    repo_root = Path.expand("..", File.cwd!())
+    workflow = File.read!(Path.join(repo_root, "workflows/agavemindlab/WORKFLOW.md"))
+
+    assert workflow =~ "当前停在 `Human Review`"
+    assert workflow =~ "下游 Design/Implementation/PR 还未按本轮 artifact 更新"
+
+    requirements_skill =
+      File.read!(Path.join(repo_root, "workflows/agavemindlab/skills/phase-requirements/SKILL.md"))
+
+    design_skill =
+      File.read!(Path.join(repo_root, "workflows/agavemindlab/skills/phase-design/SKILL.md"))
+
+    refute requirements_skill =~ "opens `phase-design` in the same session"
+    refute design_skill =~ "opens `phase-implementation` in the same session"
   end
 
   test "linear api token resolves from LINEAR_API_KEY env var" do
@@ -1374,6 +1422,69 @@ defmodule SymphonyElixir.CoreTest do
     assert {:ok, []} = Client.fetch_issues_by_states([])
   end
 
+  test "linear client polls each configured project and dedupes combined issues" do
+    raw_issue = fn issue_id, identifier, project_slug ->
+      %{
+        "id" => issue_id,
+        "identifier" => identifier,
+        "title" => "Issue #{identifier}",
+        "description" => "Project #{project_slug}",
+        "state" => %{"name" => "Todo"},
+        "project" => %{
+          "id" => "project-#{project_slug}",
+          "slugId" => project_slug,
+          "name" => "Project #{project_slug}"
+        },
+        "labels" => %{"nodes" => []},
+        "inverseRelations" => %{"nodes" => []},
+        "createdAt" => "2026-01-01T00:00:00Z",
+        "updatedAt" => "2026-01-02T00:00:00Z"
+      }
+    end
+
+    parent = self()
+
+    graphql_fun = fn query, variables ->
+      send(parent, {:linear_poll, query, variables})
+
+      nodes =
+        case variables.projectSlug do
+          "project-a" ->
+            [
+              raw_issue.("issue-a", "MT-A", "project-a"),
+              raw_issue.("issue-shared", "MT-SHARED", "project-a")
+            ]
+
+          "project-b" ->
+            [
+              raw_issue.("issue-shared", "MT-SHARED", "project-b"),
+              raw_issue.("issue-b", "MT-B", "project-b")
+            ]
+        end
+
+      {:ok,
+       %{
+         "data" => %{
+           "issues" => %{
+             "nodes" => nodes,
+             "pageInfo" => %{"hasNextPage" => false, "endCursor" => nil}
+           }
+         }
+       }}
+    end
+
+    assert {:ok, issues} =
+             Client.fetch_issues_by_states_for_test(["project-a", "project-b"], ["Todo"], graphql_fun)
+
+    assert Enum.map(issues, & &1.id) == ["issue-a", "issue-shared", "issue-b"]
+    assert Enum.map(issues, & &1.project.slug_id) == ["project-a", "project-a", "project-b"]
+
+    assert_receive {:linear_poll, query, %{projectSlug: "project-a", stateNames: ["Todo"]}}
+    assert query =~ "project {"
+    assert query =~ "slugId"
+    assert_receive {:linear_poll, ^query, %{projectSlug: "project-b", stateNames: ["Todo"]}}
+  end
+
   test "prompt builder renders issue and attempt values from workflow template" do
     workflow_prompt =
       "Ticket {{ issue.identifier }} {{ issue.title }} labels={{ issue.labels }} attempt={{ attempt }}"
@@ -1394,6 +1505,23 @@ defmodule SymphonyElixir.CoreTest do
     assert prompt =~ "Ticket S-1 Refactor backend request path"
     assert prompt =~ "labels=backend"
     assert prompt =~ "attempt=3"
+  end
+
+  test "prompt builder renders Linear project context" do
+    write_workflow_file!(Workflow.workflow_file_path(),
+      prompt: "Project {{ issue.project.slug_id }} id={{ issue.project.id }} name={{ issue.project.name }}"
+    )
+
+    issue = %Issue{
+      identifier: "S-2",
+      title: "Route by project",
+      description: "Project context should render",
+      state: "Todo",
+      url: "https://example.org/issues/S-2",
+      project: %{id: "project-id", slug_id: "project-slug", name: "Project Name"}
+    }
+
+    assert PromptBuilder.build_prompt(issue) == "Project project-slug id=project-id name=Project Name"
   end
 
   test "prompt builder renders issue datetime fields without crashing" do
@@ -1578,6 +1706,10 @@ defmodule SymphonyElixir.CoreTest do
     assert prompt =~ "This is an unattended Symphony orchestration session."
     assert prompt =~ "Stop early only for a true blocker"
     assert prompt =~ "Do not include generic \"next steps for user\""
+    assert prompt =~ "Open and follow `.agents/skills/symphony-linear/SKILL.md`"
+    assert prompt =~ "When the target phase is a rework of its own artifact"
+    assert prompt =~ "Requirements rework must also state"
+    assert prompt =~ "reachable only via `Merging`"
     assert prompt =~ "Codex session id"
     assert prompt =~ "CODEX_THREAD_ID"
     refute prompt =~ "symphony_session_context"

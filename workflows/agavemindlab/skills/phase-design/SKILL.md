@@ -273,10 +273,10 @@ them.
 <diagram>
 ```
 
-### 验收方案（每个 S<N> 两道关；指定证据形式，交互须截屏/录屏）
-| 验收项 | Pre-PR 本地验收（方法 → 证据形式） | Post-Merge 最终验收（方法 → 证据形式） |
-|--------|------|------|
-| S1: <criterion> | <如何本地验 → 截屏 / 录屏 / 命令输出 / 日志片段> | <如何线上验 → 即时信号 / 查询+判据+窗口 / 人工判定> |
+### 验收方案（每个 S<N> 两道关；指定证据形式，长文本用列表）
+- **S1: <criterion>**
+  - Pre-PR 本地验收: <如何本地验> → <截屏 / 录屏 / 命令输出 / 日志片段>
+  - Post-Merge 最终验收: <如何线上验> → <即时信号 / 查询+判据+窗口 / 人工判定>
 
 ### 风险/注意（risks; omit if none）
 - <one sentence per item>
@@ -434,7 +434,9 @@ Choose **`advance`** only when **all** of these hold:
   bet, and no non-obvious risk a reviewer would balk at.
 
 On `advance`, record `confidence: advance` in the workpad notes; Main Flow
-writes the `⏩` reply and opens `phase-implementation` in the same session.
+writes the `⏩` reply, sets `current_phase: Implementation`, persists state,
+and stops this agent run. The next Symphony dispatch opens
+`phase-implementation`.
 
 Otherwise choose **`stop`** — Main Flow moves the issue to `Human Review`.
 This is the right outcome for a rework, for a human already in the thread,
