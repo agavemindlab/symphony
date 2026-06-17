@@ -2,7 +2,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
   use SymphonyElixir.TestSupport
   alias Ecto.Changeset
   alias SymphonyElixir.Config.Schema
-  alias SymphonyElixir.Config.Schema.{Codex, StringOrMap}
+  alias SymphonyElixir.Config.Schema.{Codex, StringOrMap, StringOrStringList}
   alias SymphonyElixir.Linear.Client
 
   test "workspace bootstrap can be implemented in after_create hook" do
@@ -1197,6 +1197,53 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert :ok = Config.validate!()
   end
 
+  test "string-or-string-list schema type accepts only strings or string lists" do
+    assert StringOrStringList.type() == :any
+    assert StringOrStringList.embed_as(:json) == :self
+    assert StringOrStringList.equal?(["project-a"], ["project-a"])
+
+    assert StringOrStringList.cast("project-a") == {:ok, "project-a"}
+    assert StringOrStringList.cast(["project-a", "project-b"]) == {:ok, ["project-a", "project-b"]}
+    assert StringOrStringList.cast(["project-a", 1]) == :error
+    assert StringOrStringList.cast(1) == :error
+
+    assert StringOrStringList.load("project-a") == {:ok, "project-a"}
+    assert StringOrStringList.load(1) == :error
+    assert StringOrStringList.dump(["project-a"]) == {:ok, ["project-a"]}
+    assert StringOrStringList.dump(%{}) == :error
+  end
+
+  test "config resolves string project slugs and missing env-backed project slugs" do
+    project_slugs_env_var = "SYMP_LINEAR_PROJECT_SLUGS_#{System.unique_integer([:positive])}"
+    previous_project_slugs = System.get_env(project_slugs_env_var)
+
+    on_exit(fn -> restore_env(project_slugs_env_var, previous_project_slugs) end)
+    System.delete_env(project_slugs_env_var)
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_api_token: "token",
+      tracker_project_slug: nil,
+      tracker_project_slugs: " project-a, project-b, project-a "
+    )
+
+    assert Config.settings!().tracker.project_slugs == ["project-a", "project-b"]
+    assert :ok = Config.validate!()
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_api_token: "token",
+      tracker_project_slug: nil,
+      tracker_project_slugs: "$#{project_slugs_env_var}"
+    )
+
+    assert Config.settings!().tracker.project_slugs == []
+    assert {:error, :missing_linear_project_slug} = Config.validate!()
+
+    assert Schema.configured_project_slugs(%Schema.Tracker{project_slugs: "project-c,project-d"}) ==
+             {:ok, ["project-c", "project-d"]}
+
+    assert Schema.configured_project_slugs(%Schema.Tracker{project_slugs: :invalid}) == {:ok, []}
+  end
+
   test "local workspace hooks receive workflow directory from symlinked workflow path" do
     test_root =
       Path.join(
@@ -1435,6 +1482,46 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       assert is_binary(name), "#{skill_path} has non-string name metadata"
       assert is_binary(description), "#{skill_path} has non-string description metadata"
     end)
+  end
+
+  test "running marker script chooses a system CA bundle when Python has no default cafile" do
+    ca_bundle = first_existing_ca_bundle!()
+    test_root = Path.join(System.tmp_dir!(), "symphony-marker-ca-#{System.unique_integer([:positive])}")
+    fake_bin_dir = Path.join(test_root, "bin")
+    env_capture = Path.join(test_root, "env.txt")
+    script_path = Path.expand("../workflows/agavemindlab/mark-running-issue.sh", File.cwd!())
+    previous_path = System.get_env("PATH")
+
+    try do
+      File.mkdir_p!(fake_bin_dir)
+
+      File.write!(Path.join(fake_bin_dir, "python3"), """
+      #!/usr/bin/env sh
+      printf 'SSL_CERT_FILE=%s\\n' "${SSL_CERT_FILE:-}" > #{env_capture}
+      printf 'REQUESTS_CA_BUNDLE=%s\\n' "${REQUESTS_CA_BUNDLE:-}" >> #{env_capture}
+      printf 'CURL_CA_BUNDLE=%s\\n' "${CURL_CA_BUNDLE:-}" >> #{env_capture}
+      """)
+
+      File.chmod!(Path.join(fake_bin_dir, "python3"), 0o755)
+
+      assert {"", 0} =
+               System.cmd("sh", [script_path, "running"],
+                 env: [
+                   {"PATH", fake_bin_dir <> ":" <> (previous_path || "")},
+                   {"LINEAR_API_KEY", "test-token"},
+                   {"SYMPHONY_ISSUE_ID", "issue-1"},
+                   {"SYMPHONY_HOOK_EVENT", "running"},
+                   {"SSL_CERT_FILE", nil},
+                   {"REQUESTS_CA_BUNDLE", nil},
+                   {"CURL_CA_BUNDLE", nil}
+                 ],
+                 stderr_to_stdout: true
+               )
+
+      assert File.read!(env_capture) =~ "SSL_CERT_FILE=#{ca_bundle}\n"
+    after
+      File.rm_rf(test_root)
+    end
   end
 
   test "canonical workflow surfaces setup failures before installing shared skills" do
@@ -1964,6 +2051,18 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     ["---" | lines] = File.read!(path) |> String.split(["\r\n", "\n", "\r"], trim: false)
     {front_matter_lines, _rest} = Enum.split_while(lines, &(&1 != "---"))
     YamlElixir.read_from_string(Enum.join(front_matter_lines, "\n"))
+  end
+
+  defp first_existing_ca_bundle! do
+    [
+      "/etc/ssl/cert.pem",
+      "/etc/ssl/certs/ca-certificates.crt",
+      "/etc/pki/tls/certs/ca-bundle.crt",
+      "/etc/ssl/ca-bundle.pem",
+      "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem"
+    ]
+    |> Enum.find(&File.regular?/1) ||
+      flunk("test host has no known system CA bundle path")
   end
 
   defp create_clone_source_repo!(path) do
