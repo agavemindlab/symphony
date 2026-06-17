@@ -79,6 +79,11 @@ Reply locations:
 - For `## Implementation`, use only human PR reviews/comments as phase feedback.
   Bot or configured automated reviewer approval is not human approval, even
   when GitHub reports that account as `isBot: false` or a repo member.
+- For an Implementation rework artifact, do not require it to restate every
+  already-evidenced acceptance item from an earlier unresolved artifact. Use the
+  evidence pack's prior artifacts and current feedback to decide whether the new
+  artifact closes the actual rework request without invalidating the accepted
+  source of truth.
 - For spawned or related issues, verify the relation matches the dependency. If
   downstream work must wait for the reviewed issue to be accepted, merged, or
   closed, `related` is not enough, and a current intake/backlog state is only a
@@ -134,6 +139,11 @@ Reply locations:
   concurrency, multi-process writes, persistence completeness, data loss, or
   deployment topology). If that risk invalidates the approved design, ask for
   rework of the relevant earlier phase.
+- Request changes when fresh PR metadata contradicts the artifact's claimed
+  mergeability, check, or review state and the artifact uses that state as
+  acceptance evidence. Approve only if the contradiction is clearly irrelevant
+  to the phase decision; otherwise make the agent refresh or correct the
+  evidence instead of passing the uncertainty to Merging.
 - For Design, request changes when a plausible simpler, cheaper, or lower-risk
   alternative is rejected because it is "untested", "unverified", or assumed
   unsupported, including the same claim in Chinese, and a small spike, API
