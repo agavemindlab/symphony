@@ -17,6 +17,16 @@ defmodule SymphonyElixir.CoreTest do
     assert config.tracker.terminal_states == ["Closed", "Cancelled", "Canceled", "Duplicate", "Done"]
     assert config.tracker.assignee == nil
     assert config.agent.max_turns == 20
+    assert config.hooks.issue_running == nil
+    assert config.hooks.issue_stopped == nil
+
+    assert :ok =
+             SymphonyElixir.IssueRunHook.run(:running, %Issue{
+               id: "issue-no-hook",
+               identifier: "MT-NO-HOOK",
+               title: "No hook",
+               state: "In Progress"
+             })
 
     write_workflow_file!(Workflow.workflow_file_path(), poll_interval_ms: "invalid")
 
@@ -124,8 +134,47 @@ defmodule SymphonyElixir.CoreTest do
     assert prompt =~ "### Rework cycle (same phase)"
     assert prompt =~ "Requirements rework must also state"
     assert prompt =~ "reachable only via `Merging`"
+    assert prompt =~ "retain each comment's `parent { id }`"
+    assert prompt =~ "reply node as standalone top-level feedback"
+    assert prompt =~ "## Phase Artifact Protocol"
     assert prompt =~ "## Workpad"
+    assert prompt =~ "✅ 已批准，进入 [Next Phase]"
+    assert prompt =~ "⏩ 自动进入 [Next Phase]"
+    assert prompt =~ "Deployment only via `Merging`"
+    assert prompt =~ "**`Human Review` is not an agent state**"
+    assert prompt =~ "Do **not** use GitHub-style `> [!NOTE]`"
+    assert prompt =~ "collapsible sections (`>>>`)"
+    assert prompt =~ "Skills-activated footer"
+    assert prompt =~ "Codex session id"
+    assert prompt =~ "CODEX_THREAD_ID"
+    refute prompt =~ "symphony_session_context"
+    assert prompt =~ "`n/a`"
     assert length(String.split(prompt, "---")) >= 4
+
+    phase_skill_paths = [
+      "../workflows/agavemindlab/skills/phase-requirements/SKILL.md",
+      "../workflows/agavemindlab/skills/phase-design/SKILL.md",
+      "../workflows/agavemindlab/skills/phase-implementation/SKILL.md",
+      "../workflows/agavemindlab/skills/phase-deployment/SKILL.md"
+    ]
+
+    for phase_skill_path <- phase_skill_paths do
+      phase_skill = File.read!(Path.expand(phase_skill_path, File.cwd!()))
+
+      assert phase_skill =~ ">>> 🛠️ 本次激活的 skills"
+      assert phase_skill =~ "- Codex session id: `<session_id | n/a>`"
+    end
+  end
+
+  test "requirements skill publishes reworked clarification artifacts through workflow protocol" do
+    skill =
+      File.read!(Path.expand("../workflows/agavemindlab/skills/phase-requirements/SKILL.md", File.cwd!()))
+
+    assert skill =~ ~r/same-phase Rework\s+cycle/
+    assert skill =~ "workflow artifact protocol"
+    refute skill =~ "Post (or update) the `## Requirements` artifact"
+    refute skill =~ "Post or update the artifact comment."
+    refute skill =~ "Post or update the `## Requirements` artifact"
   end
 
   test "shared phase prompts explain rework handoff gates" do
@@ -364,11 +413,20 @@ defmodule SymphonyElixir.CoreTest do
     issue_identifier = "MT-556"
     workspace = Path.join(test_root, issue_identifier)
 
+    marker =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-terminal-reconcile-marker-#{System.unique_integer([:positive])}.log"
+      )
+
+    on_exit(fn -> File.rm(marker) end)
+
     try do
       write_workflow_file!(Workflow.workflow_file_path(),
         workspace_root: test_root,
         tracker_active_states: ["Todo", "In Progress", "In Review"],
-        tracker_terminal_states: ["Closed", "Cancelled", "Canceled", "Duplicate"]
+        tracker_terminal_states: ["Closed", "Cancelled", "Canceled", "Duplicate"],
+        hook_issue_stopped: "printf '%s|%s|%s' \"$SYMPHONY_HOOK_EVENT\" \"$SYMPHONY_HOOK_REASON\" \"$SYMPHONY_ISSUE_IDENTIFIER\" > #{marker}"
       )
 
       File.mkdir_p!(test_root)
@@ -411,6 +469,80 @@ defmodule SymphonyElixir.CoreTest do
       refute MapSet.member?(updated_state.claimed, issue_id)
       refute Process.alive?(agent_pid)
       refute File.exists?(workspace)
+      assert File.read!(marker) == "stopped|terminal_state|MT-556"
+    after
+      File.rm_rf(test_root)
+    end
+  end
+
+  test "terminal issue reconcile stops agent and cleans workspace when issue stopped hook times out" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-terminal-reconcile-timeout-#{System.unique_integer([:positive])}"
+      )
+
+    issue_id = "issue-terminal-timeout"
+    issue_identifier = "MT-TERMINAL-TIMEOUT"
+    workspace = Path.join(test_root, issue_identifier)
+
+    try do
+      write_workflow_file!(Workflow.workflow_file_path(),
+        workspace_root: test_root,
+        tracker_active_states: ["Todo", "In Progress"],
+        tracker_terminal_states: ["Closed"],
+        hook_issue_stopped: "sleep 1",
+        hook_timeout_ms: 10
+      )
+
+      File.mkdir_p!(workspace)
+
+      agent_pid =
+        spawn(fn ->
+          receive do
+            :stop -> :ok
+          end
+        end)
+
+      state = %Orchestrator.State{
+        running: %{
+          issue_id => %{
+            pid: agent_pid,
+            ref: nil,
+            identifier: issue_identifier,
+            issue: %Issue{id: issue_id, state: "In Progress", identifier: issue_identifier},
+            started_at: DateTime.utc_now()
+          }
+        },
+        claimed: MapSet.new([issue_id]),
+        codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
+        retry_attempts: %{}
+      }
+
+      issue = %Issue{
+        id: issue_id,
+        identifier: issue_identifier,
+        state: "Closed",
+        title: "Done",
+        labels: []
+      }
+
+      parent = self()
+
+      log =
+        capture_log(fn ->
+          updated_state = Orchestrator.reconcile_issue_states_for_test([issue], state)
+          send(parent, {:terminal_timeout_state, updated_state})
+        end)
+
+      assert_receive {:terminal_timeout_state, updated_state}
+      refute Map.has_key?(updated_state.running, issue_id)
+      refute MapSet.member?(updated_state.claimed, issue_id)
+      refute Process.alive?(agent_pid)
+      refute File.exists?(workspace)
+      assert log =~ "Issue run hook timed out"
+      assert log =~ "hook=issue_stopped"
+      assert log =~ "timeout_ms=10"
     after
       File.rm_rf(test_root)
     end
@@ -702,6 +834,312 @@ defmodule SymphonyElixir.CoreTest do
 
     assert {:done, ^refreshed_issue} =
              AgentRunner.continue_with_issue_for_test(issue, fetcher)
+  end
+
+  test "dispatch writes issue running marker hook after claim" do
+    marker =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-running-marker-#{System.unique_integer([:positive])}.log"
+      )
+
+    on_exit(fn -> File.rm(marker) end)
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      hook_issue_running: "printf '%s|%s|%s|%s' \"$SYMPHONY_HOOK_EVENT\" \"$SYMPHONY_HOOK_REASON\" \"$SYMPHONY_ISSUE_IDENTIFIER\" \"${SYMPHONY_WORKER_HOST:-}\" > #{marker}"
+    )
+
+    parent = self()
+
+    start_child = fn _fun ->
+      pid =
+        spawn(fn ->
+          send(parent, :fake_agent_started)
+
+          receive do
+            :stop -> :ok
+          end
+        end)
+
+      {:ok, pid}
+    end
+
+    issue = %Issue{
+      id: "issue-running-hook",
+      identifier: "MT-RUNNING",
+      title: "Running hook",
+      state: "In Progress",
+      url: "https://linear.example/MT-RUNNING"
+    }
+
+    state = %Orchestrator.State{
+      running: %{},
+      claimed: MapSet.new(),
+      blocked: %{},
+      retry_attempts: %{},
+      codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
+      max_concurrent_agents: 10
+    }
+
+    updated_state = Orchestrator.dispatch_issue_for_test(state, issue, start_child)
+
+    assert_receive :fake_agent_started
+    assert Map.has_key?(updated_state.running, "issue-running-hook")
+    assert MapSet.member?(updated_state.claimed, "issue-running-hook")
+    assert File.read!(marker) == "running|dispatch|MT-RUNNING|"
+  end
+
+  test "dispatch claims issue and starts agent when issue running hook fails" do
+    write_workflow_file!(Workflow.workflow_file_path(),
+      hook_issue_running: "printf 'marker failed' && exit 17"
+    )
+
+    parent = self()
+
+    start_child = fn _fun ->
+      pid =
+        spawn(fn ->
+          send(parent, :fake_agent_started_after_hook_failure)
+
+          receive do
+            :stop -> :ok
+          end
+        end)
+
+      {:ok, pid}
+    end
+
+    issue = %Issue{
+      id: "issue-running-hook-fails",
+      identifier: "MT-RUNNING-FAIL",
+      title: "Running hook failure",
+      state: "In Progress"
+    }
+
+    state = %Orchestrator.State{
+      running: %{},
+      claimed: MapSet.new(),
+      blocked: %{},
+      retry_attempts: %{},
+      codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
+      max_concurrent_agents: 10
+    }
+
+    log =
+      capture_log(fn ->
+        updated_state = Orchestrator.dispatch_issue_for_test(state, issue, start_child)
+        send(parent, {:dispatch_state_after_hook_failure, updated_state})
+      end)
+
+    assert_receive :fake_agent_started_after_hook_failure
+    assert_receive {:dispatch_state_after_hook_failure, updated_state}
+    assert Map.has_key?(updated_state.running, "issue-running-hook-fails")
+    assert MapSet.member?(updated_state.claimed, "issue-running-hook-fails")
+    assert log =~ "Issue run hook failed"
+    assert log =~ "hook=issue_running"
+    assert log =~ "status=17"
+  end
+
+  test "dispatch claims issue and starts agent when issue running hook times out" do
+    write_workflow_file!(Workflow.workflow_file_path(),
+      hook_issue_running: "sleep 1",
+      hook_timeout_ms: 10
+    )
+
+    parent = self()
+
+    start_child = fn _fun ->
+      pid =
+        spawn(fn ->
+          send(parent, :fake_agent_started_after_hook_timeout)
+
+          receive do
+            :stop -> :ok
+          end
+        end)
+
+      {:ok, pid}
+    end
+
+    issue = %Issue{
+      id: "issue-running-hook-timeout",
+      identifier: "MT-RUNNING-TIMEOUT",
+      title: "Running hook timeout",
+      state: "In Progress"
+    }
+
+    state = %Orchestrator.State{
+      running: %{},
+      claimed: MapSet.new(),
+      blocked: %{},
+      retry_attempts: %{},
+      codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
+      max_concurrent_agents: 10
+    }
+
+    log =
+      capture_log(fn ->
+        updated_state = Orchestrator.dispatch_issue_for_test(state, issue, start_child)
+        send(parent, {:dispatch_state_after_hook_timeout, updated_state})
+      end)
+
+    assert_receive :fake_agent_started_after_hook_timeout
+    assert_receive {:dispatch_state_after_hook_timeout, updated_state}
+    assert Map.has_key?(updated_state.running, "issue-running-hook-timeout")
+    assert MapSet.member?(updated_state.claimed, "issue-running-hook-timeout")
+    assert log =~ "Issue run hook timed out"
+    assert log =~ "hook=issue_running"
+    assert log =~ "timeout_ms=10"
+  end
+
+  test "normal worker exit writes issue stopped marker hook before continuation retry" do
+    marker =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-stopped-marker-#{System.unique_integer([:positive])}.log"
+      )
+
+    on_exit(fn -> File.rm(marker) end)
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      hook_issue_stopped: "printf '%s|%s|%s' \"$SYMPHONY_HOOK_EVENT\" \"$SYMPHONY_HOOK_REASON\" \"$SYMPHONY_ISSUE_IDENTIFIER\" > #{marker}"
+    )
+
+    issue_id = "issue-stopped-hook"
+    ref = make_ref()
+    orchestrator_name = Module.concat(__MODULE__, :IssueStoppedHookOrchestrator)
+    {:ok, pid} = Orchestrator.start_link(name: orchestrator_name)
+
+    on_exit(fn ->
+      if Process.alive?(pid) do
+        Process.exit(pid, :normal)
+      end
+    end)
+
+    initial_state = :sys.get_state(pid)
+
+    running_entry = %{
+      pid: self(),
+      ref: ref,
+      identifier: "MT-STOPPED",
+      issue: %Issue{
+        id: issue_id,
+        identifier: "MT-STOPPED",
+        title: "Stopped hook",
+        state: "In Progress"
+      },
+      started_at: DateTime.utc_now()
+    }
+
+    :sys.replace_state(pid, fn _ ->
+      initial_state
+      |> Map.put(:running, %{issue_id => running_entry})
+      |> Map.put(:claimed, MapSet.new([issue_id]))
+      |> Map.put(:retry_attempts, %{})
+    end)
+
+    send(pid, {:DOWN, ref, :process, self(), :normal})
+    Process.sleep(50)
+
+    assert File.read!(marker) == "stopped|agent_down_normal|MT-STOPPED"
+    refute Map.has_key?(:sys.get_state(pid).running, issue_id)
+  end
+
+  test "normal worker exit schedules continuation retry when issue stopped hook fails" do
+    write_workflow_file!(Workflow.workflow_file_path(),
+      hook_issue_stopped: "printf 'stop marker failed' && exit 19"
+    )
+
+    issue_id = "issue-stopped-hook-fails"
+    ref = make_ref()
+    orchestrator_name = Module.concat(__MODULE__, :IssueStoppedHookFailureOrchestrator)
+    {:ok, pid} = Orchestrator.start_link(name: orchestrator_name)
+
+    on_exit(fn ->
+      if Process.alive?(pid) do
+        Process.exit(pid, :normal)
+      end
+    end)
+
+    initial_state = :sys.get_state(pid)
+
+    running_entry = %{
+      pid: self(),
+      ref: ref,
+      identifier: "MT-STOPPED-FAIL",
+      issue: %Issue{
+        id: issue_id,
+        identifier: "MT-STOPPED-FAIL",
+        title: "Stopped hook failure",
+        state: "In Progress"
+      },
+      started_at: DateTime.utc_now()
+    }
+
+    :sys.replace_state(pid, fn _ ->
+      initial_state
+      |> Map.put(:running, %{issue_id => running_entry})
+      |> Map.put(:claimed, MapSet.new([issue_id]))
+      |> Map.put(:retry_attempts, %{})
+    end)
+
+    before_retry_ms = System.monotonic_time(:millisecond)
+
+    log =
+      capture_log(fn ->
+        send(pid, {:DOWN, ref, :process, self(), :normal})
+        Process.sleep(50)
+      end)
+
+    state = :sys.get_state(pid)
+    after_retry_ms = System.monotonic_time(:millisecond)
+
+    refute Map.has_key?(state.running, issue_id)
+    assert MapSet.member?(state.completed, issue_id)
+    assert %{attempt: 1, due_at_ms: due_at_ms} = state.retry_attempts[issue_id]
+    assert_due_in_range(due_at_ms, before_retry_ms, after_retry_ms, 500, 1_100)
+    assert log =~ "Issue run hook failed"
+    assert log =~ "hook=issue_stopped"
+    assert log =~ "status=19"
+  end
+
+  test "orchestrator startup cleanup clears stale markers for active and terminal issues" do
+    marker =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-startup-marker-cleanup-#{System.unique_integer([:positive])}.log"
+      )
+
+    on_exit(fn -> File.rm(marker) end)
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_kind: "memory",
+      tracker_active_states: ["Todo", "In Progress"],
+      tracker_terminal_states: ["Done"],
+      hook_issue_stopped: "printf '%s|%s\\n' \"$SYMPHONY_HOOK_REASON\" \"$SYMPHONY_ISSUE_IDENTIFIER\" >> #{marker}"
+    )
+
+    Application.put_env(:symphony_elixir, :memory_tracker_issues, [
+      %Issue{id: "active-1", identifier: "MT-ACTIVE", title: "Active", state: "In Progress"},
+      %Issue{id: "done-1", identifier: "MT-DONE", title: "Done", state: "Done"},
+      %Issue{id: "other-1", identifier: "MT-OTHER", title: "Other", state: "Backlog"}
+    ])
+
+    orchestrator_name = Module.concat(__MODULE__, :StartupMarkerCleanupOrchestrator)
+    {:ok, pid} = Orchestrator.start_link(name: orchestrator_name)
+
+    on_exit(fn ->
+      if Process.alive?(pid) do
+        Process.exit(pid, :normal)
+      end
+    end)
+
+    Process.sleep(50)
+
+    assert marker |> File.read!() |> String.split("\n", trim: true) |> Enum.sort() == [
+             "startup_recovery|MT-ACTIVE",
+             "startup_recovery|MT-DONE"
+           ]
   end
 
   test "normal worker exit schedules active-state continuation retry" do
@@ -1166,6 +1604,17 @@ defmodule SymphonyElixir.CoreTest do
     assert prompt =~ "When the target phase is a rework of its own artifact"
     assert prompt =~ "Requirements rework must also state"
     assert prompt =~ "reachable only via `Merging`"
+    assert prompt =~ "Codex session id"
+    assert prompt =~ "CODEX_THREAD_ID"
+    refute prompt =~ "symphony_session_context"
+    assert prompt =~ "`n/a`"
+    assert prompt =~ "## Phase Map"
+    assert prompt =~ "## Main Flow"
+    assert prompt =~ "Scan **every** unresolved artifact"
+    assert prompt =~ "inspect each artifact's `children` / thread replies"
+    assert prompt =~ "retain each comment's `parent { id }`"
+    assert prompt =~ "reply node as standalone top-level feedback"
+    assert prompt =~ "feedback keeps the phase intent of that artifact"
     assert prompt =~ "Continuation context:"
     assert prompt =~ "retry attempt #2"
 

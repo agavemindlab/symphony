@@ -1,0 +1,118 @@
+defmodule SymphonyElixir.IssueRunHook do
+  @moduledoc """
+  Runs optional workflow hooks for issue Running lifecycle markers.
+  """
+
+  require Logger
+
+  alias SymphonyElixir.{Config, Workflow}
+  alias SymphonyElixir.Linear.Issue
+
+  @type event :: :running | :stopped
+
+  @spec configured?(event()) :: boolean()
+  def configured?(event) when event in [:running, :stopped] do
+    event
+    |> hook_command(Config.settings!().hooks)
+    |> configured_command?()
+  end
+
+  def configured?(_event), do: false
+
+  @spec run(event(), Issue.t()) :: :ok
+  def run(event, issue), do: run(event, issue, [])
+
+  @spec run(event(), Issue.t(), keyword()) :: :ok
+  def run(event, %Issue{} = issue, opts) when event in [:running, :stopped] do
+    hooks = Config.settings!().hooks
+
+    case hook_command(event, hooks) do
+      command when is_binary(command) ->
+        if configured_command?(command) do
+          run_command(command, event, issue, opts, hooks.timeout_ms)
+        else
+          :ok
+        end
+
+      _ ->
+        :ok
+    end
+  end
+
+  def run(_event, _issue, _opts), do: :ok
+
+  defp run_command(command, event, issue, opts, timeout_ms) do
+    hook_name = hook_name(event)
+    workflow_dir = Path.dirname(Workflow.workflow_file_path())
+    env = hook_env(event, issue, opts, workflow_dir)
+
+    Logger.info("Running issue run hook hook=#{hook_name} #{issue_log_context(issue)}")
+
+    task =
+      Task.async(fn ->
+        System.cmd("sh", ["-lc", command],
+          cd: workflow_dir,
+          env: env,
+          stderr_to_stdout: true
+        )
+      end)
+
+    case Task.yield(task, timeout_ms) do
+      {:ok, {_output, 0}} ->
+        :ok
+
+      {:ok, {output, status}} ->
+        Logger.warning("Issue run hook failed hook=#{hook_name} #{issue_log_context(issue)} status=#{status} output=#{inspect(sanitize_output(output))}")
+
+        :ok
+
+      nil ->
+        Task.shutdown(task, :brutal_kill)
+
+        Logger.warning("Issue run hook timed out hook=#{hook_name} #{issue_log_context(issue)} timeout_ms=#{timeout_ms}")
+
+        :ok
+    end
+  end
+
+  defp configured_command?(command) when is_binary(command), do: String.trim(command) != ""
+  defp configured_command?(_command), do: false
+
+  defp hook_command(:running, hooks), do: hooks.issue_running
+  defp hook_command(:stopped, hooks), do: hooks.issue_stopped
+
+  defp hook_name(:running), do: "issue_running"
+  defp hook_name(:stopped), do: "issue_stopped"
+
+  defp hook_env(event, issue, opts, workflow_dir) do
+    [
+      {"SYMPHONY_WORKFLOW_DIR", workflow_dir},
+      {"SYMPHONY_HOOK_EVENT", Atom.to_string(event)},
+      {"SYMPHONY_HOOK_REASON", env_value(Keyword.get(opts, :reason))},
+      {"SYMPHONY_ISSUE_ID", env_value(issue.id)},
+      {"SYMPHONY_ISSUE_IDENTIFIER", env_value(issue.identifier)},
+      {"SYMPHONY_ISSUE_TITLE", env_value(issue.title)},
+      {"SYMPHONY_ISSUE_STATE", env_value(issue.state)},
+      {"SYMPHONY_ISSUE_URL", env_value(issue.url)},
+      {"SYMPHONY_WORKER_HOST", env_value(Keyword.get(opts, :worker_host))}
+    ]
+  end
+
+  defp env_value(nil), do: ""
+  defp env_value(value) when is_binary(value), do: value
+  defp env_value(value), do: to_string(value)
+
+  defp issue_log_context(%Issue{id: id, identifier: identifier}) do
+    "issue_id=#{id || "n/a"} issue_identifier=#{identifier || "n/a"}"
+  end
+
+  defp sanitize_output(output, max_bytes \\ 2_048) do
+    binary = IO.iodata_to_binary(output)
+
+    if byte_size(binary) > max_bytes do
+      binary_part(binary, 0, max_bytes) <> "... (truncated)"
+    else
+      binary
+    end
+  end
+end
