@@ -34,7 +34,11 @@ review judgment in the parent agent.
      or verification changes.
    - For runtime-secret contract work, include whether the named runtime
      variables are present, without printing their values.
-4. Inspect linked PRs only when `## Implementation` is awaiting review:
+4. Inspect spawned or related issues mentioned by the current artifacts and
+   Linear relations. Include each related issue's relation type, state, assignee,
+   whether it is blocked by or blocks the reviewed issue, and whether validation
+   or disposable issues have a durable relation plus a terminal cleanup state.
+5. Inspect linked PRs only when `## Implementation` is awaiting review:
    - Identify the project's configured automated reviewer accounts first
      (especially `AUTOMATED_REVIEWER` from workflow env/defaults, such as
      `workflows/<project>/project.env*`). Treat those accounts as automated
@@ -44,13 +48,13 @@ review judgment in the parent agent.
    - `gh pr checks <pr>` when available
    - Treat only human PR reviews/comments as phase feedback; ignore bot or
      configured automated reviewer approval as a human approval signal.
-5. Read `agents/maestro-reviewer.md` and spawn exactly one fresh subagent with
+6. Read `agents/maestro-reviewer.md` and spawn exactly one fresh subagent with
    context forking disabled. Pass only that reviewer prompt and the explicit
    evidence pack. Do not pass current conversation history, prior `$maestro`
    results, or your own expected answer.
-6. Compare the subagent's recommendation with the evidence. If it is unsupported
+7. Compare the subagent's recommendation with the evidence. If it is unsupported
    or misses later comments, correct it in the final answer and explain why.
-7. Return a concise Chinese recommendation with:
+8. Return a concise Chinese recommendation with:
    - `建议回复方式`: approve / request changes / ask clarification / merge nudge /
      completion confirmation / no reply yet.
    - `回复对象`: next Symphony agent / human.
@@ -109,6 +113,11 @@ Acceptance source of truth for all phases:
 Runtime secret provisioning:
 <required variable names and present/missing status only, or "not applicable">
 
+Spawned or related issue evidence:
+<issue identifiers, relation types, state/assignee, blocker relation status,
+validation/disposable issue cleanup status, and whether any downstream issue can
+be selected before this one is accepted, or "none">
+
 Linked PR evidence, only for Implementation review:
 <PR metadata, checks, configured automated reviewer accounts, human review
 state/comments after excluding bots/automated reviewers, important diff summary,
@@ -129,7 +138,10 @@ Task:
 7. Apply the relevant review lens from the reviewer prompt: Requirements /
    Design rigor, Implementation / Deployment verification, or bugfix / rework
    root cause.
-8. Cite the decisive evidence and call out missing evidence or uncertainty.
+8. Check whether spawned or related issues have the dependency relation or
+   cleanup disposition needed to prevent unsafe parallel work or orphaned
+   validation artifacts.
+9. Cite the decisive evidence and call out missing evidence or uncertainty.
 Keep the answer concise and do not recommend changing state directly unless the
 human's reply should explicitly instruct that.
 ```

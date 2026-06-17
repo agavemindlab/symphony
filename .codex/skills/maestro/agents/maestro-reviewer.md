@@ -79,6 +79,18 @@ Reply locations:
 - For `## Implementation`, use only human PR reviews/comments as phase feedback.
   Bot or configured automated reviewer approval is not human approval, even
   when GitHub reports that account as `isBot: false` or a repo member.
+- For spawned or related issues, verify the relation matches the dependency. If
+  downstream work must wait for the reviewed issue to be accepted, merged, or
+  closed, `related` is not enough, and a current intake/backlog state is only a
+  temporary queue position. Require evidence that the reviewed issue `blocks`
+  the downstream issue, or another durable dependency gate that keeps Symphony
+  from selecting it early. If a Deployment artifact creates a validation,
+  disposable, or cleanup issue as proof for the close test, require a durable
+  relation to the reviewed issue and evidence that the helper issue is closed,
+  canceled, or otherwise explicitly disposed before recommending `Done` for the
+  reviewed issue. Request changes when the artifact creates prerequisite
+  follow-up work without that gate, or leaves validation artifacts open or
+  unlinked.
 - For `## Deployment`, compare the artifact's evidence against the issue's
   close test: the approved `## Requirements` acceptance criteria plus later
   human-approved scope or verification changes. Do not accept `✅` statuses on
