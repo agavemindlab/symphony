@@ -138,36 +138,30 @@ defmodule SymphonyElixir.Workspace do
 
   @spec remove_issue_workspaces(term(), worker_host()) :: :ok
   def remove_issue_workspaces(issue_or_identifier, worker_host) when is_binary(worker_host) do
-    with %{issue_identifier: identifier} = issue_context when is_binary(identifier) <-
-           removable_issue_context(issue_or_identifier) do
-      safe_id = safe_identifier(identifier)
+    case removable_issue_context(issue_or_identifier) do
+      %{issue_identifier: identifier} = issue_context when is_binary(identifier) ->
+        identifier
+        |> safe_identifier()
+        |> remove_issue_workspace_for_worker(worker_host, issue_context)
 
-      case workspace_path_for_issue(safe_id, worker_host) do
-        {:ok, workspace} -> remove(workspace, worker_host, issue_context)
-        {:error, _reason} -> :ok
-      end
-    else
-      _ -> :ok
+      _ ->
+        :ok
     end
 
     :ok
   end
 
   def remove_issue_workspaces(issue_or_identifier, nil) do
-    with %{issue_identifier: identifier} = issue_context when is_binary(identifier) <-
-           removable_issue_context(issue_or_identifier) do
-      safe_id = safe_identifier(identifier)
+    case removable_issue_context(issue_or_identifier) do
+      %{issue_identifier: identifier} = issue_context when is_binary(identifier) ->
+        remove_issue_workspaces_for_configured_workers(
+          issue_or_identifier,
+          safe_identifier(identifier),
+          issue_context
+        )
 
-      case Config.settings!().worker.ssh_hosts do
-        [] ->
-          case workspace_path_for_issue(safe_id, nil) do
-            {:ok, workspace} -> remove(workspace, nil, issue_context)
-            {:error, _reason} -> :ok
-          end
-
-        worker_hosts ->
-          Enum.each(worker_hosts, &remove_issue_workspaces(issue_or_identifier, &1))
-      end
+      _ ->
+        :ok
     end
 
     :ok
@@ -175,6 +169,23 @@ defmodule SymphonyElixir.Workspace do
 
   def remove_issue_workspaces(_identifier, _worker_host) do
     :ok
+  end
+
+  defp remove_issue_workspaces_for_configured_workers(issue_or_identifier, safe_id, issue_context) do
+    case Config.settings!().worker.ssh_hosts do
+      [] ->
+        remove_issue_workspace_for_worker(safe_id, nil, issue_context)
+
+      worker_hosts ->
+        Enum.each(worker_hosts, &remove_issue_workspaces(issue_or_identifier, &1))
+    end
+  end
+
+  defp remove_issue_workspace_for_worker(safe_id, worker_host, issue_context) do
+    case workspace_path_for_issue(safe_id, worker_host) do
+      {:ok, workspace} -> remove(workspace, worker_host, issue_context)
+      {:error, _reason} -> :ok
+    end
   end
 
   @spec run_before_run_hook(Path.t(), map() | String.t() | nil, worker_host()) ::

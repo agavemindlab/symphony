@@ -140,16 +140,14 @@ defmodule SymphonyElixir.Config do
   end
 
   defp validate_linear_tracker_semantics(tracker) do
-    cond do
-      not is_binary(tracker.api_key) ->
-        {:error, :missing_linear_api_token}
-
-      true ->
-        case configured_project_slugs(tracker) do
-          {:ok, []} -> {:error, :missing_linear_project_slug}
-          {:ok, _project_slugs} -> :ok
-          {:error, reason} -> {:error, reason}
-        end
+    if is_binary(tracker.api_key) do
+      case configured_project_slugs(tracker) do
+        {:ok, []} -> {:error, :missing_linear_project_slug}
+        {:ok, _project_slugs} -> :ok
+        {:error, reason} -> {:error, reason}
+      end
+    else
+      {:error, :missing_linear_api_token}
     end
   end
 

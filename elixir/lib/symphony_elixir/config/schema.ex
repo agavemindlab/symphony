@@ -525,8 +525,6 @@ defmodule SymphonyElixir.Config.Schema do
     end
   end
 
-  defp resolve_project_slugs_setting(nil), do: []
-
   defp resolve_project_slugs_setting(project_slugs) when is_list(project_slugs) do
     project_slugs
     |> Enum.flat_map(&resolve_project_slugs_setting/1)
@@ -537,11 +535,8 @@ defmodule SymphonyElixir.Config.Schema do
     case resolve_env_value(value, nil) do
       nil -> []
       resolved when is_binary(resolved) -> split_project_slugs(resolved)
-      _ -> []
     end
   end
-
-  defp resolve_project_slugs_setting(_value), do: []
 
   defp split_project_slugs(value) when is_binary(value) do
     value
