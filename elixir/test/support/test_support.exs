@@ -146,6 +146,7 @@ defmodule SymphonyElixir.TestSupport do
           tracker_endpoint: "https://api.linear.app/graphql",
           tracker_api_token: "token",
           tracker_project_slug: "project",
+          tracker_project_slugs: nil,
           tracker_assignee: nil,
           tracker_required_labels: [],
           tracker_active_states: ["Todo", "In Progress"],
@@ -186,6 +187,7 @@ defmodule SymphonyElixir.TestSupport do
     tracker_endpoint = Keyword.get(config, :tracker_endpoint)
     tracker_api_token = Keyword.get(config, :tracker_api_token)
     tracker_project_slug = Keyword.get(config, :tracker_project_slug)
+    tracker_project_slugs = Keyword.get(config, :tracker_project_slugs)
     tracker_assignee = Keyword.get(config, :tracker_assignee)
     tracker_required_labels = Keyword.get(config, :tracker_required_labels)
     tracker_active_states = Keyword.get(config, :tracker_active_states)
@@ -227,6 +229,7 @@ defmodule SymphonyElixir.TestSupport do
         "  endpoint: #{yaml_value(tracker_endpoint)}",
         "  api_key: #{yaml_value(tracker_api_token)}",
         "  project_slug: #{yaml_value(tracker_project_slug)}",
+        tracker_project_slugs_entry(tracker_project_slugs),
         "  assignee: #{yaml_value(tracker_assignee)}",
         "  required_labels: #{yaml_value(tracker_required_labels)}",
         "  active_states: #{yaml_value(tracker_active_states)}",
@@ -329,6 +332,12 @@ defmodule SymphonyElixir.TestSupport do
     ]
     |> Enum.reject(&(&1 in [nil, false]))
     |> Enum.join("\n")
+  end
+
+  defp tracker_project_slugs_entry(nil), do: nil
+
+  defp tracker_project_slugs_entry(project_slugs) do
+    "  project_slugs: #{yaml_value(project_slugs)}"
   end
 
   defp observability_yaml(enabled, refresh_ms, render_interval_ms) do
