@@ -220,6 +220,34 @@ defmodule SymphonyElixir.CoreTest do
     refute design_skill =~ "opens `phase-implementation` in the same session"
   end
 
+  test "implementation artifact template is readable and preserves Maestro evidence" do
+    phase_skill =
+      File.read!(Path.expand("../workflows/agavemindlab/skills/phase-implementation/SKILL.md", File.cwd!()))
+
+    for section <- [
+          "### 当前对象",
+          "### Root cause",
+          "### Rework 已回应",
+          "### Code changes",
+          "### Verification",
+          "### Acceptance mapping",
+          "### Human action needed"
+        ] do
+      assert phase_skill =~ section
+    end
+
+    for evidence <- [
+          "Source comment:",
+          "Automated review:",
+          "不等于人工批准",
+          "S2 direct verification",
+          "S1 post-deploy close test",
+          "Current-main compatibility"
+        ] do
+      assert phase_skill =~ evidence
+    end
+  end
+
   test "linear api token resolves from LINEAR_API_KEY env var" do
     previous_linear_api_key = System.get_env("LINEAR_API_KEY")
     env_api_key = "test-linear-api-key"
