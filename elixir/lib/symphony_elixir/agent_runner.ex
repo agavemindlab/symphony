@@ -5,7 +5,7 @@ defmodule SymphonyElixir.AgentRunner do
 
   require Logger
   alias SymphonyElixir.Codex.AppServer
-  alias SymphonyElixir.{Config, Linear.Issue, PromptBuilder, Tracker, Workspace}
+  alias SymphonyElixir.{Config, Linear.Issue, MaestroPreReview, PromptBuilder, Tracker, Workspace}
 
   @type worker_host :: String.t() | nil
 
@@ -129,8 +129,8 @@ defmodule SymphonyElixir.AgentRunner do
 
           :ok
 
-        {:done, _refreshed_issue} ->
-          :ok
+        {:done, refreshed_issue} ->
+          maybe_run_maestro_pre_review(refreshed_issue, codex_update_recipient, opts, app_session[:worker_host])
 
         {:error, reason} ->
           {:error, reason}
@@ -183,6 +183,36 @@ defmodule SymphonyElixir.AgentRunner do
   defp issue_routable?(%Issue{} = issue) do
     Issue.routable?(issue, Config.settings!().tracker.required_labels)
   end
+
+  defp maybe_run_maestro_pre_review(%Issue{} = issue, codex_update_recipient, opts, worker_host) do
+    if human_review_issue?(issue) and issue_routable?(issue) do
+      runner = Keyword.get(opts, :maestro_pre_review_runner, &MaestroPreReview.run/2)
+
+      runner_opts = [
+        worker_host: worker_host,
+        on_message: codex_message_handler(codex_update_recipient, issue)
+      ]
+
+      case runner.(issue, runner_opts) do
+        :ok ->
+          :ok
+
+        {:error, reason} ->
+          Logger.warning("Maestro pre-review failed for #{issue_context(issue)}: #{inspect(reason)}")
+          :ok
+      end
+    else
+      :ok
+    end
+  end
+
+  defp maybe_run_maestro_pre_review(_issue, _codex_update_recipient, _opts, _worker_host), do: :ok
+
+  defp human_review_issue?(%Issue{state: state}) when is_binary(state) do
+    normalize_issue_state(state) == "human review"
+  end
+
+  defp human_review_issue?(_issue), do: false
 
   defp selected_worker_host(nil, []), do: nil
 

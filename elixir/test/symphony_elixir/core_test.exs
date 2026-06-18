@@ -1945,6 +1945,233 @@ defmodule SymphonyElixir.CoreTest do
     end
   end
 
+  test "maestro pre-review prompt preserves human review gate semantics" do
+    issue = %Issue{
+      id: "issue-maestro-prompt",
+      identifier: "MT-5316",
+      title: "Use Maestro before human review",
+      description: "Pre-review handoff",
+      state: "Human Review",
+      url: "https://example.org/issues/MT-5316",
+      labels: ["symphony"]
+    }
+
+    prompt = SymphonyElixir.MaestroPreReview.build_prompt_for_test(issue)
+
+    assert prompt =~ "$maestro MT-5316"
+    assert prompt =~ "fresh Codex session"
+    assert prompt =~ "Do not reuse the working agent"
+    assert prompt =~ "request changes"
+    assert prompt =~ "Rework"
+    assert prompt =~ "approve"
+    assert prompt =~ "0-10"
+    assert prompt =~ "keep the issue in `Human Review`"
+    refute prompt =~ "✅ 已批准"
+
+    assert SymphonyElixir.MaestroPreReview.workspace_identifier_for_test(issue) == "MT-5316-maestro"
+    assert SymphonyElixir.MaestroPreReview.prepare_main_branch_command_for_test() =~ "upstream/$base_branch"
+  end
+
+  test "maestro pre-review records no-action reason when the isolated session cannot start" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-maestro-pre-review-failure-#{System.unique_integer([:positive])}"
+      )
+
+    try do
+      workspace_root = Path.join(test_root, "workspaces")
+
+      write_workflow_file!(Workflow.workflow_file_path(),
+        tracker_kind: "memory",
+        workspace_root: workspace_root
+      )
+
+      Application.put_env(:symphony_elixir, :memory_tracker_recipient, self())
+
+      issue = %Issue{
+        id: "issue-maestro-failure",
+        identifier: "MT-5318",
+        title: "Record pre-review failure",
+        description: "The fallback should leave the issue in Human Review",
+        state: "Human Review",
+        url: "https://example.org/issues/MT-5318",
+        labels: ["symphony"]
+      }
+
+      assert {:error, {:maestro_main_branch_prepare_failed, _status, _output}} =
+               SymphonyElixir.MaestroPreReview.run(issue)
+
+      assert_receive {:memory_tracker_comment, "issue-maestro-failure", body}
+      assert body =~ "🤖 Maestro 预审核:"
+      assert body =~ "未自动执行"
+      assert body =~ "Human Review"
+      refute_received {:memory_tracker_state_update, "issue-maestro-failure", _state}
+    after
+      File.rm_rf(test_root)
+    end
+  end
+
+  test "agent runner runs maestro pre-review after a human review handoff" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-agent-runner-maestro-human-review-#{System.unique_integer([:positive])}"
+      )
+
+    try do
+      template_repo = Path.join(test_root, "source")
+      workspace_root = Path.join(test_root, "workspaces")
+      codex_binary = Path.join(test_root, "fake-codex")
+
+      File.mkdir_p!(template_repo)
+      File.write!(Path.join(template_repo, "README.md"), "# test")
+      System.cmd("git", ["-C", template_repo, "init", "-b", "main"])
+      System.cmd("git", ["-C", template_repo, "config", "user.name", "Test User"])
+      System.cmd("git", ["-C", template_repo, "config", "user.email", "test@example.com"])
+      System.cmd("git", ["-C", template_repo, "add", "README.md"])
+      System.cmd("git", ["-C", template_repo, "commit", "-m", "initial"])
+
+      File.write!(codex_binary, """
+      #!/bin/sh
+      while IFS= read -r line; do
+        case "$line" in
+          *'"method":"initialize"'*)
+            printf '%s\\n' '{"id":1,"result":{}}'
+            ;;
+          *'"method":"thread/start"'*)
+            printf '%s\\n' '{"id":2,"result":{"thread":{"id":"thread-maestro"}}}'
+            ;;
+          *'"method":"turn/start"'*)
+            printf '%s\\n' '{"id":3,"result":{"turn":{"id":"turn-maestro"}}}'
+            printf '%s\\n' '{"method":"turn/completed"}'
+            exit 0
+            ;;
+        esac
+      done
+      """)
+
+      File.chmod!(codex_binary, 0o755)
+
+      write_workflow_file!(Workflow.workflow_file_path(),
+        workspace_root: workspace_root,
+        hook_after_create: "cp #{Path.join(template_repo, "README.md")} README.md",
+        codex_command: "#{codex_binary} app-server"
+      )
+
+      parent = self()
+
+      issue = %Issue{
+        id: "issue-maestro-human-review",
+        identifier: "MT-5316",
+        title: "Pre-review Human Review",
+        description: "Run Maestro after handoff",
+        state: "In Progress",
+        url: "https://example.org/issues/MT-5316",
+        labels: ["symphony"]
+      }
+
+      pre_review_runner = fn refreshed_issue, opts ->
+        send(parent, {:maestro_pre_review, refreshed_issue.identifier, refreshed_issue.state, opts[:worker_host]})
+        :ok
+      end
+
+      assert :ok =
+               AgentRunner.run(
+                 issue,
+                 nil,
+                 issue_state_fetcher: fn [_issue_id] ->
+                   {:ok, [%{issue | state: "Human Review"}]}
+                 end,
+                 maestro_pre_review_runner: pre_review_runner
+               )
+
+      assert_receive {:maestro_pre_review, "MT-5316", "Human Review", nil}
+    after
+      File.rm_rf(test_root)
+    end
+  end
+
+  test "agent runner skips maestro pre-review for non human review terminal handoff" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-agent-runner-maestro-done-#{System.unique_integer([:positive])}"
+      )
+
+    try do
+      template_repo = Path.join(test_root, "source")
+      workspace_root = Path.join(test_root, "workspaces")
+      codex_binary = Path.join(test_root, "fake-codex")
+
+      File.mkdir_p!(template_repo)
+      File.write!(Path.join(template_repo, "README.md"), "# test")
+      System.cmd("git", ["-C", template_repo, "init", "-b", "main"])
+      System.cmd("git", ["-C", template_repo, "config", "user.name", "Test User"])
+      System.cmd("git", ["-C", template_repo, "config", "user.email", "test@example.com"])
+      System.cmd("git", ["-C", template_repo, "add", "README.md"])
+      System.cmd("git", ["-C", template_repo, "commit", "-m", "initial"])
+
+      File.write!(codex_binary, """
+      #!/bin/sh
+      while IFS= read -r line; do
+        case "$line" in
+          *'"method":"initialize"'*)
+            printf '%s\\n' '{"id":1,"result":{}}'
+            ;;
+          *'"method":"thread/start"'*)
+            printf '%s\\n' '{"id":2,"result":{"thread":{"id":"thread-done"}}}'
+            ;;
+          *'"method":"turn/start"'*)
+            printf '%s\\n' '{"id":3,"result":{"turn":{"id":"turn-done"}}}'
+            printf '%s\\n' '{"method":"turn/completed"}'
+            exit 0
+            ;;
+        esac
+      done
+      """)
+
+      File.chmod!(codex_binary, 0o755)
+
+      write_workflow_file!(Workflow.workflow_file_path(),
+        workspace_root: workspace_root,
+        hook_after_create: "cp #{Path.join(template_repo, "README.md")} README.md",
+        codex_command: "#{codex_binary} app-server"
+      )
+
+      parent = self()
+
+      issue = %Issue{
+        id: "issue-maestro-done",
+        identifier: "MT-5317",
+        title: "No pre-review after done",
+        description: "Do not run Maestro for Done",
+        state: "In Progress",
+        url: "https://example.org/issues/MT-5317",
+        labels: ["symphony"]
+      }
+
+      pre_review_runner = fn refreshed_issue, _opts ->
+        send(parent, {:unexpected_maestro_pre_review, refreshed_issue.state})
+        :ok
+      end
+
+      assert :ok =
+               AgentRunner.run(
+                 issue,
+                 nil,
+                 issue_state_fetcher: fn [_issue_id] ->
+                   {:ok, [%{issue | state: "Done"}]}
+                 end,
+                 maestro_pre_review_runner: pre_review_runner
+               )
+
+      refute_received {:unexpected_maestro_pre_review, _state}
+    after
+      File.rm_rf(test_root)
+    end
+  end
+
   test "agent runner surfaces ssh startup failures instead of silently hopping hosts" do
     test_root =
       Path.join(
