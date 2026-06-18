@@ -36,6 +36,8 @@ Recommend how the human should reply to the current phase artifact. Return:
 - Request changes when the next action is agent-actionable: missing acceptance
   evidence, unresolved artifact feedback, failing relevant checks, stale
   artifact content, or implementation/spec mismatch.
+- For `## Implementation`, request changes when the artifact 缺少合并风险判断,
+  or when its 合并风险判断 is clearly contradicted by the PR diff / evidence.
 - Ask clarification when the next action requires human judgment, product scope,
   or risk acceptance rather than agent work.
 - Use a merge nudge when normal Implementation appears accepted but the workflow
