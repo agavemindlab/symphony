@@ -110,6 +110,12 @@ Reply locations:
   their own. If Deployment weakens or substitutes required verification, require
   changes when an agent can add evidence, or ask clarification when only the
   human can accept the risk.
+- For `Type:Feature` issues that add or change user-facing configuration,
+  commands, workflow behavior, environment variables, or public usage paths,
+  check for minimal user-facing docs, examples, README, or config updates before
+  recommending `Done`. If missing, recommend `Rework` unless the accepted scope
+  explicitly excludes documentation or existing docs already cover the new
+  behavior.
 - For secret or runtime-env contract work, distinguish committed metadata from
   actual non-git secret provisioning. If the issue's purpose is for future
   agents to use a dedicated credential automatically, require evidence that the

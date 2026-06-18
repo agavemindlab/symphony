@@ -40,7 +40,12 @@ review judgment in the parent agent.
    issues have enough context to start safely after the reviewed issue is closed,
    and whether validation or disposable issues have a durable relation plus a
    terminal cleanup state.
-5. Inspect linked PRs only when `## Implementation` is awaiting review:
+5. Inspect linked PRs when `## Implementation` is awaiting review. Also
+   inspect merged PR file lists or artifact evidence for `## Deployment` when a
+   `Type:Feature` issue appears to add user-facing configuration, commands,
+   workflow behavior, environment variables, or public usage paths, so the
+   reviewer can check for minimal usage docs or examples.
+   For Implementation:
    - Identify the project's configured automated reviewer accounts first
      (especially `AUTOMATED_REVIEWER` from workflow env/defaults, such as
      `workflows/<project>/project.env*`). Treat those accounts as automated
@@ -114,6 +119,10 @@ Acceptance source of truth for all phases:
 
 Runtime secret provisioning:
 <required variable names and present/missing status only, or "not applicable">
+
+User-facing documentation evidence:
+<docs, examples, README/config updates for new user-facing feature usage, or
+"not applicable" / "none found">
 
 Spawned or related issue evidence:
 <issue identifiers, relation types, state/assignee, blocker relation status,
