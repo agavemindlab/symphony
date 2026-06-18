@@ -168,6 +168,12 @@ Fields:
 - `url` (string or null)
 - `labels` (list of strings)
   - Normalized to lowercase.
+- `project` (object or null)
+  - Tracker project for this issue when the tracker supplies one.
+  - Linear projects normalize to:
+    - `id` (string or null)
+    - `slug_id` (string or null)
+    - `name` (string or null)
 - `blocked_by` (list of blocker refs)
   - Each blocker ref contains:
     - `id` (string or null)
@@ -357,7 +363,13 @@ Fields:
   - Canonical environment variable for `tracker.kind == "linear"`: `LINEAR_API_KEY`.
   - If `$VAR_NAME` resolves to an empty string, treat the key as missing.
 - `project_slug` (string)
-  - REQUIRED for dispatch when `tracker.kind == "linear"`.
+  - Backward-compatible single Linear project selector.
+  - REQUIRED for dispatch when `tracker.kind == "linear"` unless `project_slugs` is set.
+- `project_slugs` (string or list of strings)
+  - Multi-project Linear selector.
+  - MAY be a YAML list or a `$VAR_NAME` that resolves to a comma-separated list.
+  - Blank entries are invalid. Duplicate entries MAY be deduplicated.
+  - `project_slug` and `project_slugs` MUST NOT both be non-empty.
 - `required_labels` (list of strings)
   - Default: `[]`.
   - An issue MUST contain every configured label to dispatch or continue.
@@ -572,7 +584,9 @@ Validation checks:
 - Workflow file can be loaded and parsed.
 - `tracker.kind` is present and supported.
 - `tracker.api_key` is present after `$` resolution.
-- `tracker.project_slug` is present when REQUIRED by the selected tracker kind.
+- `tracker.project_slug` or `tracker.project_slugs` is present when REQUIRED by the selected
+  tracker kind.
+- `tracker.project_slug` and `tracker.project_slugs` are not both non-empty.
 - `codex.command` is present and non-empty.
 
 ### 6.4 Core Config Fields Summary (Cheat Sheet)
@@ -584,7 +598,9 @@ not require recognizing or validating extension fields unless that extension is 
 - `tracker.kind`: string, REQUIRED, currently `linear`
 - `tracker.endpoint`: string, default `https://api.linear.app/graphql` when `tracker.kind=linear`
 - `tracker.api_key`: string or `$VAR`, canonical env `LINEAR_API_KEY` when `tracker.kind=linear`
-- `tracker.project_slug`: string, REQUIRED when `tracker.kind=linear`
+- `tracker.project_slug`: string, REQUIRED when `tracker.kind=linear` unless `project_slugs` is set
+- `tracker.project_slugs`: string or list of strings, REQUIRED when `tracker.kind=linear` unless
+  `project_slug` is set
 - `tracker.required_labels`: list of strings, default `[]`
 - `tracker.active_states`: list of strings, default `["Todo", "In Progress"]`
 - `tracker.terminal_states`: list of strings, default `["Closed", "Cancelled", "Canceled", "Duplicate", "Done"]`
@@ -891,6 +907,9 @@ Execution contract:
   `cwd`.
 - Issue-running hooks execute from the workflow directory and receive issue context in
   `SYMPHONY_*` environment variables.
+- Hooks for a Linear issue receive project context when present:
+  `SYMPHONY_LINEAR_PROJECT_ID`, `SYMPHONY_LINEAR_PROJECT_SLUG`, and
+  `SYMPHONY_LINEAR_PROJECT_NAME`.
 - On POSIX systems, `sh -lc <script>` (or a stricter equivalent such as `bash -lc <script>`) is a
   conforming default.
 - Hook timeout uses `hooks.timeout_ms`; default: `60000 ms`.
@@ -1158,10 +1177,10 @@ Note:
 An implementation MUST support these tracker adapter operations:
 
 1. `fetch_candidate_issues()`
-   - Return issues in configured active states for a configured project.
+   - Return issues in configured active states for the configured project or projects.
 
 2. `fetch_issues_by_states(state_names)`
-   - Used for startup terminal cleanup.
+   - Used for startup terminal cleanup across the configured project or projects.
 
 3. `fetch_issue_states_by_ids(issue_ids)`
    - Used for active-run reconciliation.
@@ -1173,8 +1192,10 @@ Linear-specific requirements for `tracker.kind == "linear"`:
 - `tracker.kind == "linear"`
 - GraphQL endpoint (default `https://api.linear.app/graphql`)
 - Auth token sent in `Authorization` header
-- `tracker.project_slug` maps to Linear project `slugId`
-- Candidate issue query filters project using `project: { slugId: { eq: $projectSlug } }`
+- `tracker.project_slug` maps to one Linear project `slugId`
+- `tracker.project_slugs` maps to multiple Linear project `slugId` values and shares one candidate
+  dispatch set
+- Candidate issue queries filter each project using `project: { slugId: { eq: $projectSlug } }`
 - Candidate and issue-state refresh queries include issue labels. Required
   label filtering happens after normalization so refresh can observe label
   removal and stop or release existing work.
