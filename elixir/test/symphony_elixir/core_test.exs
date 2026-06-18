@@ -246,6 +246,31 @@ defmodule SymphonyElixir.CoreTest do
         ] do
       assert phase_skill =~ evidence
     end
+
+    for merge_risk_contract <- [
+          "### 合并风险判断",
+          "required: 2-3 bullets",
+          "漏 bug 最坏影响",
+          "服务故障 / 数据损坏 / 权限隐私 / 不可逆状态",
+          "低风险也必须说明为什么低风险",
+          "缓解措施或 Deployment 验证"
+        ] do
+      assert phase_skill =~ merge_risk_contract
+    end
+  end
+
+  test "maestro reviewer requests changes for missing or stale merge risk judgment" do
+    reviewer =
+      File.read!(Path.expand("../.codex/skills/maestro/agents/maestro-reviewer.md", File.cwd!()))
+
+    for contract <- [
+          "合并风险判断",
+          "缺少合并风险判断",
+          "PR diff / evidence",
+          "request changes"
+        ] do
+      assert reviewer =~ contract
+    end
   end
 
   test "linear api token resolves from LINEAR_API_KEY env var" do

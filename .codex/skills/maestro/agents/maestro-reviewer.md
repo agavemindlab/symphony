@@ -153,6 +153,8 @@ Reply locations:
   concurrency, multi-process writes, persistence completeness, data loss, or
   deployment topology). If that risk invalidates the approved design, ask for
   rework of the relevant earlier phase.
+- For `## Implementation`, request changes when the artifact 缺少合并风险判断,
+  or when its 合并风险判断 is clearly contradicted by the PR diff / evidence.
 - Request changes when fresh PR metadata contradicts the artifact's claimed
   mergeability, check, or review state and the artifact uses that state as
   acceptance evidence. Approve only if the contradiction is clearly irrelevant
