@@ -7,7 +7,7 @@ description:
   for human consent. Uses symphony-linear for the raw GraphQL.
 ---
 
-# Spawn a related issue
+# Spawn a Linear issue
 
 Use this when, while working an issue, you find work that belongs in its
 **own** Linear ticket. Two entry modes:
@@ -43,7 +43,7 @@ Also assign a type label: `Bug | Feature | Refactor | Performance | Migration | 
 
 1. **State = the team's intake state, resolved by `type` (never by name).**
    Pick `type: "triage"` if the team has one, else `type: "backlog"` (see
-   symphony-linear "Spawn a related issue"). A spawned issue lands outside
+   symphony-linear "Spawn a Linear issue"). A spawned issue lands outside
    `active_states`, so Symphony never auto-works it.
 2. **`assignee` = the current issue's `creator`.** Never assign a spawned
    issue to Symphony's own account.
@@ -153,9 +153,11 @@ record it and move on. Both paths coexist.
 
 ## Worked examples
 
-- **follow-up during Implementation** → `related` issue created in the intake
-  state, assignee = creator, listed in the `## Implementation` artifact;
-  workpad `已创建 ENG-123`.
+- **independent follow-up during Implementation** → `related` issue created in
+  the intake state, assignee = creator, listed in the `## Implementation`
+  artifact; workpad `已创建 ENG-123`.
+- **implementation ticket that depends on the current artifact** → `downstream
+  blocked`, linked as current `blocks` new.
 - **blocking dependency found** → proposal comment + blocker callout on the
   artifact + `Human Review`; nothing created until consent.
 - **consent reply in a proposal thread** → issue created, `已创建 ENG-123`

@@ -133,19 +133,7 @@ defmodule SymphonyElixir.Linear.Client do
 
     case normalized_states do
       [] -> {:ok, []}
-      states -> fetch_issues_by_normalized_states(states)
-    end
-  end
-
-  defp fetch_issues_by_normalized_states(states) do
-    tracker = Config.settings!().tracker
-
-    if is_nil(tracker.api_key) do
-      {:error, :missing_linear_api_token}
-    else
-      with {:ok, project_slugs} <- configured_project_slugs(tracker) do
-        do_fetch_by_project_slugs(project_slugs, states, nil)
-      end
+      states -> fetch_issues_by_normalized_states(states, Config.settings!().tracker)
     end
   end
 
@@ -229,8 +217,7 @@ defmodule SymphonyElixir.Linear.Client do
           [String.t()],
           [String.t()],
           (String.t(), map() -> {:ok, map()} | {:error, term()})
-        ) ::
-          {:ok, [Issue.t()]} | {:error, term()}
+        ) :: {:ok, [Issue.t()]} | {:error, term()}
   def fetch_issues_by_states_for_test(project_slugs, state_names, graphql_fun)
       when is_list(project_slugs) and is_list(state_names) and is_function(graphql_fun, 2) do
     do_fetch_by_project_slugs(project_slugs, state_names, nil, graphql_fun)
@@ -249,6 +236,16 @@ defmodule SymphonyElixir.Linear.Client do
 
       ids ->
         do_fetch_issue_states(ids, nil, graphql_fun)
+    end
+  end
+
+  defp fetch_issues_by_normalized_states(_state_names, %{api_key: nil}) do
+    {:error, :missing_linear_api_token}
+  end
+
+  defp fetch_issues_by_normalized_states(state_names, tracker) do
+    with {:ok, project_slugs} <- configured_project_slugs(tracker) do
+      do_fetch_by_project_slugs(project_slugs, state_names, nil)
     end
   end
 

@@ -142,7 +142,7 @@ defmodule SymphonyElixir.Workspace do
       %{issue_identifier: identifier} = issue_context when is_binary(identifier) ->
         identifier
         |> safe_identifier()
-        |> remove_workspace_by_safe_id(worker_host, issue_context)
+        |> remove_issue_workspace_for_worker(worker_host, issue_context)
 
       _ ->
         :ok
@@ -154,7 +154,11 @@ defmodule SymphonyElixir.Workspace do
   def remove_issue_workspaces(issue_or_identifier, nil) do
     case removable_issue_context(issue_or_identifier) do
       %{issue_identifier: identifier} = issue_context when is_binary(identifier) ->
-        remove_configured_issue_workspaces(issue_or_identifier, safe_identifier(identifier), issue_context)
+        remove_issue_workspaces_for_configured_workers(
+          issue_or_identifier,
+          safe_identifier(identifier),
+          issue_context
+        )
 
       _ ->
         :ok
@@ -167,17 +171,17 @@ defmodule SymphonyElixir.Workspace do
     :ok
   end
 
-  defp remove_configured_issue_workspaces(issue_or_identifier, safe_id, issue_context) do
+  defp remove_issue_workspaces_for_configured_workers(issue_or_identifier, safe_id, issue_context) do
     case Config.settings!().worker.ssh_hosts do
       [] ->
-        remove_workspace_by_safe_id(safe_id, nil, issue_context)
+        remove_issue_workspace_for_worker(safe_id, nil, issue_context)
 
       worker_hosts ->
         Enum.each(worker_hosts, &remove_issue_workspaces(issue_or_identifier, &1))
     end
   end
 
-  defp remove_workspace_by_safe_id(safe_id, worker_host, issue_context) do
+  defp remove_issue_workspace_for_worker(safe_id, worker_host, issue_context) do
     case workspace_path_for_issue(safe_id, worker_host) do
       {:ok, workspace} -> remove(workspace, worker_host, issue_context)
       {:error, _reason} -> :ok

@@ -386,7 +386,7 @@ mutation AttachURL($issueId: String!, $url: String!, $title: String) {
 }
 ```
 
-### Spawn a related issue (create + link)
+### Spawn a Linear issue (create + link)
 
 Used by the `symphony-issue` skill. Three reads to gather ids, then create,
 then link.

@@ -20,6 +20,21 @@ if ! command -v python3 >/dev/null 2>&1; then
   exit 1
 fi
 
+if [ -z "${SSL_CERT_FILE:-}" ] && [ -z "${REQUESTS_CA_BUNDLE:-}" ] && [ -z "${CURL_CA_BUNDLE:-}" ]; then
+  for ca_bundle in \
+    /etc/ssl/cert.pem \
+    /etc/ssl/certs/ca-certificates.crt \
+    /etc/pki/tls/certs/ca-bundle.crt \
+    /etc/ssl/ca-bundle.pem \
+    /etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem
+  do
+    if [ -f "$ca_bundle" ]; then
+      export SSL_CERT_FILE="$ca_bundle"
+      break
+    fi
+  done
+fi
+
 python3 <<'PY'
 import json
 import os
