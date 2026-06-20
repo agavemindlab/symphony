@@ -175,6 +175,7 @@ query IssueDetails($id: String!) {
         title
         url
         sourceType
+        createdAt
       }
     }
   }
@@ -207,9 +208,15 @@ query IssueTeamStates($id: String!) {
 
 ### Query active issue comments
 
-Returns the issue's Phase artifacts and their reply threads. Each top-level
-comment carries `resolvedAt` (non-null once resolved) and its `children`
-(replies, e.g. approval replies and rework-change summaries).
+Returns the issue's Phase artifacts and their reply threads. Linear may return
+reply comments in `comments.nodes`, so use `parent` to keep replies attached to
+the artifact they belong to. Each top-level comment carries `resolvedAt`
+(non-null once resolved) and its `children` (replies, e.g. approval replies and
+rework-change summaries).
+
+Before routing phase feedback, normalize both representations: inspect each
+artifact's `children` / thread replies, and exclude any `comments.nodes` item
+with `parent { id }` from standalone top-level comments.
 
 **Default contract**: this read returns *active* state only. Drop every node
 whose `resolvedAt` is non-null before using the result — resolved comments are
@@ -231,6 +238,9 @@ query IssueComments($issueId: String!) {
       nodes {
         id
         body
+        parent {
+          id
+        }
         resolvedAt
         user {
           name
@@ -376,7 +386,7 @@ mutation AttachURL($issueId: String!, $url: String!, $title: String) {
 }
 ```
 
-### Spawn a related issue (create + link)
+### Spawn a Linear issue (create + link)
 
 Used by the `symphony-issue` skill. Three reads to gather ids, then create,
 then link.
@@ -537,6 +547,46 @@ mutation FileUpload(
   }
 }
 ```
+
+### Persist and restore Symphony agent state
+
+Use Linear attachments for agent-only files that must survive session loss but
+must not enter the GitHub PR diff, such as `.symphony/workpad.md`,
+`.symphony/design.md`, and other paths listed in the workpad `cleanup`
+frontmatter.
+
+Persist:
+
+1. Create a tarball containing agent state:
+
+   ```sh
+   tar -czf /tmp/symphony-agent-state.tgz .symphony/
+   ```
+
+2. Upload it with `fileUpload` using filename
+   `symphony-agent-state-<issue-identifier>-<timestamp>.tgz`,
+   content type `application/gzip`, and `makePublic: false` when supported.
+3. Upload the file bytes to the returned `uploadUrl` with the exact headers
+   returned by `fileUpload`.
+4. Attach/link the returned `assetUrl` to the issue with title
+   `Symphony agent state (<branch>, <timestamp>)` using `attachmentLinkURL`.
+   Do not create or update a Linear comment for state pointers; the attachment
+   title and `createdAt` are the index.
+
+Restore:
+
+1. Query issue attachments and select the latest attachment whose title starts
+   with `Symphony agent state (`. Prefer the greatest `createdAt`.
+2. Download its `url` to a temporary file.
+3. Unpack it into the workspace root:
+
+   ```sh
+   tar -xzf /tmp/symphony-agent-state.tgz
+   grep -qxF '.symphony/' .git/info/exclude || printf '\n.symphony/\n' >> .git/info/exclude
+   ```
+
+Do not include secrets or credentials in state attachments. Keep the tarball
+limited to files listed in the workpad `cleanup` field.
 
 ## Usage rules
 

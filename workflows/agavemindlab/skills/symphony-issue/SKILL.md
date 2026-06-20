@@ -7,7 +7,7 @@ description:
   for human consent. Uses symphony-linear for the raw GraphQL.
 ---
 
-# Spawn a related issue
+# Spawn a Linear issue
 
 Use this when, while working an issue, you find work that belongs in its
 **own** Linear ticket. Two entry modes:
@@ -43,7 +43,7 @@ Also assign a type label: `Bug | Feature | Refactor | Performance | Migration | 
 
 1. **State = the team's intake state, resolved by `type` (never by name).**
    Pick `type: "triage"` if the team has one, else `type: "backlog"` (see
-   symphony-linear "Spawn a related issue"). A spawned issue lands outside
+   symphony-linear "Spawn a Linear issue"). A spawned issue lands outside
    `active_states`, so Symphony never auto-works it.
 2. **`assignee` = the current issue's `creator`.** Never assign a spawned
    issue to Symphony's own account.
@@ -51,9 +51,9 @@ Also assign a type label: `Bug | Feature | Refactor | Performance | Migration | 
 4. **Idempotency.** The workpad `## Spawned Issues` section records every item
    created or proposed on this branch; never recreate a recorded item.
 5. **Persist-before-proceed.** After a successful `issueCreate`, immediately
-   record the new id in the workpad, then `git add .symphony/workpad.md &&
-   git commit && git push origin <branch>` (stage only the workpad, per the
-   WORKFLOW Persistence section) before doing anything else.
+   record the new id in the workpad, then upload a fresh `Symphony agent state`
+   Linear issue attachment per the WORKFLOW Persistence section before doing
+   anything else. Do not stage the workpad into the PR branch.
 
 ## Tier A — autonomous create
 
@@ -78,7 +78,7 @@ Also assign a type label: `Bug | Feature | Refactor | Performance | Migration | 
 3. **Link** (`issueRelationCreate`): `related` for follow-up/related;
    current `blocks` new for downstream blocked.
 4. **Record + persist**: write the new issue's identifier into workpad `## Spawned Issues`
-   (status `已创建`), then commit + push the workpad (invariant 5).
+   (status `已创建`), then upload a fresh state attachment (invariant 5).
 5. **Surface**: return the new issue's identifier to the calling phase, which lists it in its
    artifact (Design 未覆盖范围 / Implementation 风险 / Deployment 后续事项).
 
@@ -153,9 +153,11 @@ record it and move on. Both paths coexist.
 
 ## Worked examples
 
-- **follow-up during Implementation** → `related` issue created in the intake
-  state, assignee = creator, listed in the `## Implementation` artifact;
-  workpad `已创建 ENG-123`.
+- **independent follow-up during Implementation** → `related` issue created in
+  the intake state, assignee = creator, listed in the `## Implementation`
+  artifact; workpad `已创建 ENG-123`.
+- **implementation ticket that depends on the current artifact** → `downstream
+  blocked`, linked as current `blocks` new.
 - **blocking dependency found** → proposal comment + blocker callout on the
   artifact + `Human Review`; nothing created until consent.
 - **consent reply in a proposal thread** → issue created, `已创建 ENG-123`

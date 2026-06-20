@@ -37,18 +37,49 @@ defmodule SymphonyElixir.Config.Schema do
     def dump(_value), do: :error
   end
 
+  defmodule StringOrStringList do
+    @moduledoc false
+    @behaviour Ecto.Type
+
+    @spec type() :: :any
+    def type, do: :any
+
+    @spec embed_as(term()) :: :self
+    def embed_as(_format), do: :self
+
+    @spec equal?(term(), term()) :: boolean()
+    def equal?(left, right), do: left == right
+
+    @spec cast(term()) :: {:ok, String.t() | [String.t()]} | :error
+    def cast(value) when is_binary(value), do: {:ok, value}
+
+    def cast(values) when is_list(values) do
+      if Enum.all?(values, &is_binary/1), do: {:ok, values}, else: :error
+    end
+
+    def cast(_value), do: :error
+
+    @spec load(term()) :: {:ok, String.t() | [String.t()]} | :error
+    def load(value), do: cast(value)
+
+    @spec dump(term()) :: {:ok, String.t() | [String.t()]} | :error
+    def dump(value), do: cast(value)
+  end
+
   defmodule Tracker do
     @moduledoc false
     use Ecto.Schema
     import Ecto.Changeset
 
     @primary_key false
+    @type t :: %__MODULE__{}
 
     embedded_schema do
       field(:kind, :string)
       field(:endpoint, :string, default: "https://api.linear.app/graphql")
       field(:api_key, :string)
       field(:project_slug, :string)
+      field(:project_slugs, StringOrStringList, default: [])
       field(:assignee, :string)
       field(:required_labels, {:array, :string}, default: [])
       field(:active_states, {:array, :string}, default: ["Todo", "In Progress"])
@@ -60,7 +91,17 @@ defmodule SymphonyElixir.Config.Schema do
       schema
       |> cast(
         attrs,
-        [:kind, :endpoint, :api_key, :project_slug, :assignee, :required_labels, :active_states, :terminal_states],
+        [
+          :kind,
+          :endpoint,
+          :api_key,
+          :project_slug,
+          :project_slugs,
+          :assignee,
+          :required_labels,
+          :active_states,
+          :terminal_states
+        ],
         empty_values: []
       )
       |> update_change(:required_labels, fn labels ->
@@ -216,13 +257,19 @@ defmodule SymphonyElixir.Config.Schema do
       field(:before_run, :string)
       field(:after_run, :string)
       field(:before_remove, :string)
+      field(:issue_running, :string)
+      field(:issue_stopped, :string)
       field(:timeout_ms, :integer, default: 60_000)
     end
 
     @spec changeset(%__MODULE__{}, map()) :: Ecto.Changeset.t()
     def changeset(schema, attrs) do
       schema
-      |> cast(attrs, [:after_create, :before_run, :after_run, :before_remove, :timeout_ms], empty_values: [])
+      |> cast(
+        attrs,
+        [:after_create, :before_run, :after_run, :before_remove, :issue_running, :issue_stopped, :timeout_ms],
+        empty_values: []
+      )
       |> validate_number(:timeout_ms, greater_than: 0)
     end
   end
@@ -357,6 +404,27 @@ defmodule SymphonyElixir.Config.Schema do
     end)
   end
 
+  @doc false
+  @spec configured_project_slugs(Tracker.t()) :: {:ok, [String.t()]} | {:error, term()}
+  def configured_project_slugs(%Tracker{} = tracker) do
+    project_slug = normalize_project_slug(tracker.project_slug)
+    project_slugs = normalize_project_slugs(tracker.project_slugs)
+
+    cond do
+      is_binary(project_slug) and project_slugs != [] ->
+        {:error, :conflicting_linear_project_slug_config}
+
+      Enum.any?(project_slugs, &(&1 == "")) ->
+        {:error, {:invalid_linear_project_slugs, :blank}}
+
+      is_binary(project_slug) ->
+        {:ok, [project_slug]}
+
+      true ->
+        {:ok, project_slugs}
+    end
+  end
+
   defp changeset(attrs) do
     %__MODULE__{}
     |> cast(attrs, [])
@@ -375,7 +443,8 @@ defmodule SymphonyElixir.Config.Schema do
     tracker = %{
       settings.tracker
       | api_key: resolve_secret_setting(settings.tracker.api_key, System.get_env("LINEAR_API_KEY")),
-        project_slug: resolve_secret_setting(settings.tracker.project_slug, nil),
+        project_slug: settings.tracker.project_slug |> resolve_secret_setting(nil) |> normalize_project_slug(),
+        project_slugs: resolve_project_slugs_setting(settings.tracker.project_slugs),
         assignee: resolve_secret_setting(settings.tracker.assignee, System.get_env("LINEAR_ASSIGNEE"))
     }
 
@@ -455,6 +524,45 @@ defmodule SymphonyElixir.Config.Schema do
         value
     end
   end
+
+  defp resolve_project_slugs_setting(project_slugs) when is_list(project_slugs) do
+    project_slugs
+    |> Enum.flat_map(&resolve_project_slugs_setting/1)
+    |> Enum.uniq()
+  end
+
+  defp resolve_project_slugs_setting(value) when is_binary(value) do
+    case resolve_env_value(value, nil) do
+      nil -> []
+      resolved when is_binary(resolved) -> split_project_slugs(resolved)
+    end
+  end
+
+  defp split_project_slugs(value) when is_binary(value) do
+    value
+    |> String.split(",")
+    |> Enum.map(&String.trim/1)
+    |> Enum.uniq()
+  end
+
+  defp normalize_project_slugs(project_slugs) when is_list(project_slugs) do
+    project_slugs
+    |> Enum.map(&normalize_project_slug/1)
+    |> Enum.map(&(&1 || ""))
+    |> Enum.uniq()
+  end
+
+  defp normalize_project_slugs(project_slug) when is_binary(project_slug), do: split_project_slugs(project_slug)
+  defp normalize_project_slugs(_project_slugs), do: []
+
+  defp normalize_project_slug(value) when is_binary(value) do
+    case String.trim(value) do
+      "" -> nil
+      slug -> slug
+    end
+  end
+
+  defp normalize_project_slug(_value), do: nil
 
   defp normalize_path_token(value) when is_binary(value) do
     case env_reference_name(value) do

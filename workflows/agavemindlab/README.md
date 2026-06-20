@@ -54,6 +54,11 @@ specific to the Agavemindlab workflow namespace.
 `project.env` may also define project-specific runtime settings consumed by that
 project's `setup.sh`.
 
+Existing project env files use `SYMPHONY_PROJECT_SLUG` with
+`tracker.project_slug` and do not need migration. A custom workflow that watches
+multiple Linear projects can use `tracker.project_slugs` with a YAML list or an
+env var such as `SYMPHONY_PROJECT_SLUGS="project-a,project-b"`.
+
 `project.env.defaults` currently defines `AUTOMATED_REVIEWER="gl-swe"`, the
 shared Agavemindlab automated reviewer used by the `symphony-pr` skill. Keep common
 workflow values there instead of duplicating them in every project env file.
@@ -76,6 +81,11 @@ repository version in place. Only newly installed skills are added to
 `.git/info/exclude`; the committed `.gitignore` is not modified.
 
 `hooks.before_remove` runs the project `teardown.sh` if it exists.
+
+When an issue comes from Linear, hooks can branch on
+`SYMPHONY_LINEAR_PROJECT_ID`, `SYMPHONY_LINEAR_PROJECT_SLUG`, and
+`SYMPHONY_LINEAR_PROJECT_NAME`. Use these values to select a repository,
+setup script, or teardown path for multi-project watchers.
 
 ## Shared Skills
 

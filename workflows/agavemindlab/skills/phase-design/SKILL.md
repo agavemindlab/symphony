@@ -18,7 +18,7 @@ Produce **two paired outputs** — they serve different readers (see
 1. **`.symphony/design.md`** — the detailed, English, **agent-facing** design
    doc that Implementation builds from (approach, alternatives, architecture,
    edge cases, failure modes, type-specific substance). Dev-cycle only — listed
-   in workpad `cleanup`, removed at merge.
+   in workpad `cleanup` and persisted through the Linear state attachment.
 2. The **`## Design` Linear artifact** — the **human-facing** Chinese review
    surface that summarizes the doc and gates approval, carrying:
    - Chosen approach direction and rationale
@@ -245,19 +245,15 @@ Design emits **two paired records with different readers**, kept in sync:
   breakdown is the Implementation phase's job).
 - **`## Design` Linear artifact** — for the **human**. The Chinese review
   surface: a faithful summary of the doc + the diagram + `验收方案` + risks +
-  `待确认`, ending with a **clickable GitHub link** to the doc on the feature
-  branch — `https://github.com/<owner>/<repo>/blob/<branch>/.symphony/design.md`,
-  with `<owner>/<repo>` from the `origin` remote and `<branch>` the issue's
-  `branchName`. Use a plain markdown link: Linear's rich GitHub embedding is for
-  PR / issue links, not file blobs. The link is branch-scoped and resolves only
-  during the dev cycle (the doc is removed at merge), which is expected.
+  `待确认`. Do not link to `.symphony/design.md` as a GitHub blob: it is
+  agent-only state and must not enter the PR branch.
   Approving this artifact approves the design it represents.
 
-Lifecycle: `.symphony/design.md` lives on the feature branch, is listed in the
-workpad `cleanup` field, and is **removed at merge** — it is a dev-cycle spec,
-not durable repo documentation. **Commit and push it to `origin` before posting
-the artifact**, so the GitHub link resolves when the human opens it. Keep the
-two in sync; the human only reviewed the artifact, so on any conflict the
+Lifecycle: `.symphony/design.md` lives in the workspace, is listed in the
+workpad `cleanup` field, and is persisted through the `Symphony agent state`
+Linear issue attachment — it is a dev-cycle spec, not durable repo
+documentation. Keep the two in sync; the human only reviewed the artifact, so
+on any conflict the
 **approved artifact and its thread govern** and the doc is reconciled toward
 them.
 
@@ -277,19 +273,18 @@ them.
 <diagram>
 ```
 
-### 验收方案（每个 S<N> 两道关；指定证据形式，交互须截屏/录屏）
-| 验收项 | Pre-PR 本地验收（方法 → 证据形式） | Post-Merge 最终验收（方法 → 证据形式） |
-|--------|------|------|
-| S1: <criterion> | <如何本地验 → 截屏 / 录屏 / 命令输出 / 日志片段> | <如何线上验 → 即时信号 / 查询+判据+窗口 / 人工判定> |
+### 验收方案（每个 S<N> 两道关；指定证据形式，长文本用列表）
+- **S1: <criterion>**
+  - Pre-PR 本地验收: <如何本地验> → <截屏 / 录屏 / 命令输出 / 日志片段>
+  - Post-Merge 最终验收: <如何线上验> → <即时信号 / 查询+判据+窗口 / 人工判定>
 
 ### 风险/注意（risks; omit if none）
 - <one sentence per item>
 
 ### 待确认（omit if none; the batched [NEEDS CLARIFICATION] block — see Batched clarification）
 
-> 📄 详细设计（agent 实现依据，分支内文档，merge 前清理）：[`.symphony/design.md`](https://github.com/<owner>/<repo>/blob/<branch>/.symphony/design.md)
-
 >>> 🛠️ 本次激活的 skills
+- Codex session id: `<session_id | n/a>`
 - `<skill>` — <≤6-word purpose>
 >>>
 ```
@@ -410,8 +405,9 @@ update workpad `current_phase: Requirements`, and open `phase-requirements`.
 The artifact is complete enough to post when all of these hold — this is
 about form, not correctness:
 
-- `.symphony/design.md` written (scaled to the change) and listed in workpad
-  `cleanup`; the `## Design` artifact faithfully summarizes it and links it.
+- `.symphony/design.md` written (scaled to the change), listed in workpad
+  `cleanup`, and persisted through the latest `Symphony agent state` Linear
+  attachment; the `## Design` artifact faithfully summarizes it.
 - `方案（approach）` is complete (no placeholder text).
 - Diagram included for non-trivial designs.
 - `验收方案` covers every `S<N>` with both gates (pre-PR 本地 + post-merge 最终)
@@ -438,7 +434,9 @@ Choose **`advance`** only when **all** of these hold:
   bet, and no non-obvious risk a reviewer would balk at.
 
 On `advance`, record `confidence: advance` in the workpad notes; Main Flow
-writes the `⏩` reply and opens `phase-implementation` in the same session.
+writes the `⏩` reply, sets `current_phase: Implementation`, persists state,
+and stops this agent run. The next Symphony dispatch opens
+`phase-implementation`.
 
 Otherwise choose **`stop`** — Main Flow moves the issue to `Human Review`.
 This is the right outcome for a rework, for a human already in the thread,
