@@ -560,6 +560,25 @@ defmodule SymphonyElixir.ExtensionsTest do
     assert live_view_js =~ "var LiveView = (() => {"
   end
 
+  test "embedded static assets declare byte content length" do
+    start_test_endpoint([])
+
+    for path <- [
+          "/dashboard.css",
+          "/favicon.png",
+          "/vendor/phoenix_html/phoenix_html.js",
+          "/vendor/phoenix/phoenix.js",
+          "/vendor/phoenix_live_view/phoenix_live_view.js"
+        ] do
+      {:ok, _content_type, body} = SymphonyElixirWeb.StaticAssets.fetch(path)
+
+      conn = get(build_conn(), path)
+
+      assert response(conn, 200) == body
+      assert Plug.Conn.get_resp_header(conn, "content-length") == [to_string(byte_size(body))]
+    end
+  end
+
   test "dashboard liveview renders and refreshes over pubsub" do
     orchestrator_name = Module.concat(__MODULE__, :DashboardOrchestrator)
     snapshot = static_snapshot()
