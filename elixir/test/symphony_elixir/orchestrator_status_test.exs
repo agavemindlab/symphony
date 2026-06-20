@@ -30,7 +30,8 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
       title: "Snapshot test",
       description: "Capture codex state",
       state: "In Progress",
-      url: "https://example.org/issues/MT-188"
+      url: "https://example.org/issues/MT-188",
+      project: %{id: "project-id", slug_id: "project-slug", name: "Project Name"}
     }
 
     orchestrator_name = Module.concat(__MODULE__, :SnapshotOrchestrator)
@@ -91,6 +92,7 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
     assert %{running: [snapshot_entry]} = snapshot
     assert snapshot_entry.issue_id == issue_id
     assert snapshot_entry.issue_url == "https://example.org/issues/MT-188"
+    assert snapshot_entry.project == %{id: "project-id", slug_id: "project-slug", name: "Project Name"}
     assert snapshot_entry.session_id == "thread-live-turn-live"
     assert snapshot_entry.turn_count == 1
     assert snapshot_entry.last_codex_timestamp == now
@@ -1462,6 +1464,7 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
              identifier: "MT-777",
              state: "running",
              session_id: "thread-1234567890",
+             project: %{id: "project-id", slug_id: "project-slug", name: "Project Name"},
              codex_app_server_pid: "4242",
              codex_total_tokens: 3_200,
              runtime_seconds: 75,
@@ -1489,6 +1492,8 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
     rendered = StatusDashboard.format_snapshot_content_for_test(snapshot_data, 0.0)
     plain = Regex.replace(~r/\e\[[0-9;]*m/, rendered, "")
 
+    assert plain =~ "PROJECT"
+    assert plain =~ "Project Name"
     assert plain =~ ~r/MT-777.*\r?\n│\s*\r?\n├─ Backoff queue/s
   end
 

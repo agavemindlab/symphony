@@ -1656,6 +1656,7 @@ defmodule SymphonyElixir.Orchestrator do
           issue_id: issue_id,
           identifier: metadata.identifier,
           issue_url: metadata.issue.url,
+          project: metadata.issue.project,
           state: metadata.issue.state,
           worker_host: Map.get(metadata, :worker_host),
           workspace_path: Map.get(metadata, :workspace_path),
