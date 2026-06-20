@@ -2,6 +2,9 @@
 tracker:
   kind: linear
   project_slug: $SYMPHONY_PROJECT_SLUG
+  project_slugs: $SYMPHONY_PROJECT_SLUGS
+  project_name: $SYMPHONY_PROJECT_NAME
+  project_names: $SYMPHONY_PROJECT_NAMES
   required_labels: ["symphony"]
   active_states:
     - Todo
@@ -22,9 +25,15 @@ hooks:
   after_create: |
     set -e
     : "${SYMPHONY_WORKFLOW_DIR:?SYMPHONY_WORKFLOW_DIR is not set}"
-    : "${SYMPHONY_REPO:?SYMPHONY_REPO is not set}"
+
+    if [ -f "$SYMPHONY_WORKFLOW_DIR/project-for-linear-project.sh" ]; then
+      . "$SYMPHONY_WORKFLOW_DIR/project-for-linear-project.sh"
+    fi
+
+    project_workflow_dir="${SYMPHONY_PROJECT_DIR:-$SYMPHONY_WORKFLOW_DIR}"
 
     fork_owner="${GITHUB_FORK_OWNER:-$(gh api user -q .login)}"
+    : "${SYMPHONY_REPO:?SYMPHONY_REPO is not set}"
     fork_repo="$fork_owner/$SYMPHONY_REPO"
     base_branch="${SYMPHONY_BASE_BRANCH:-main}"
 
@@ -36,13 +45,13 @@ hooks:
 
     git fetch upstream "$base_branch" --prune
 
-    if [ -f "$SYMPHONY_WORKFLOW_DIR/setup.sh" ]; then
-      "$SYMPHONY_WORKFLOW_DIR/setup.sh"
+    if [ -f "$project_workflow_dir/setup.sh" ]; then
+      "$project_workflow_dir/setup.sh"
     fi
 
     mkdir -p .agents/skills
-    if [ -d "$SYMPHONY_WORKFLOW_DIR/skills" ]; then
-      for skill in "$SYMPHONY_WORKFLOW_DIR"/skills/*; do
+    if [ -d "$project_workflow_dir/skills" ]; then
+      for skill in "$project_workflow_dir"/skills/*; do
         [ -d "$skill" ] || continue
         name="${skill##*/}"
         target=".agents/skills/$name"
@@ -59,8 +68,14 @@ hooks:
   before_remove: |
     set -e
     : "${SYMPHONY_WORKFLOW_DIR:?SYMPHONY_WORKFLOW_DIR is not set}"
-    if [ -f "$SYMPHONY_WORKFLOW_DIR/teardown.sh" ]; then
-      "$SYMPHONY_WORKFLOW_DIR/teardown.sh"
+    if [ -f "$SYMPHONY_WORKFLOW_DIR/project-for-linear-project.sh" ]; then
+      . "$SYMPHONY_WORKFLOW_DIR/project-for-linear-project.sh"
+    fi
+
+    project_workflow_dir="${SYMPHONY_PROJECT_DIR:-$SYMPHONY_WORKFLOW_DIR}"
+
+    if [ -f "$project_workflow_dir/teardown.sh" ]; then
+      "$project_workflow_dir/teardown.sh"
     fi
   issue_running: |
     set -e

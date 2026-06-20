@@ -25,6 +25,53 @@ defmodule SymphonyElixir.SymphonyRunTest do
     assert capture["AUTOMATED_REVIEWER"] == "project-reviewer"
   end
 
+  test "allows aggregate projects to use project slugs without a singular repo" do
+    capture =
+      run_launcher!("grandline",
+        project_env: """
+        SYMPHONY_PROJECT_SLUGS="project-a,project-b"
+        SYMPHONY_PROFILE="grandline"
+        """
+      )
+
+    assert capture["SYMPHONY_PROJECT_SLUGS"] == "project-a,project-b"
+    assert capture["SYMPHONY_REPO"] == ""
+    assert capture["SYMPHONY_BASE_BRANCH"] == ""
+  end
+
+  test "allows aggregate projects to use project names without a singular repo" do
+    capture = run_launcher!("grandline")
+
+    assert capture["SYMPHONY_PROJECT_NAMES"] == "grotto,gl-infra,gl-skills,symphony,voxvault"
+    assert capture["SYMPHONY_REPO"] == ""
+    assert capture["SYMPHONY_BASE_BRANCH"] == ""
+  end
+
+  test "rebuilds the escript before launching" do
+    capture = run_launcher!("grandline", project_env: "SYMPHONY_PROJECT_SLUGS=\"project-a\"\n")
+
+    assert capture["CALLS"] == "exec -- mix escript.build|exec -- ./bin/symphony --i-understand-that-this-will-be-running-without-the-usual-guardrails #{capture["WORKFLOW"]}"
+  end
+
+  test "Agavemindlab Linear project slugs use Linear slugId values" do
+    expected_slugs = %{
+      "gl-infra" => "02773795419d",
+      "gl-skills" => "1ecc8649e9da",
+      "grotto" => "bb8f9b7a6364",
+      "symphony" => "977d7a7b6c0e",
+      "voxvault" => "25c113bb4717"
+    }
+
+    actual_slugs =
+      Map.new(expected_slugs, fn {project, _expected_slug} ->
+        project_env = File.read!(Path.join(@repo_root, "workflows/#{project}/project.env"))
+        [slug] = Regex.run(~r/^SYMPHONY_PROJECT_SLUG="([^"]+)"/m, project_env, capture: :all_but_first)
+        {project, slug}
+      end)
+
+    assert actual_slugs == expected_slugs
+  end
+
   defp run_launcher!(project, opts \\ []) do
     run_id = System.unique_integer([:positive])
     tmp_root = Path.join(System.tmp_dir!(), "symphony-run-test-#{run_id}")
@@ -32,6 +79,7 @@ defmodule SymphonyElixir.SymphonyRunTest do
     fake_bin = Path.join(tmp_root, "bin")
     fake_repo_root = Path.join(tmp_root, "repo")
     capture_path = Path.join(tmp_root, "capture.env")
+    calls_path = Path.join(tmp_root, "calls.log")
 
     File.mkdir_p!(Path.join(home, ".config/symphony"))
     File.mkdir_p!(fake_bin)
@@ -45,9 +93,15 @@ defmodule SymphonyElixir.SymphonyRunTest do
     )
 
     project_env =
-      Path.join(@repo_root, "workflows/#{project}/project.env")
-      |> File.read!()
-      |> Kernel.<>(Keyword.get(opts, :project_env_extra, ""))
+      case Keyword.fetch(opts, :project_env) do
+        {:ok, contents} ->
+          contents
+
+        :error ->
+          Path.join(@repo_root, "workflows/#{project}/project.env")
+          |> File.read!()
+          |> Kernel.<>(Keyword.get(opts, :project_env_extra, ""))
+      end
 
     File.write!(Path.join(fake_repo_root, "workflows/#{project}/project.env"), project_env)
     File.write!(Path.join(fake_repo_root, "workflows/#{project}/WORKFLOW.md"), "# Test workflow\n")
@@ -65,13 +119,14 @@ defmodule SymphonyElixir.SymphonyRunTest do
       {"PATH", fake_bin <> ":" <> System.get_env("PATH", "")},
       {"SYMPHONY_REPO_ROOT", fake_repo_root},
       {"SYMPHONY_RUN_CAPTURE", capture_path},
+      {"SYMPHONY_RUN_CALLS", calls_path},
       {"SYMPHONY_PROFILE", nil},
       {"AUTOMATED_REVIEWER", nil}
     ]
 
     try do
       assert {output, 0} = System.cmd(@launcher, [project], env: env, stderr_to_stdout: true)
-      assert output == ""
+      assert output =~ "symphony-run: starting project=#{project} profile=grandline"
 
       capture_path
       |> File.read!()
@@ -84,11 +139,28 @@ defmodule SymphonyElixir.SymphonyRunTest do
   defp fake_mise_script do
     """
     #!/bin/sh
+    printf '%s\\n' "$*" >> "$SYMPHONY_RUN_CALLS"
+
+    if [ "$*" = "exec -- mix escript.build" ]; then
+      exit 0
+    fi
+
+    workflow=""
+    for arg in "$@"; do
+      workflow="$arg"
+    done
+
     {
       printf 'AUTOMATED_REVIEWER=%s\\n' "${AUTOMATED_REVIEWER-}"
       printf 'SYMPHONY_PROFILE=%s\\n' "${SYMPHONY_PROFILE-}"
+      printf 'SYMPHONY_PROJECT_SLUGS=%s\\n' "${SYMPHONY_PROJECT_SLUGS-}"
+      printf 'SYMPHONY_PROJECT_NAMES=%s\\n' "${SYMPHONY_PROJECT_NAMES-}"
+      printf 'SYMPHONY_REPO=%s\\n' "${SYMPHONY_REPO-}"
+      printf 'SYMPHONY_BASE_BRANCH=%s\\n' "${SYMPHONY_BASE_BRANCH-}"
       printf 'PWD=%s\\n' "$PWD"
       printf 'ARGS=%s\\n' "$*"
+      printf 'WORKFLOW=%s\\n' "$workflow"
+      printf 'CALLS=%s\\n' "$(paste -sd '|' "$SYMPHONY_RUN_CALLS")"
     } > "$SYMPHONY_RUN_CAPTURE"
     """
   end

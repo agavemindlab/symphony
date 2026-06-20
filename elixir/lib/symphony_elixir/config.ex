@@ -104,6 +104,12 @@ defmodule SymphonyElixir.Config do
   @spec configured_project_slugs(Schema.Tracker.t()) :: {:ok, [String.t()]} | {:error, term()}
   def configured_project_slugs(%Schema.Tracker{} = tracker), do: Schema.configured_project_slugs(tracker)
 
+  @spec configured_project_names() :: {:ok, [String.t()]} | {:error, term()}
+  def configured_project_names, do: Schema.configured_project_names(settings!().tracker)
+
+  @spec configured_project_names(Schema.Tracker.t()) :: {:ok, [String.t()]} | {:error, term()}
+  def configured_project_names(%Schema.Tracker{} = tracker), do: Schema.configured_project_names(tracker)
+
   @spec codex_runtime_settings(Path.t() | nil, keyword()) ::
           {:ok, codex_runtime_settings()} | {:error, term()}
   def codex_runtime_settings(workspace \\ nil, opts \\ []) do
@@ -141,10 +147,13 @@ defmodule SymphonyElixir.Config do
 
   defp validate_linear_tracker_semantics(tracker) do
     if is_binary(tracker.api_key) do
-      case configured_project_slugs(tracker) do
-        {:ok, []} -> {:error, :missing_linear_project_slug}
-        {:ok, _project_slugs} -> :ok
-        {:error, reason} -> {:error, reason}
+      with {:ok, project_slugs} <- configured_project_slugs(tracker),
+           {:ok, project_names} <- configured_project_names(tracker) do
+        cond do
+          project_slugs != [] and project_names != [] -> {:error, :conflicting_linear_project_scope_config}
+          project_slugs == [] and project_names == [] -> {:error, :missing_linear_project_scope}
+          true -> :ok
+        end
       end
     else
       {:error, :missing_linear_api_token}
