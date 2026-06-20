@@ -1230,8 +1230,20 @@ defmodule SymphonyElixir.CoreTest do
     )
 
     Application.put_env(:symphony_elixir, :memory_tracker_issues, [
-      %Issue{id: "active-1", identifier: "MT-ACTIVE", title: "Active", state: "In Progress"},
-      %Issue{id: "done-1", identifier: "MT-DONE", title: "Done", state: "Done"},
+      %Issue{
+        id: "active-1",
+        identifier: "MT-ACTIVE",
+        title: "Active",
+        state: "In Progress",
+        labels: ["symphony:running:default"]
+      },
+      %Issue{
+        id: "done-1",
+        identifier: "MT-DONE",
+        title: "Done",
+        state: "Done",
+        labels: ["symphony:running:default"]
+      },
       %Issue{id: "other-1", identifier: "MT-OTHER", title: "Other", state: "Backlog"}
     ])
 
@@ -1257,16 +1269,39 @@ defmodule SymphonyElixir.CoreTest do
     Application.put_env(:symphony_elixir, :startup_cleanup_progress, true)
     on_exit(fn -> restore_app_env(:startup_cleanup_progress, previous_progress) end)
 
+    workspace_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-startup-cleanup-progress-#{System.unique_integer([:positive])}"
+      )
+
+    on_exit(fn -> File.rm_rf(workspace_root) end)
+    File.mkdir_p!(Path.join(workspace_root, "MT-DONE"))
+
     write_workflow_file!(Workflow.workflow_file_path(),
       tracker_kind: "memory",
+      workspace_root: workspace_root,
       tracker_active_states: ["Todo"],
       tracker_terminal_states: ["Done"],
       hook_issue_stopped: "true"
     )
 
     Application.put_env(:symphony_elixir, :memory_tracker_issues, [
-      %Issue{id: "done-1", identifier: "MT-DONE", title: "Done", state: "Done"},
-      %Issue{id: "todo-1", identifier: "MT-TODO", title: "Todo", state: "Todo"}
+      %Issue{
+        id: "done-1",
+        identifier: "MT-DONE",
+        title: "Done",
+        state: "Done",
+        labels: ["symphony:running:default"]
+      },
+      %Issue{
+        id: "todo-1",
+        identifier: "MT-TODO",
+        title: "Todo",
+        state: "Todo",
+        labels: ["symphony:running:default"]
+      },
+      %Issue{id: "old-1", identifier: "MT-OLD", title: "Old", state: "Done"}
     ])
 
     orchestrator_name = Module.concat(__MODULE__, :StartupCleanupProgressOrchestrator)

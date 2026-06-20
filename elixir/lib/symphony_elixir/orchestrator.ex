@@ -1127,10 +1127,12 @@ defmodule SymphonyElixir.Orchestrator do
 
     case Tracker.fetch_issues_by_states(states) do
       {:ok, issues} ->
-        issues
+        cleanup_issues = Enum.filter(issues, &startup_marker_cleanup_issue?/1)
+
+        cleanup_issues
         |> Enum.with_index(1)
         |> Enum.each(fn {issue, index} ->
-          print_startup_cleanup_progress("issue markers", {:issue, issue, index, length(issues)})
+          print_startup_cleanup_progress("issue markers", {:issue, issue, index, length(cleanup_issues)})
           cleanup_startup_issue_marker(issue)
         end)
 
@@ -1147,6 +1149,45 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   defp cleanup_startup_issue_marker(_issue), do: :ok
+
+  defp startup_marker_cleanup_issue?(%Issue{} = issue) do
+    issue_has_label?(issue, startup_running_marker_label())
+  end
+
+  defp startup_marker_cleanup_issue?(_issue), do: false
+
+  defp startup_running_marker_label do
+    case System.get_env("SYMPHONY_RUNNING_LABEL") do
+      label when is_binary(label) and label != "" ->
+        label
+
+      _ ->
+        agent_id =
+          System.get_env("SYMPHONY_AGENT_ID") ||
+            System.get_env("SYMPHONY_PROFILE") ||
+            "default"
+
+        "symphony:running:#{agent_id}"
+    end
+  end
+
+  defp issue_has_label?(%Issue{} = issue, label) when is_binary(label) do
+    normalized_label = normalize_issue_label(label)
+
+    issue
+    |> Issue.label_names()
+    |> Enum.any?(&(normalize_issue_label(&1) == normalized_label))
+  end
+
+  defp issue_has_label?(_issue, _label), do: false
+
+  defp normalize_issue_label(label) when is_binary(label) do
+    label
+    |> String.trim()
+    |> String.downcase()
+  end
+
+  defp normalize_issue_label(_label), do: ""
 
   defp revalidate_issue_for_dispatch(%Issue{id: issue_id}, issue_fetcher, terminal_states)
        when is_binary(issue_id) and is_function(issue_fetcher, 1) do
@@ -1303,11 +1344,13 @@ defmodule SymphonyElixir.Orchestrator do
 
     case Tracker.fetch_issues_by_states(Config.settings!().tracker.terminal_states) do
       {:ok, issues} ->
-        issues
+        cleanup_issues = Enum.filter(issues, &startup_terminal_workspace_cleanup_issue?/1)
+
+        cleanup_issues
         |> Enum.with_index(1)
         |> Enum.each(fn
           {%Issue{} = issue, index} ->
-            print_startup_cleanup_progress("terminal workspaces", {:issue, issue, index, length(issues)})
+            print_startup_cleanup_progress("terminal workspaces", {:issue, issue, index, length(cleanup_issues)})
             cleanup_issue_workspace(issue)
 
           {_issue, _index} ->
@@ -1319,6 +1362,12 @@ defmodule SymphonyElixir.Orchestrator do
         Logger.warning("Skipping startup terminal workspace cleanup; failed to fetch terminal issues: #{inspect(reason)}")
     end
   end
+
+  defp startup_terminal_workspace_cleanup_issue?(%Issue{} = issue) do
+    Workspace.issue_workspace_exists?(issue)
+  end
+
+  defp startup_terminal_workspace_cleanup_issue?(_issue), do: false
 
   defp print_startup_cleanup_progress(stage, :start) when is_binary(stage) do
     if startup_cleanup_progress_enabled?() do
