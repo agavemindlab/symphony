@@ -171,6 +171,56 @@ defmodule SymphonyElixir.Workspace do
     :ok
   end
 
+  @spec issue_workspace_exists?(term()) :: boolean()
+  def issue_workspace_exists?(issue_or_identifier) do
+    case removable_issue_context(issue_or_identifier) do
+      %{issue_identifier: identifier} when is_binary(identifier) ->
+        issue_workspace_exists_for_configured_workers?(safe_identifier(identifier))
+
+      _ ->
+        false
+    end
+  end
+
+  defp issue_workspace_exists_for_configured_workers?(safe_id) when is_binary(safe_id) do
+    case Config.settings!().worker.ssh_hosts do
+      [] ->
+        issue_workspace_exists_for_worker?(safe_id, nil)
+
+      worker_hosts ->
+        Enum.any?(worker_hosts, &issue_workspace_exists_for_worker?(safe_id, &1))
+    end
+  end
+
+  defp issue_workspace_exists_for_worker?(safe_id, nil) when is_binary(safe_id) do
+    with {:ok, workspace} <- workspace_path_for_issue(safe_id, nil),
+         :ok <- validate_workspace_path(workspace, nil) do
+      File.exists?(workspace)
+    else
+      _ -> false
+    end
+  end
+
+  defp issue_workspace_exists_for_worker?(safe_id, worker_host)
+       when is_binary(safe_id) and is_binary(worker_host) do
+    with {:ok, workspace} <- workspace_path_for_issue(safe_id, worker_host),
+         :ok <- validate_workspace_path(workspace, worker_host) do
+      script =
+        [
+          remote_shell_assign("workspace", workspace),
+          "[ -e \"$workspace\" ]"
+        ]
+        |> Enum.join("\n")
+
+      case run_remote_command(worker_host, script, Config.settings!().hooks.timeout_ms) do
+        {:ok, {_output, 0}} -> true
+        _ -> false
+      end
+    else
+      _ -> false
+    end
+  end
+
   defp remove_issue_workspaces_for_configured_workers(issue_or_identifier, safe_id, issue_context) do
     case Config.settings!().worker.ssh_hosts do
       [] ->

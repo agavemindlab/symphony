@@ -80,6 +80,8 @@ defmodule SymphonyElixir.Config.Schema do
       field(:api_key, :string)
       field(:project_slug, :string)
       field(:project_slugs, StringOrStringList, default: [])
+      field(:project_name, :string)
+      field(:project_names, StringOrStringList, default: [])
       field(:assignee, :string)
       field(:required_labels, {:array, :string}, default: [])
       field(:active_states, {:array, :string}, default: ["Todo", "In Progress"])
@@ -97,6 +99,8 @@ defmodule SymphonyElixir.Config.Schema do
           :api_key,
           :project_slug,
           :project_slugs,
+          :project_name,
+          :project_names,
           :assignee,
           :required_labels,
           :active_states,
@@ -425,6 +429,26 @@ defmodule SymphonyElixir.Config.Schema do
     end
   end
 
+  @spec configured_project_names(Tracker.t()) :: {:ok, [String.t()]} | {:error, term()}
+  def configured_project_names(%Tracker{} = tracker) do
+    project_name = normalize_project_name(tracker.project_name)
+    project_names = normalize_project_names(tracker.project_names)
+
+    cond do
+      is_binary(project_name) and project_names != [] ->
+        {:error, :conflicting_linear_project_name_config}
+
+      Enum.any?(project_names, &(&1 == "")) ->
+        {:error, {:invalid_linear_project_names, :blank}}
+
+      is_binary(project_name) ->
+        {:ok, [project_name]}
+
+      true ->
+        {:ok, project_names}
+    end
+  end
+
   defp changeset(attrs) do
     %__MODULE__{}
     |> cast(attrs, [])
@@ -445,6 +469,8 @@ defmodule SymphonyElixir.Config.Schema do
       | api_key: resolve_secret_setting(settings.tracker.api_key, System.get_env("LINEAR_API_KEY")),
         project_slug: settings.tracker.project_slug |> resolve_secret_setting(nil) |> normalize_project_slug(),
         project_slugs: resolve_project_slugs_setting(settings.tracker.project_slugs),
+        project_name: settings.tracker.project_name |> resolve_secret_setting(nil) |> normalize_project_name(),
+        project_names: resolve_project_names_setting(settings.tracker.project_names),
         assignee: resolve_secret_setting(settings.tracker.assignee, System.get_env("LINEAR_ASSIGNEE"))
     }
 
@@ -538,7 +564,27 @@ defmodule SymphonyElixir.Config.Schema do
     end
   end
 
+  defp resolve_project_names_setting(project_names) when is_list(project_names) do
+    project_names
+    |> Enum.flat_map(&resolve_project_names_setting/1)
+    |> Enum.uniq()
+  end
+
+  defp resolve_project_names_setting(value) when is_binary(value) do
+    case resolve_env_value(value, nil) do
+      nil -> []
+      resolved when is_binary(resolved) -> split_project_names(resolved)
+    end
+  end
+
   defp split_project_slugs(value) when is_binary(value) do
+    value
+    |> String.split(",")
+    |> Enum.map(&String.trim/1)
+    |> Enum.uniq()
+  end
+
+  defp split_project_names(value) when is_binary(value) do
     value
     |> String.split(",")
     |> Enum.map(&String.trim/1)
@@ -563,6 +609,25 @@ defmodule SymphonyElixir.Config.Schema do
   end
 
   defp normalize_project_slug(_value), do: nil
+
+  defp normalize_project_names(project_names) when is_list(project_names) do
+    project_names
+    |> Enum.map(&normalize_project_name/1)
+    |> Enum.map(&(&1 || ""))
+    |> Enum.uniq()
+  end
+
+  defp normalize_project_names(project_name) when is_binary(project_name), do: split_project_names(project_name)
+  defp normalize_project_names(_project_names), do: []
+
+  defp normalize_project_name(value) when is_binary(value) do
+    case String.trim(value) do
+      "" -> nil
+      name -> name
+    end
+  end
+
+  defp normalize_project_name(_value), do: nil
 
   defp normalize_path_token(value) when is_binary(value) do
     case env_reference_name(value) do

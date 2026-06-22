@@ -546,6 +546,44 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert Orchestrator.should_dispatch_issue_for_test(next_issue, %{state | max_concurrent_agents: 2})
   end
 
+  test "multiple configured projects expand effective dispatch slots" do
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_api_token: "token",
+      tracker_project_slug: nil,
+      tracker_project_slugs: ["project-a", "project-b"],
+      max_concurrent_agents: 1
+    )
+
+    running_issue = %Issue{
+      id: "issue-project-a",
+      identifier: "MT-A",
+      title: "Project A issue",
+      state: "Todo",
+      project: %{id: "project-a-id", slug_id: "project-a", name: "Project A"}
+    }
+
+    next_issue = %Issue{
+      id: "issue-project-b",
+      identifier: "MT-B",
+      title: "Project B issue",
+      state: "Todo",
+      project: %{id: "project-b-id", slug_id: "project-b", name: "Project B"}
+    }
+
+    state = %Orchestrator.State{
+      max_concurrent_agents: 1,
+      running: %{
+        running_issue.id => %{issue: running_issue, worker_host: nil}
+      },
+      claimed: MapSet.new([running_issue.id]),
+      blocked: %{},
+      retry_attempts: %{},
+      codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0}
+    }
+
+    assert Orchestrator.should_dispatch_issue_for_test(next_issue, state)
+  end
+
   test "todo issue with non-terminal blocker is not dispatch-eligible" do
     state = %Orchestrator.State{
       max_concurrent_agents: 3,
@@ -1149,6 +1187,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     api_key_env_var = "SYMP_LINEAR_API_KEY_#{System.unique_integer([:positive])}"
     project_slug_env_var = "SYMP_LINEAR_PROJECT_SLUG_#{System.unique_integer([:positive])}"
     project_slugs_env_var = "SYMP_LINEAR_PROJECT_SLUGS_#{System.unique_integer([:positive])}"
+    project_names_env_var = "SYMP_LINEAR_PROJECT_NAMES_#{System.unique_integer([:positive])}"
     workspace_root = Path.join("/tmp", "symphony-workspace-root")
     api_key = "resolved-secret"
     project_slug = "resolved-project-slug"
@@ -1158,17 +1197,20 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     previous_api_key = System.get_env(api_key_env_var)
     previous_project_slug = System.get_env(project_slug_env_var)
     previous_project_slugs = System.get_env(project_slugs_env_var)
+    previous_project_names = System.get_env(project_names_env_var)
 
     System.put_env(workspace_env_var, workspace_root)
     System.put_env(api_key_env_var, api_key)
     System.put_env(project_slug_env_var, project_slug)
     System.put_env(project_slugs_env_var, " project-a,project-b,project-a ")
+    System.put_env(project_names_env_var, " grotto,symphony,grotto ")
 
     on_exit(fn ->
       restore_env(workspace_env_var, previous_workspace_root)
       restore_env(api_key_env_var, previous_api_key)
       restore_env(project_slug_env_var, previous_project_slug)
       restore_env(project_slugs_env_var, previous_project_slugs)
+      restore_env(project_names_env_var, previous_project_names)
     end)
 
     write_workflow_file!(Workflow.workflow_file_path(),
@@ -1194,6 +1236,17 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     config = Config.settings!()
     assert config.tracker.project_slug == nil
     assert config.tracker.project_slugs == ["project-a", "project-b"]
+    assert :ok = Config.validate!()
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_api_token: "$#{api_key_env_var}",
+      tracker_project_slug: nil,
+      tracker_project_names: "$#{project_names_env_var}",
+      workspace_root: "$#{workspace_env_var}"
+    )
+
+    config = Config.settings!()
+    assert config.tracker.project_names == ["grotto", "symphony"]
     assert :ok = Config.validate!()
   end
 
@@ -1236,7 +1289,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     )
 
     assert Config.settings!().tracker.project_slugs == []
-    assert {:error, :missing_linear_project_slug} = Config.validate!()
+    assert {:error, :missing_linear_project_scope} = Config.validate!()
 
     assert Schema.configured_project_slugs(%Schema.Tracker{project_slugs: "project-c,project-d"}) ==
              {:ok, ["project-c", "project-d"]}

@@ -56,7 +56,7 @@ defmodule SymphonyElixir.CoreTest do
       tracker_project_slug: nil
     )
 
-    assert {:error, :missing_linear_project_slug} = Config.validate!()
+    assert {:error, :missing_linear_project_scope} = Config.validate!()
 
     write_workflow_file!(Workflow.workflow_file_path(),
       tracker_api_token: "token",
@@ -67,6 +67,15 @@ defmodule SymphonyElixir.CoreTest do
     assert :ok = Config.validate!()
     assert Config.settings!().tracker.project_slug == nil
     assert Config.settings!().tracker.project_slugs == ["project-a", "project-b"]
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_api_token: "token",
+      tracker_project_slug: nil,
+      tracker_project_names: [" Project A ", "Project B", "Project A"]
+    )
+
+    assert :ok = Config.validate!()
+    assert Config.settings!().tracker.project_names == ["Project A", "Project B"]
 
     write_workflow_file!(Workflow.workflow_file_path(),
       tracker_api_token: "token",
@@ -136,15 +145,19 @@ defmodule SymphonyElixir.CoreTest do
     assert is_map(tracker)
     assert Map.get(tracker, "kind") == "linear"
     assert Map.get(tracker, "project_slug") == "$SYMPHONY_PROJECT_SLUG"
+    assert Map.get(tracker, "project_slugs") == "$SYMPHONY_PROJECT_SLUGS"
+    assert Map.get(tracker, "project_name") == "$SYMPHONY_PROJECT_NAME"
+    assert Map.get(tracker, "project_names") == "$SYMPHONY_PROJECT_NAMES"
     assert is_list(Map.get(tracker, "active_states"))
     assert is_list(Map.get(tracker, "terminal_states"))
 
     hooks = Map.get(config, "hooks", %{})
     assert is_map(hooks)
-    assert Map.get(hooks, "after_create") =~ "\"$SYMPHONY_WORKFLOW_DIR/setup.sh\""
-    assert Map.get(hooks, "after_create") =~ "\"$SYMPHONY_WORKFLOW_DIR/skills\""
+    assert Map.get(hooks, "after_create") =~ "project_workflow_dir="
+    assert Map.get(hooks, "after_create") =~ "\"$project_workflow_dir/setup.sh\""
+    assert Map.get(hooks, "after_create") =~ "\"$project_workflow_dir/skills\""
     assert Map.get(hooks, "after_create") =~ ".git/info/exclude"
-    assert Map.get(hooks, "before_remove") =~ "\"$SYMPHONY_WORKFLOW_DIR/teardown.sh\""
+    assert Map.get(hooks, "before_remove") =~ "\"$project_workflow_dir/teardown.sh\""
 
     assert String.trim(prompt) != ""
     assert is_binary(Config.workflow_prompt())
@@ -202,6 +215,24 @@ defmodule SymphonyElixir.CoreTest do
     refute skill =~ "Post (or update) the `## Requirements` artifact"
     refute skill =~ "Post or update the artifact comment."
     refute skill =~ "Post or update the `## Requirements` artifact"
+  end
+
+  test "aggregate dispatch ordering interleaves projects" do
+    issues = [
+      dispatch_issue("grotto-1", "DEV-1001", "grotto", ~U[2026-01-01 00:00:00Z]),
+      dispatch_issue("grotto-2", "DEV-1002", "grotto", ~U[2026-01-02 00:00:00Z]),
+      dispatch_issue("symphony-1", "DEV-2001", "symphony", ~U[2026-01-03 00:00:00Z]),
+      dispatch_issue("voxvault-1", "DEV-3001", "voxvault", ~U[2026-01-04 00:00:00Z])
+    ]
+
+    assert issues
+           |> Orchestrator.sort_issues_for_dispatch_for_test()
+           |> Enum.map(& &1.identifier) == [
+             "DEV-1001",
+             "DEV-2001",
+             "DEV-3001",
+             "DEV-1002"
+           ]
   end
 
   test "shared phase prompts explain rework handoff gates" do
@@ -1200,8 +1231,20 @@ defmodule SymphonyElixir.CoreTest do
     )
 
     Application.put_env(:symphony_elixir, :memory_tracker_issues, [
-      %Issue{id: "active-1", identifier: "MT-ACTIVE", title: "Active", state: "In Progress"},
-      %Issue{id: "done-1", identifier: "MT-DONE", title: "Done", state: "Done"},
+      %Issue{
+        id: "active-1",
+        identifier: "MT-ACTIVE",
+        title: "Active",
+        state: "In Progress",
+        labels: ["symphony:running:default"]
+      },
+      %Issue{
+        id: "done-1",
+        identifier: "MT-DONE",
+        title: "Done",
+        state: "Done",
+        labels: ["symphony:running:default"]
+      },
       %Issue{id: "other-1", identifier: "MT-OTHER", title: "Other", state: "Backlog"}
     ])
 
@@ -1220,6 +1263,64 @@ defmodule SymphonyElixir.CoreTest do
              "startup_recovery|MT-ACTIVE",
              "startup_recovery|MT-DONE"
            ]
+  end
+
+  test "orchestrator startup cleanup prints progress" do
+    previous_progress = Application.get_env(:symphony_elixir, :startup_cleanup_progress)
+    Application.put_env(:symphony_elixir, :startup_cleanup_progress, true)
+    on_exit(fn -> restore_app_env(:startup_cleanup_progress, previous_progress) end)
+
+    workspace_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-startup-cleanup-progress-#{System.unique_integer([:positive])}"
+      )
+
+    on_exit(fn -> File.rm_rf(workspace_root) end)
+    File.mkdir_p!(Path.join(workspace_root, "MT-DONE"))
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_kind: "memory",
+      workspace_root: workspace_root,
+      tracker_active_states: ["Todo"],
+      tracker_terminal_states: ["Done"],
+      hook_issue_stopped: "true"
+    )
+
+    Application.put_env(:symphony_elixir, :memory_tracker_issues, [
+      %Issue{
+        id: "done-1",
+        identifier: "MT-DONE",
+        title: "Done",
+        state: "Done",
+        labels: ["symphony:running:default"]
+      },
+      %Issue{
+        id: "todo-1",
+        identifier: "MT-TODO",
+        title: "Todo",
+        state: "Todo",
+        labels: ["symphony:running:default"]
+      },
+      %Issue{id: "old-1", identifier: "MT-OLD", title: "Old", state: "Done"}
+    ])
+
+    orchestrator_name = Module.concat(__MODULE__, :StartupCleanupProgressOrchestrator)
+
+    output =
+      ExUnit.CaptureIO.capture_io(:stderr, fn ->
+        {:ok, pid} = Orchestrator.start_link(name: orchestrator_name)
+
+        if Process.alive?(pid) do
+          Process.exit(pid, :normal)
+        end
+      end)
+
+    assert output =~ "startup cleanup: terminal workspaces"
+    assert output =~ "startup cleanup: terminal workspaces 1/1 MT-DONE"
+    assert output =~ "startup cleanup: issue markers 1/2 MT-DONE"
+    assert output =~ "startup cleanup: issue markers 2/2 MT-TODO"
+    assert output =~ "startup cleanup: done"
   end
 
   test "normal worker exit schedules active-state continuation retry" do
@@ -1537,6 +1638,59 @@ defmodule SymphonyElixir.CoreTest do
     assert query =~ "project {"
     assert query =~ "slugId"
     assert_receive {:linear_poll, ^query, %{projectSlug: "project-b", stateNames: ["Todo"]}}
+  end
+
+  test "linear client can poll configured project names" do
+    raw_issue = fn issue_id, identifier, project_name ->
+      %{
+        "id" => issue_id,
+        "identifier" => identifier,
+        "title" => "Issue #{identifier}",
+        "description" => "Project #{project_name}",
+        "state" => %{"name" => "Todo"},
+        "project" => %{
+          "id" => "project-#{project_name}",
+          "slugId" => String.downcase(project_name),
+          "name" => project_name
+        },
+        "labels" => %{"nodes" => []},
+        "inverseRelations" => %{"nodes" => []},
+        "createdAt" => "2026-01-01T00:00:00Z",
+        "updatedAt" => "2026-01-02T00:00:00Z"
+      }
+    end
+
+    parent = self()
+
+    graphql_fun = fn query, variables ->
+      send(parent, {:linear_poll, query, variables})
+
+      nodes =
+        case variables.projectName do
+          "grotto" -> [raw_issue.("issue-a", "MT-A", "grotto")]
+          "symphony" -> [raw_issue.("issue-b", "MT-B", "symphony")]
+        end
+
+      {:ok,
+       %{
+         "data" => %{
+           "issues" => %{
+             "nodes" => nodes,
+             "pageInfo" => %{"hasNextPage" => false, "endCursor" => nil}
+           }
+         }
+       }}
+    end
+
+    assert {:ok, issues} =
+             Client.fetch_issues_by_project_names_for_test(["grotto", "symphony"], ["Todo"], graphql_fun)
+
+    assert Enum.map(issues, & &1.identifier) == ["MT-A", "MT-B"]
+
+    assert_receive {:linear_poll, query, %{projectName: "grotto", stateNames: ["Todo"]}}
+    assert query =~ "project {"
+    assert query =~ "name"
+    assert_receive {:linear_poll, ^query, %{projectName: "symphony", stateNames: ["Todo"]}}
   end
 
   test "prompt builder renders issue and attempt values from workflow template" do
@@ -2753,5 +2907,18 @@ defmodule SymphonyElixir.CoreTest do
     after
       File.rm_rf(test_root)
     end
+  end
+
+  defp dispatch_issue(id, identifier, project_slug, created_at) do
+    %Issue{
+      id: id,
+      identifier: identifier,
+      title: identifier,
+      priority: 0,
+      state: "Todo",
+      project: %{slug_id: project_slug},
+      labels: ["symphony"],
+      created_at: created_at
+    }
   end
 end
