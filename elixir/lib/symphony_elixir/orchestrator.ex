@@ -265,8 +265,8 @@ defmodule SymphonyElixir.Orchestrator do
         Logger.error("Linear API token missing in WORKFLOW.md")
         state
 
-      {:error, :missing_linear_project_slug} ->
-        Logger.error("Linear project slug missing in WORKFLOW.md")
+      {:error, :missing_linear_project_scope} ->
+        Logger.error("Linear project slug/name missing in WORKFLOW.md")
         state
 
       {:error, :missing_tracker_kind} ->
@@ -805,14 +805,64 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   defp sort_issues_for_dispatch(issues) when is_list(issues) do
-    Enum.sort_by(issues, fn
-      %Issue{} = issue ->
-        {priority_rank(issue.priority), issue_created_at_sort_key(issue), issue.identifier || issue.id || ""}
-
-      _ ->
-        {priority_rank(nil), issue_created_at_sort_key(nil), ""}
-    end)
+    issues
+    |> Enum.sort_by(&issue_dispatch_sort_key/1)
+    |> Enum.chunk_by(&dispatch_priority_rank/1)
+    |> Enum.flat_map(&interleave_issues_by_project/1)
   end
+
+  defp issue_dispatch_sort_key(%Issue{} = issue) do
+    {priority_rank(issue.priority), issue_created_at_sort_key(issue), issue.identifier || issue.id || ""}
+  end
+
+  defp issue_dispatch_sort_key(_issue) do
+    {priority_rank(nil), issue_created_at_sort_key(nil), ""}
+  end
+
+  defp dispatch_priority_rank(%Issue{} = issue), do: priority_rank(issue.priority)
+  defp dispatch_priority_rank(_issue), do: priority_rank(nil)
+
+  defp interleave_issues_by_project(issues) do
+    {project_order, queues} =
+      Enum.reduce(issues, {[], %{}}, fn issue, {project_order, queues} ->
+        project_key = issue_project_key(issue)
+
+        project_order =
+          if Map.has_key?(queues, project_key), do: project_order, else: project_order ++ [project_key]
+
+        queues = Map.update(queues, project_key, [issue], &(&1 ++ [issue]))
+
+        {project_order, queues}
+      end)
+
+    drain_project_queues(project_order, queues, [])
+  end
+
+  defp drain_project_queues(project_order, queues, acc) do
+    {round, queues} =
+      Enum.reduce(project_order, {[], queues}, fn project_key, {round, queues} ->
+        case Map.get(queues, project_key, []) do
+          [issue | rest] -> {round ++ [issue], Map.put(queues, project_key, rest)}
+          [] -> {round, queues}
+        end
+      end)
+
+    case round do
+      [] -> acc
+      issues -> drain_project_queues(project_order, queues, acc ++ issues)
+    end
+  end
+
+  defp issue_project_key(%Issue{project: %{slug_id: slug_id}}) when is_binary(slug_id) and slug_id != "" do
+    {:project, slug_id}
+  end
+
+  defp issue_project_key(%Issue{project: %{id: id}}) when is_binary(id) and id != "" do
+    {:project, id}
+  end
+
+  defp issue_project_key(%Issue{}), do: {:project, nil}
+  defp issue_project_key(_issue), do: {:project, nil}
 
   defp priority_rank(priority) when is_integer(priority) and priority in 1..4, do: priority
   defp priority_rank(_priority), do: 5
@@ -836,19 +886,33 @@ defmodule SymphonyElixir.Orchestrator do
       !Map.has_key?(running, issue.id) and
       !Map.has_key?(blocked, issue.id) and
       available_slots(state) > 0 and
-      state_slots_available?(issue, running) and
+      state_slots_available?(issue, state) and
       worker_slots_available?(state)
   end
 
   defp should_dispatch_issue?(_issue, _state, _active_states, _terminal_states), do: false
 
-  defp state_slots_available?(%Issue{state: issue_state}, running) when is_map(running) do
-    limit = Config.max_concurrent_agents_for_state(issue_state)
+  defp state_slots_available?(%Issue{state: issue_state}, %State{running: running} = state) when is_map(running) do
+    limit = effective_max_concurrent_agents_for_state(issue_state, state)
     used = running_issue_count_for_state(running, issue_state)
     limit > used
   end
 
-  defp state_slots_available?(_issue, _running), do: false
+  defp state_slots_available?(_issue, _state), do: false
+
+  defp effective_max_concurrent_agents_for_state(issue_state, %State{} = state) when is_binary(issue_state) do
+    state_limits = Config.settings!().agent.max_concurrent_agents_by_state
+    normalized_state = normalize_issue_state(issue_state)
+
+    case Map.fetch(state_limits, normalized_state) do
+      {:ok, limit} -> limit
+      :error -> effective_max_concurrent_agents(state)
+    end
+  end
+
+  defp effective_max_concurrent_agents_for_state(_issue_state, %State{} = state) do
+    effective_max_concurrent_agents(state)
+  end
 
   defp running_issue_count_for_state(running, issue_state) when is_map(running) do
     normalized_state = normalize_issue_state(issue_state)
@@ -1060,6 +1124,8 @@ defmodule SymphonyElixir.Orchestrator do
   defp run_startup_issue_marker_cleanup do
     if IssueRunHook.configured?(:stopped) do
       do_run_startup_issue_marker_cleanup(startup_marker_cleanup_states())
+    else
+      print_startup_cleanup_progress("startup cleanup", :done)
     end
   end
 
@@ -1070,13 +1136,25 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   defp do_run_startup_issue_marker_cleanup(states) do
+    print_startup_cleanup_progress("issue markers", :start)
+
     case Tracker.fetch_issues_by_states(states) do
       {:ok, issues} ->
-        Enum.each(issues, &cleanup_startup_issue_marker/1)
+        cleanup_issues = Enum.filter(issues, &startup_marker_cleanup_issue?/1)
+
+        cleanup_issues
+        |> Enum.with_index(1)
+        |> Enum.each(fn {issue, index} ->
+          print_startup_cleanup_progress("issue markers", {:issue, issue, index, length(cleanup_issues)})
+          cleanup_startup_issue_marker(issue)
+        end)
 
       {:error, reason} ->
+        print_startup_cleanup_progress("issue markers", {:skip, reason})
         Logger.warning("Skipping startup issue marker cleanup; failed to fetch issues: #{inspect(reason)}")
     end
+
+    print_startup_cleanup_progress("startup cleanup", :done)
   end
 
   defp cleanup_startup_issue_marker(%Issue{} = issue) do
@@ -1084,6 +1162,43 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   defp cleanup_startup_issue_marker(_issue), do: :ok
+
+  defp startup_marker_cleanup_issue?(%Issue{} = issue) do
+    issue_has_label?(issue, startup_running_marker_label())
+  end
+
+  defp startup_marker_cleanup_issue?(_issue), do: false
+
+  defp startup_running_marker_label do
+    case System.get_env("SYMPHONY_RUNNING_LABEL") do
+      label when is_binary(label) and label != "" ->
+        label
+
+      _ ->
+        agent_id =
+          System.get_env("SYMPHONY_AGENT_ID") ||
+            System.get_env("SYMPHONY_PROFILE") ||
+            "default"
+
+        "symphony:running:#{agent_id}"
+    end
+  end
+
+  defp issue_has_label?(%Issue{} = issue, label) when is_binary(label) do
+    normalized_label = normalize_issue_label(label)
+
+    issue
+    |> Issue.label_names()
+    |> Enum.any?(&(normalize_issue_label(&1) == normalized_label))
+  end
+
+  defp normalize_issue_label(label) when is_binary(label) do
+    label
+    |> String.trim()
+    |> String.downcase()
+  end
+
+  defp normalize_issue_label(_label), do: ""
 
   defp revalidate_issue_for_dispatch(%Issue{id: issue_id}, issue_fetcher, terminal_states)
        when is_binary(issue_id) and is_function(issue_fetcher, 1) do
@@ -1247,19 +1362,80 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   defp run_terminal_workspace_cleanup do
+    print_startup_cleanup_progress("terminal workspaces", :start)
+
     case Tracker.fetch_issues_by_states(Config.settings!().tracker.terminal_states) do
       {:ok, issues} ->
-        issues
+        cleanup_issues = Enum.filter(issues, &startup_terminal_workspace_cleanup_issue?/1)
+
+        cleanup_issues
+        |> Enum.with_index(1)
         |> Enum.each(fn
-          %Issue{} = issue ->
+          {%Issue{} = issue, index} ->
+            print_startup_cleanup_progress("terminal workspaces", {:issue, issue, index, length(cleanup_issues)})
             cleanup_issue_workspace(issue)
 
-          _ ->
+          {_issue, _index} ->
             :ok
         end)
 
       {:error, reason} ->
+        print_startup_cleanup_progress("terminal workspaces", {:skip, reason})
         Logger.warning("Skipping startup terminal workspace cleanup; failed to fetch terminal issues: #{inspect(reason)}")
+    end
+  end
+
+  defp startup_terminal_workspace_cleanup_issue?(%Issue{} = issue) do
+    Workspace.issue_workspace_exists?(issue)
+  end
+
+  defp startup_terminal_workspace_cleanup_issue?(_issue), do: false
+
+  defp print_startup_cleanup_progress(stage, :start) when is_binary(stage) do
+    if startup_cleanup_progress_enabled?() do
+      IO.puts(:stderr, "startup cleanup: #{stage}...")
+    end
+  end
+
+  defp print_startup_cleanup_progress(stage, {:issue, issue, index, total}) when is_binary(stage) do
+    if startup_cleanup_progress_enabled?() do
+      IO.puts(:stderr, "startup cleanup: #{stage} #{index}/#{total} #{startup_cleanup_issue_identifier(issue)}")
+    end
+  end
+
+  defp print_startup_cleanup_progress(stage, {:skip, reason}) when is_binary(stage) do
+    if startup_cleanup_progress_enabled?() do
+      IO.puts(:stderr, "startup cleanup: #{stage} skipped: #{inspect(reason)}")
+    end
+  end
+
+  defp print_startup_cleanup_progress("startup cleanup", :done) do
+    if startup_cleanup_progress_enabled?() do
+      IO.puts(:stderr, "startup cleanup: done")
+    end
+  end
+
+  defp print_startup_cleanup_progress(_stage, _event), do: :ok
+
+  defp startup_cleanup_issue_identifier(%Issue{identifier: identifier}) when is_binary(identifier) and identifier != "" do
+    identifier
+  end
+
+  defp startup_cleanup_issue_identifier(%Issue{id: id}) when is_binary(id) and id != "" do
+    id
+  end
+
+  defp startup_cleanup_issue_identifier(_issue), do: "n/a"
+
+  defp startup_cleanup_progress_enabled? do
+    Application.get_env(:symphony_elixir, :startup_cleanup_progress, default_startup_cleanup_progress_enabled?())
+  end
+
+  defp default_startup_cleanup_progress_enabled? do
+    if Code.ensure_loaded?(Mix) and function_exported?(Mix, :env, 0) do
+      Mix.env() != :test
+    else
+      true
     end
   end
 
@@ -1436,10 +1612,26 @@ defmodule SymphonyElixir.Orchestrator do
 
   defp available_slots(%State{} = state) do
     max(
-      (state.max_concurrent_agents || Config.settings!().agent.max_concurrent_agents) -
+      effective_max_concurrent_agents(state) -
         map_size(state.running),
       0
     )
+  end
+
+  defp effective_max_concurrent_agents(%State{} = state) do
+    configured_max = state.max_concurrent_agents || Config.settings!().agent.max_concurrent_agents
+
+    configured_max
+    |> max(configured_project_count(Config.configured_project_slugs()))
+    |> max(configured_project_count(Config.configured_project_names()))
+  end
+
+  defp configured_project_count({:ok, projects}) when is_list(projects) do
+    length(projects)
+  end
+
+  defp configured_project_count(_result) do
+    0
   end
 
   @spec request_refresh() :: map() | :unavailable
@@ -1486,6 +1678,7 @@ defmodule SymphonyElixir.Orchestrator do
           issue_id: issue_id,
           identifier: metadata.identifier,
           issue_url: metadata.issue.url,
+          project: metadata.issue.project,
           state: metadata.issue.state,
           worker_host: Map.get(metadata, :worker_host),
           workspace_path: Map.get(metadata, :workspace_path),
@@ -1862,7 +2055,7 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   defp dispatch_slots_available?(%Issue{} = issue, %State{} = state) do
-    available_slots(state) > 0 and state_slots_available?(issue, state.running)
+    available_slots(state) > 0 and state_slots_available?(issue, state)
   end
 
   defp apply_codex_token_delta(

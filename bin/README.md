@@ -9,7 +9,9 @@ Elixir Symphony binary with the project's `WORKFLOW.md`.
 bin/symphony-run <project>
 ```
 
-`<project>` is a directory name under `workflows/`.
+`<project>` is a directory name under `workflows/`. `grandline` is an
+aggregate Agavemindlab target that watches several Linear projects from one
+process.
 
 ## Environment layers
 
@@ -26,8 +28,11 @@ later layer overrides earlier layers:
    in any repo, shared across every project that selects the same profile.
    Required (the launcher exits if missing). Must define `LINEAR_API_KEY`.
 3. **`workflows/<project>/project.env`** — committed project settings.
-   Required. Must define `SYMPHONY_PROJECT_SLUG`, `SYMPHONY_BASE_BRANCH`,
-   `SYMPHONY_REPO`, and `SYMPHONY_PROFILE`.
+   Required. Must define one of `SYMPHONY_PROJECT_SLUG`,
+   `SYMPHONY_PROJECT_SLUGS`, `SYMPHONY_PROJECT_NAME`, or
+   `SYMPHONY_PROJECT_NAMES`. Single-project workflows also define
+   `SYMPHONY_BASE_BRANCH`, `SYMPHONY_REPO`, and `SYMPHONY_PROFILE`; aggregate
+   workflows resolve repo/base per issue.
 4. **`workflows/<project>/project.env.local`** — machine-local per-project
    overrides. Optional; gitignored via `*.env.local` in the repo root
    `.gitignore`. Use this layer for values that

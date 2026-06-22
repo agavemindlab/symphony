@@ -47,9 +47,14 @@ else
 fi
 export SYMPHONY_PROFILE
 
-[ -n "${SYMPHONY_PROJECT_SLUG:-}" ] || die "SYMPHONY_PROJECT_SLUG is not set by $project_env"
-[ -n "${SYMPHONY_BASE_BRANCH:-}" ] || die "SYMPHONY_BASE_BRANCH is not set by $project_env"
-[ -n "${SYMPHONY_REPO:-}" ] || die "SYMPHONY_REPO is not set by $project_env"
+if [ -z "${SYMPHONY_PROJECT_SLUG:-}" ] && [ -z "${SYMPHONY_PROJECT_SLUGS:-}" ] && [ -z "${SYMPHONY_PROJECT_NAME:-}" ] && [ -z "${SYMPHONY_PROJECT_NAMES:-}" ]; then
+  die "SYMPHONY_PROJECT_SLUG, SYMPHONY_PROJECT_SLUGS, SYMPHONY_PROJECT_NAME, or SYMPHONY_PROJECT_NAMES is not set by $project_env"
+fi
+
+if [ -z "${SYMPHONY_PROJECT_SLUGS:-}" ] && [ -z "${SYMPHONY_PROJECT_NAMES:-}" ]; then
+  [ -n "${SYMPHONY_BASE_BRANCH:-}" ] || die "SYMPHONY_BASE_BRANCH is not set by $project_env"
+  [ -n "${SYMPHONY_REPO:-}" ] || die "SYMPHONY_REPO is not set by $project_env"
+fi
 
 selected_profile="$SYMPHONY_PROFILE"
 profile_env="$HOME/.config/symphony/$SYMPHONY_PROFILE.env"
@@ -69,5 +74,12 @@ export GH_PROMPT_DISABLED="${GH_PROMPT_DISABLED:-true}"
 export SYMPHONY_WORKSPACE_ROOT="${SYMPHONY_WORKSPACE_ROOT:-$HOME/symphony-workspaces}"
 export SYMPHONY_PROFILE
 
+printf 'symphony-run: starting project=%s profile=%s workflow=%s logs=%s\n' \
+  "$project" \
+  "$SYMPHONY_PROFILE" \
+  "$workflow_file" \
+  "$repo_root/elixir/log/symphony.log" >&2
+
 cd "$repo_root/elixir"
+mise exec -- mix escript.build >/dev/null
 exec mise exec -- ./bin/symphony --i-understand-that-this-will-be-running-without-the-usual-guardrails "$workflow_file"

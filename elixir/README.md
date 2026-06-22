@@ -121,6 +121,33 @@ You are working on a Linear issue {{ issue.identifier }}.
 Title: {{ issue.title }} Body: {{ issue.description }}
 ```
 
+To watch more than one Linear project with the same Symphony instance, replace
+the single-project field with `tracker.project_slugs`:
+
+```yaml
+tracker:
+  kind: linear
+  project_slugs:
+    - project-a-slug
+    - project-b-slug
+```
+
+`tracker.project_slugs` also accepts an environment variable that resolves to a
+comma-separated list, such as `$SYMPHONY_PROJECT_SLUGS` with
+`project-a-slug,project-b-slug`. Existing single-project workflows that use
+`tracker.project_slug` do not need migration.
+
+Hooks can read the matched issue's Linear project from the environment:
+
+```yaml
+hooks:
+  after_create: |
+    printf 'project=%s %s %s\n' \
+      "$SYMPHONY_LINEAR_PROJECT_ID" \
+      "$SYMPHONY_LINEAR_PROJECT_SLUG" \
+      "$SYMPHONY_LINEAR_PROJECT_NAME"
+```
+
 Notes:
 
 - If a value is missing, defaults are used.
@@ -150,11 +177,18 @@ Notes:
   `SYMPHONY_WORKFLOW_DIR`, `SYMPHONY_HOOK_EVENT`, `SYMPHONY_HOOK_REASON`,
   `SYMPHONY_ISSUE_ID`, `SYMPHONY_ISSUE_IDENTIFIER`, `SYMPHONY_ISSUE_STATE`,
   `SYMPHONY_ISSUE_URL`, and `SYMPHONY_WORKER_HOST` in the environment.
+- Hooks for a Linear issue also receive `SYMPHONY_LINEAR_PROJECT_ID`,
+  `SYMPHONY_LINEAR_PROJECT_SLUG`, and `SYMPHONY_LINEAR_PROJECT_NAME` when the
+  issue payload includes project data. Use `SYMPHONY_LINEAR_PROJECT_SLUG` to
+  choose project-specific clone, setup, or teardown behavior.
 - If a hook needs `mise exec` inside a freshly cloned workspace, trust the repo config and fetch
   the project dependencies in `hooks.after_create` before invoking `mise` later from other hooks.
 - `tracker.api_key` reads from `LINEAR_API_KEY` when unset or when value is `$LINEAR_API_KEY`.
 - `tracker.project_slug` can read from an environment variable such as
   `$SYMPHONY_PROJECT_SLUG`.
+- `tracker.project_slugs` can read from a YAML list or from a comma-separated
+  environment variable such as `$SYMPHONY_PROJECT_SLUGS`. Do not set both
+  `tracker.project_slug` and `tracker.project_slugs` in the same workflow.
 - For path values, `~` is expanded to the home directory.
 - For env-backed path values, use `$VAR`. `workspace.root` resolves `$VAR` before path handling,
   while `codex.command` stays a shell command string and any `$VAR` expansion there happens in the

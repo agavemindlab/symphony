@@ -147,6 +147,8 @@ defmodule SymphonyElixir.TestSupport do
           tracker_api_token: "token",
           tracker_project_slug: "project",
           tracker_project_slugs: nil,
+          tracker_project_name: nil,
+          tracker_project_names: nil,
           tracker_assignee: nil,
           tracker_required_labels: [],
           tracker_active_states: ["Todo", "In Progress"],
@@ -189,6 +191,8 @@ defmodule SymphonyElixir.TestSupport do
     tracker_api_token = Keyword.get(config, :tracker_api_token)
     tracker_project_slug = Keyword.get(config, :tracker_project_slug)
     tracker_project_slugs = Keyword.get(config, :tracker_project_slugs)
+    tracker_project_name = Keyword.get(config, :tracker_project_name)
+    tracker_project_names = Keyword.get(config, :tracker_project_names)
     tracker_assignee = Keyword.get(config, :tracker_assignee)
     tracker_required_labels = Keyword.get(config, :tracker_required_labels)
     tracker_active_states = Keyword.get(config, :tracker_active_states)
@@ -232,6 +236,8 @@ defmodule SymphonyElixir.TestSupport do
         "  api_key: #{yaml_value(tracker_api_token)}",
         "  project_slug: #{yaml_value(tracker_project_slug)}",
         tracker_project_slugs_entry(tracker_project_slugs),
+        tracker_project_name_entry(tracker_project_name),
+        tracker_project_names_entry(tracker_project_names),
         "  assignee: #{yaml_value(tracker_assignee)}",
         "  required_labels: #{yaml_value(tracker_required_labels)}",
         "  active_states: #{yaml_value(tracker_active_states)}",
@@ -345,6 +351,18 @@ defmodule SymphonyElixir.TestSupport do
 
   defp tracker_project_slugs_entry(project_slugs) do
     "  project_slugs: #{yaml_value(project_slugs)}"
+  end
+
+  defp tracker_project_name_entry(nil), do: nil
+
+  defp tracker_project_name_entry(project_name) do
+    "  project_name: #{yaml_value(project_name)}"
+  end
+
+  defp tracker_project_names_entry(nil), do: nil
+
+  defp tracker_project_names_entry(project_names) do
+    "  project_names: #{yaml_value(project_names)}"
   end
 
   defp observability_yaml(enabled, refresh_ms, render_interval_ms, analytics_path) do
