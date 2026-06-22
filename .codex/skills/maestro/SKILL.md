@@ -37,7 +37,8 @@ review judgment in the parent agent.
 4. Inspect spawned or related issues mentioned by the current artifacts and
    Linear relations. Include each related issue's relation type, state, assignee,
    whether it is blocked by or blocks the reviewed issue, whether downstream
-   issues have enough context to start safely after the reviewed issue is closed,
+   issues or accepted out-of-scope prerequisites have enough context to start
+   safely after the reviewed issue is closed,
    and whether validation or disposable issues have a durable relation plus a
    terminal cleanup state.
 5. Inspect linked PRs when `## Implementation` is awaiting review. Also
@@ -127,8 +128,10 @@ User-facing documentation evidence:
 Spawned or related issue evidence:
 <issue identifiers, relation types, state/assignee, blocker relation status,
 whether any downstream issue can be selected before this one is accepted,
-whether the downstream issue has enough context to start safely after the
-reviewed issue is closed, validation/disposable issue cleanup status, or "none">
+whether any accepted but excluded prerequisite work has a follow-up issue and
+durable dependency relation, whether the downstream issue has enough context to
+start safely after the reviewed issue is closed, validation/disposable issue
+cleanup status, or "none">
 
 Linked PR evidence, only for Implementation review:
 <PR metadata, checks, configured automated reviewer accounts, human review
@@ -157,7 +160,8 @@ Task:
    root cause.
 8. Check whether spawned or related issues have the dependency relation or
    cleanup disposition needed to prevent unsafe parallel work or orphaned
-   validation artifacts, and whether downstream issues have enough inherited
+   validation artifacts, whether accepted but excluded prerequisite work has a
+   durable follow-up issue, and whether downstream issues have enough inherited
    context to start safely once unblocked.
 9. For bugfixes, reject artifacts that do not explain new failure windows caused
    by moved side effects or durable state before success.

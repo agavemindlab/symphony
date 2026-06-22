@@ -94,7 +94,11 @@ Reply locations:
   closed, `related` is not enough, and a current intake/backlog state is only a
   temporary queue position. Require evidence that the reviewed issue `blocks`
   the downstream issue, or another durable dependency gate that keeps Symphony
-  from selecting it early. If a Deployment artifact creates a validation,
+  from selecting it early. If the accepted scope excludes prerequisite
+  operational work that is still required before safe use, such as real infra,
+  secrets, environment protection, credentials, or data reset setup, require a
+  follow-up issue with enough context and a durable dependency relation instead
+  of treating "out of scope" as disposed. If a Deployment artifact creates a validation,
   disposable, or cleanup issue as proof for the close test, require a durable
   relation to the reviewed issue and evidence that the helper issue is closed,
   canceled, or otherwise explicitly disposed before recommending `Done` for the
