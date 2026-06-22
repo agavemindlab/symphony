@@ -86,6 +86,7 @@ defmodule SymphonyElixir.SymphonyRunTest do
     File.mkdir_p!(Path.join(fake_repo_root, "elixir"))
     File.mkdir_p!(Path.join(fake_repo_root, "workflows/agavemindlab"))
     File.mkdir_p!(Path.join(fake_repo_root, "workflows/#{project}"))
+    File.write!(Path.join(fake_repo_root, "workflows/agavemindlab/WORKFLOW.md"), "# Test workflow\n")
 
     File.write!(
       Path.join(fake_repo_root, "workflows/agavemindlab/project.env.defaults"),
@@ -104,7 +105,7 @@ defmodule SymphonyElixir.SymphonyRunTest do
       end
 
     File.write!(Path.join(fake_repo_root, "workflows/#{project}/project.env"), project_env)
-    File.write!(Path.join(fake_repo_root, "workflows/#{project}/WORKFLOW.md"), "# Test workflow\n")
+    File.ln_s!("../agavemindlab/WORKFLOW.md", Path.join(fake_repo_root, "workflows/#{project}/WORKFLOW.md"))
 
     File.write!(
       Path.join(home, ".config/symphony/grandline.env"),
