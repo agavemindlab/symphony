@@ -1215,6 +1215,10 @@ defmodule SymphonyElixir.CoreTest do
   end
 
   test "orchestrator startup cleanup clears stale markers for active and terminal issues" do
+    previous_running_label = System.get_env("SYMPHONY_RUNNING_LABEL")
+    System.put_env("SYMPHONY_RUNNING_LABEL", "symphony:running:default")
+    on_exit(fn -> restore_env("SYMPHONY_RUNNING_LABEL", previous_running_label) end)
+
     marker =
       Path.join(
         System.tmp_dir!(),
@@ -1266,6 +1270,10 @@ defmodule SymphonyElixir.CoreTest do
   end
 
   test "orchestrator startup cleanup prints progress" do
+    previous_running_label = System.get_env("SYMPHONY_RUNNING_LABEL")
+    System.put_env("SYMPHONY_RUNNING_LABEL", "symphony:running:default")
+    on_exit(fn -> restore_env("SYMPHONY_RUNNING_LABEL", previous_running_label) end)
+
     previous_progress = Application.get_env(:symphony_elixir, :startup_cleanup_progress)
     Application.put_env(:symphony_elixir, :startup_cleanup_progress, true)
     on_exit(fn -> restore_app_env(:startup_cleanup_progress, previous_progress) end)

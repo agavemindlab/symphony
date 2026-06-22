@@ -93,34 +93,32 @@ defmodule SymphonyElixir.AgentRunner do
 
     with {:ok, session} <- AppServer.start_session(workspace, worker_host: worker_host, issue: issue) do
       try do
-        do_run_codex_turns(
-          session,
-          workspace,
-          issue,
-          codex_update_recipient,
-          opts,
-          issue_state_fetcher,
-          worker_host,
-          1,
-          max_turns
-        )
+        context = %{
+          app_session: session,
+          workspace: workspace,
+          codex_update_recipient: codex_update_recipient,
+          opts: opts,
+          issue_state_fetcher: issue_state_fetcher,
+          worker_host: worker_host,
+          max_turns: max_turns
+        }
+
+        do_run_codex_turns(context, issue, 1)
       after
         AppServer.stop_session(session)
       end
     end
   end
 
-  defp do_run_codex_turns(
-         app_session,
-         workspace,
-         issue,
-         codex_update_recipient,
-         opts,
-         issue_state_fetcher,
-         worker_host,
-         turn_number,
-         max_turns
-       ) do
+  defp do_run_codex_turns(context, issue, turn_number) do
+    %{
+      app_session: app_session,
+      codex_update_recipient: codex_update_recipient,
+      max_turns: max_turns,
+      opts: opts,
+      workspace: workspace
+    } = context
+
     prompt = build_turn_prompt(issue, opts, turn_number, max_turns)
 
     with {:ok, turn_session} <-
@@ -132,39 +130,44 @@ defmodule SymphonyElixir.AgentRunner do
            ) do
       Logger.info("Completed agent run for #{issue_context(issue)} session_id=#{turn_session[:session_id]} workspace=#{workspace} turn=#{turn_number}/#{max_turns}")
 
-      if stop_after_turn_marker?(workspace, worker_host) do
-        Logger.info("Stop-after-turn marker present for #{issue_context(issue)} session_id=#{turn_session[:session_id]} workspace=#{workspace}; returning control to orchestrator")
+      continue_after_turn(context, issue, turn_number, turn_session)
+    end
+  end
+
+  defp continue_after_turn(context, issue, turn_number, turn_session) do
+    %{
+      issue_state_fetcher: issue_state_fetcher,
+      max_turns: max_turns,
+      worker_host: worker_host,
+      workspace: workspace
+    } = context
+
+    if stop_after_turn_marker?(workspace, worker_host) do
+      Logger.info("Stop-after-turn marker present for #{issue_context(issue)} session_id=#{turn_session[:session_id]} workspace=#{workspace}; returning control to orchestrator")
+
+      :ok
+    else
+      continue_normally(context, issue, issue_state_fetcher, turn_number, max_turns)
+    end
+  end
+
+  defp continue_normally(context, issue, issue_state_fetcher, turn_number, max_turns) do
+    case continue_with_issue?(issue, issue_state_fetcher) do
+      {:continue, refreshed_issue} when turn_number < max_turns ->
+        Logger.info("Continuing agent run for #{issue_context(refreshed_issue)} after normal turn completion turn=#{turn_number}/#{max_turns}")
+
+        do_run_codex_turns(context, refreshed_issue, turn_number + 1)
+
+      {:continue, refreshed_issue} ->
+        Logger.info("Reached agent.max_turns for #{issue_context(refreshed_issue)} with issue still active; returning control to orchestrator")
 
         :ok
-      else
-        case continue_with_issue?(issue, issue_state_fetcher) do
-          {:continue, refreshed_issue} when turn_number < max_turns ->
-            Logger.info("Continuing agent run for #{issue_context(refreshed_issue)} after normal turn completion turn=#{turn_number}/#{max_turns}")
 
-            do_run_codex_turns(
-              app_session,
-              workspace,
-              refreshed_issue,
-              codex_update_recipient,
-              opts,
-              issue_state_fetcher,
-              worker_host,
-              turn_number + 1,
-              max_turns
-            )
+      {:done, _refreshed_issue} ->
+        :ok
 
-          {:continue, refreshed_issue} ->
-            Logger.info("Reached agent.max_turns for #{issue_context(refreshed_issue)} with issue still active; returning control to orchestrator")
-
-            :ok
-
-          {:done, _refreshed_issue} ->
-            :ok
-
-          {:error, reason} ->
-            {:error, reason}
-        end
-      end
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 

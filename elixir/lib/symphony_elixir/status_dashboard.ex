@@ -423,20 +423,25 @@ defmodule SymphonyElixir.StatusDashboard do
   end
 
   defp format_project_part do
-    with {:ok, project_names} when project_names != [] <- Config.configured_project_names() do
-      colorize("#{length(project_names)} projects: #{Enum.join(project_names, ", ")}", @ansi_cyan)
-    else
+    case Config.configured_project_names() do
+      {:ok, project_names} when project_names != [] ->
+        colorize("#{length(project_names)} projects: #{Enum.join(project_names, ", ")}", @ansi_cyan)
+
       _ ->
-        case Config.configured_project_slugs() do
-          {:ok, [project_slug]} ->
-            colorize(linear_project_url(project_slug), @ansi_cyan)
+        format_project_slugs_part()
+    end
+  end
 
-          {:ok, project_slugs} when is_list(project_slugs) and project_slugs != [] ->
-            colorize("#{length(project_slugs)} projects: #{Enum.join(project_slugs, ", ")}", @ansi_cyan)
+  defp format_project_slugs_part do
+    case Config.configured_project_slugs() do
+      {:ok, [project_slug]} ->
+        colorize(linear_project_url(project_slug), @ansi_cyan)
 
-          _ ->
-            colorize("n/a", @ansi_gray)
-        end
+      {:ok, project_slugs} when is_list(project_slugs) and project_slugs != [] ->
+        colorize("#{length(project_slugs)} projects: #{Enum.join(project_slugs, ", ")}", @ansi_cyan)
+
+      _ ->
+        colorize("n/a", @ansi_gray)
     end
   end
 
