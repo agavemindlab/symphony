@@ -2150,6 +2150,8 @@ defmodule SymphonyElixir.CoreTest do
     assert prompt =~ "$maestro MT-5316"
     assert prompt =~ "fresh Codex session"
     assert prompt =~ "Do not reuse the working agent"
+    assert prompt =~ "dedicated Maestro Linear OAuth app"
+    assert prompt =~ "without using any fallback identity"
     assert prompt =~ "request changes"
     assert prompt =~ "Rework"
     assert prompt =~ "approve"
@@ -2161,15 +2163,18 @@ defmodule SymphonyElixir.CoreTest do
     assert SymphonyElixir.MaestroPreReview.prepare_main_branch_command_for_test() =~ "upstream/$base_branch"
   end
 
-  test "maestro pre-review records no-action reason when the isolated session cannot start" do
+  test "maestro pre-review fails closed without dedicated Linear auth" do
     test_root =
       Path.join(
         System.tmp_dir!(),
-        "symphony-elixir-maestro-pre-review-failure-#{System.unique_integer([:positive])}"
+        "symphony-elixir-maestro-pre-review-missing-auth-#{System.unique_integer([:positive])}"
       )
 
     try do
       workspace_root = Path.join(test_root, "workspaces")
+      previous_maestro_linear_api_key = System.get_env("MAESTRO_LINEAR_API_KEY")
+      on_exit(fn -> restore_env("MAESTRO_LINEAR_API_KEY", previous_maestro_linear_api_key) end)
+      System.delete_env("MAESTRO_LINEAR_API_KEY")
 
       write_workflow_file!(Workflow.workflow_file_path(),
         tracker_kind: "memory",
@@ -2188,14 +2193,152 @@ defmodule SymphonyElixir.CoreTest do
         labels: ["symphony"]
       }
 
-      assert {:error, {:maestro_main_branch_prepare_failed, _status, _output}} =
-               SymphonyElixir.MaestroPreReview.run(issue)
+      assert {:error, :missing_maestro_linear_api_key} =
+               SymphonyElixir.MaestroPreReview.run(issue,
+                 linear_client: fn _query, _variables, _opts ->
+                   flunk("missing dedicated auth must not preflight Linear")
+                 end,
+                 app_server_runner: fn _workspace, _prompt, _issue, _opts ->
+                   flunk("missing dedicated auth must not start Maestro")
+                 end
+               )
 
-      assert_receive {:memory_tracker_comment, "issue-maestro-failure", body}
-      assert body =~ "🤖 Maestro 预审核:"
-      assert body =~ "未自动执行"
-      assert body =~ "Human Review"
+      refute_received {:memory_tracker_comment, "issue-maestro-failure", _body}
       refute_received {:memory_tracker_state_update, "issue-maestro-failure", _state}
+    after
+      File.rm_rf(test_root)
+    end
+  end
+
+  test "maestro pre-review fails closed when dedicated Linear auth is invalid" do
+    write_workflow_file!(Workflow.workflow_file_path(), tracker_kind: "memory")
+    Application.put_env(:symphony_elixir, :memory_tracker_recipient, self())
+
+    issue = %Issue{
+      id: "issue-maestro-invalid-auth",
+      identifier: "MT-5320",
+      title: "Reject invalid Maestro Linear auth",
+      description: "The fallback must not use Symphony auth",
+      state: "Human Review",
+      url: "https://example.org/issues/MT-5320",
+      labels: ["symphony"]
+    }
+
+    assert {:error, :invalid_maestro_linear_api_key} =
+             SymphonyElixir.MaestroPreReview.run(issue,
+               maestro_linear_api_key: "bad-token",
+               linear_client: fn _query, _variables, opts ->
+                 assert opts == [api_key: "bad-token"]
+                 {:error, {:linear_api_status, 401}}
+               end,
+               app_server_runner: fn _workspace, _prompt, _issue, _opts ->
+                 flunk("invalid dedicated auth must not start Maestro")
+               end
+             )
+
+    refute_received {:memory_tracker_comment, "issue-maestro-invalid-auth", _body}
+    refute_received {:memory_tracker_state_update, "issue-maestro-invalid-auth", _state}
+  end
+
+  test "maestro pre-review does not write Symphony-auth no-action comments after startup failure" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-maestro-pre-review-startup-failure-#{System.unique_integer([:positive])}"
+      )
+
+    try do
+      write_workflow_file!(Workflow.workflow_file_path(),
+        tracker_kind: "memory",
+        workspace_root: Path.join(test_root, "workspaces")
+      )
+
+      Application.put_env(:symphony_elixir, :memory_tracker_recipient, self())
+
+      issue = %Issue{
+        id: "issue-maestro-startup-failure",
+        identifier: "MT-5321",
+        title: "Do not fallback-comment startup failures",
+        description: "Only dedicated Maestro auth may write Maestro review notes",
+        state: "Human Review",
+        url: "https://example.org/issues/MT-5321",
+        labels: ["symphony"]
+      }
+
+      assert {:error, {:maestro_main_branch_prepare_failed, _status, _output}} =
+               SymphonyElixir.MaestroPreReview.run(issue,
+                 maestro_linear_api_key: "maestro-token",
+                 linear_client: fn _query, _variables, opts ->
+                   assert opts == [api_key: "maestro-token"]
+                   {:ok, %{"data" => %{"viewer" => %{"id" => "usr_maestro"}}}}
+                 end
+               )
+
+      refute_received {:memory_tracker_comment, "issue-maestro-startup-failure", _body}
+      refute_received {:memory_tracker_state_update, "issue-maestro-startup-failure", _state}
+    after
+      File.rm_rf(test_root)
+    end
+  end
+
+  test "maestro pre-review injects the dedicated Linear api key into fresh session tools" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-maestro-pre-review-dedicated-auth-#{System.unique_integer([:positive])}"
+      )
+
+    try do
+      workspace_root = Path.join(test_root, "workspaces")
+      upstream_repo = Path.join(test_root, "upstream")
+
+      File.mkdir_p!(upstream_repo)
+      System.cmd("git", ["-C", upstream_repo, "init", "-b", "main"])
+      System.cmd("git", ["-C", upstream_repo, "config", "user.name", "Test User"])
+      System.cmd("git", ["-C", upstream_repo, "config", "user.email", "test@example.com"])
+      File.write!(Path.join(upstream_repo, "README.md"), "# upstream")
+      System.cmd("git", ["-C", upstream_repo, "add", "README.md"])
+      System.cmd("git", ["-C", upstream_repo, "commit", "-m", "initial"])
+
+      write_workflow_file!(Workflow.workflow_file_path(),
+        workspace_root: workspace_root,
+        hook_after_create: "git init -b main . && git remote add upstream #{upstream_repo}"
+      )
+
+      issue = %Issue{
+        id: "issue-maestro-dedicated-auth",
+        identifier: "MT-5319",
+        title: "Use dedicated Maestro Linear auth",
+        description: "Maestro tool calls must not use Symphony auth",
+        state: "Human Review",
+        url: "https://example.org/issues/MT-5319",
+        labels: ["symphony"]
+      }
+
+      parent = self()
+
+      linear_client = fn query, variables, opts ->
+        send(parent, {:linear_client_called, query, variables, opts})
+        {:ok, %{"data" => %{"viewer" => %{"id" => "usr_maestro"}}}}
+      end
+
+      app_server_runner = fn _workspace, _prompt, _issue, opts ->
+        result = opts[:tool_executor].("linear_graphql", %{"query" => "query Viewer { viewer { id } }"})
+        send(parent, {:tool_result, result})
+        {:ok, %{id: "turn-maestro"}}
+      end
+
+      assert :ok =
+               SymphonyElixir.MaestroPreReview.run(issue,
+                 maestro_linear_api_key: "maestro-token",
+                 linear_client: linear_client,
+                 app_server_runner: app_server_runner
+               )
+
+      assert_receive {:linear_client_called, "query SymphonyLinearViewer" <> _, %{}, [api_key: "maestro-token"]}
+      assert_receive {:linear_client_called, "query Viewer { viewer { id } }", %{}, [api_key: "maestro-token"]}
+      assert_receive {:tool_result, %{"success" => true}}
+      refute_received {:memory_tracker_comment, "issue-maestro-dedicated-auth", _body}
     after
       File.rm_rf(test_root)
     end

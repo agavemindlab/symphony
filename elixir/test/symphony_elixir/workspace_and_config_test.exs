@@ -476,6 +476,25 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert log =~ "Variable \\\"$ids\\\" got invalid value"
   end
 
+  test "linear client can use an explicit api key without mutating tracker auth" do
+    write_workflow_file!(Workflow.workflow_file_path(), tracker_api_token: "symphony-token")
+
+    assert {:ok, %{"data" => %{"viewer" => %{"id" => "usr_maestro"}}}} =
+             Client.graphql(
+               "query Viewer { viewer { id } }",
+               %{},
+               api_key: "maestro-token",
+               request_fun: fn _payload, headers ->
+                 assert {"Authorization", "maestro-token"} in headers
+                 refute {"Authorization", "symphony-token"} in headers
+
+                 {:ok, %{status: 200, body: %{"data" => %{"viewer" => %{"id" => "usr_maestro"}}}}}
+               end
+             )
+
+    assert Config.settings!().tracker.api_key == "symphony-token"
+  end
+
   test "orchestrator sorts dispatch by priority then oldest created_at" do
     issue_same_priority_older = %Issue{
       id: "issue-old-high",

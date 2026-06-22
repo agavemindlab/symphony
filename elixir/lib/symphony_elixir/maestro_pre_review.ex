@@ -6,36 +6,52 @@ defmodule SymphonyElixir.MaestroPreReview do
   require Logger
 
   alias SymphonyElixir.Codex.AppServer
-  alias SymphonyElixir.{Linear.Issue, SSH, Tracker, Workspace}
+  alias SymphonyElixir.Codex.DynamicTool
+  alias SymphonyElixir.Linear.Client
+  alias SymphonyElixir.{Linear.Issue, SSH, Workspace}
 
   @workspace_suffix "-maestro"
+  @maestro_linear_api_key_env "MAESTRO_LINEAR_API_KEY"
+  @viewer_query """
+  query SymphonyLinearViewer {
+    viewer {
+      id
+    }
+  }
+  """
 
   @spec run(Issue.t(), keyword()) :: :ok | {:error, term()}
   def run(%Issue{} = issue, opts \\ []) do
     worker_host = Keyword.get(opts, :worker_host)
     on_message = Keyword.get(opts, :on_message, &default_on_message/1)
+    linear_client = Keyword.get(opts, :linear_client, &Client.graphql/3)
+    app_server_runner = Keyword.get(opts, :app_server_runner, &AppServer.run/4)
     workspace_issue = %{issue | identifier: workspace_identifier(issue)}
 
-    Logger.info("Maestro pre-review started for #{issue_context(issue)} worker_host=#{worker_host || "local"}")
-
     result =
-      case Workspace.create_for_issue(workspace_issue, worker_host) do
-        {:ok, workspace} ->
-          try do
-            with :ok <- prepare_main_branch(workspace, worker_host),
-                 {:ok, _turn} <-
-                   AppServer.run(workspace, build_prompt(issue), issue,
-                     worker_host: worker_host,
-                     on_message: on_message
-                   ) do
-              :ok
-            end
-          after
-            Workspace.remove(workspace, worker_host, workspace_issue)
-          end
+      with {:ok, maestro_api_key} <- resolve_maestro_linear_api_key(opts),
+           :ok <- validate_maestro_linear_api_key(maestro_api_key, linear_client) do
+        Logger.info("Maestro pre-review started for #{issue_context(issue)} worker_host=#{worker_host || "local"}")
 
-        {:error, reason} ->
-          {:error, reason}
+        case Workspace.create_for_issue(workspace_issue, worker_host) do
+          {:ok, workspace} ->
+            try do
+              with :ok <- prepare_main_branch(workspace, worker_host),
+                   {:ok, _turn} <-
+                     app_server_runner.(workspace, build_prompt(issue), issue,
+                       worker_host: worker_host,
+                       on_message: on_message,
+                       tool_executor: maestro_tool_executor(maestro_api_key, linear_client)
+                     ) do
+                :ok
+              end
+            after
+              Workspace.remove(workspace, worker_host, workspace_issue)
+            end
+
+          {:error, reason} ->
+            {:error, reason}
+        end
       end
 
     case result do
@@ -108,6 +124,7 @@ defmodule SymphonyElixir.MaestroPreReview do
 
     This is a fresh Codex session launched after the working agent handed the issue to `Human Review`.
     Do not reuse the working agent, do not rely on any prior conversation, and do not edit repository files.
+    All Linear reads, comments, and state changes available through `linear_graphql` use the dedicated Maestro Linear OAuth app credentials injected by the host. If that tool reports auth failure, stop without using any fallback identity.
 
     First invoke `$maestro #{identifier}` to obtain the read-only Maestro recommendation.
     Then act on that recommendation using Linear tools under these DEV-5316 rules:
@@ -136,28 +153,46 @@ defmodule SymphonyElixir.MaestroPreReview do
     "issue_id=#{issue_id || "n/a"} issue_identifier=#{identifier || "n/a"}"
   end
 
-  defp record_no_action_reason(%Issue{id: issue_id} = issue, reason)
-       when is_binary(issue_id) and issue_id != "" do
-    body = """
-    🤖 Maestro 预审核: 未自动执行
+  defp record_no_action_reason(issue, reason) do
+    Logger.warning("Maestro pre-review no-action for #{issue_context(issue)}: #{safe_failure_reason(reason)}")
+    :ok
+  end
 
-    预审核会话未能启动或完成：#{safe_failure_reason(reason)}。
-    Issue 保持 `Human Review`，未写入 approve/rework 结论。
-    """
+  defp resolve_maestro_linear_api_key(opts) do
+    opts
+    |> Keyword.get(:maestro_linear_api_key, System.get_env(@maestro_linear_api_key_env))
+    |> normalize_maestro_linear_api_key()
+  end
 
-    case Tracker.create_comment(issue_id, body) do
-      :ok ->
-        :ok
-
-      {:error, comment_reason} ->
-        Logger.warning("Maestro pre-review failure comment failed for #{issue_context(issue)}: #{inspect(comment_reason)}")
-        :ok
+  defp normalize_maestro_linear_api_key(value) when is_binary(value) do
+    case String.trim(value) do
+      "" -> {:error, :missing_maestro_linear_api_key}
+      api_key -> {:ok, api_key}
     end
   end
 
-  defp record_no_action_reason(issue, reason) do
-    Logger.warning("Maestro pre-review could not record no-action reason for #{issue_context(issue)}: #{inspect(reason)}")
-    :ok
+  defp normalize_maestro_linear_api_key(_value), do: {:error, :missing_maestro_linear_api_key}
+
+  defp validate_maestro_linear_api_key(api_key, linear_client) do
+    case linear_client.(@viewer_query, %{}, api_key: api_key) do
+      {:ok, response} ->
+        if graphql_success?(response), do: :ok, else: {:error, :invalid_maestro_linear_api_key}
+
+      {:error, _reason} ->
+        {:error, :invalid_maestro_linear_api_key}
+    end
+  end
+
+  defp graphql_success?(%{"errors" => errors}) when is_list(errors) and errors != [], do: false
+  defp graphql_success?(%{errors: errors}) when is_list(errors) and errors != [], do: false
+  defp graphql_success?(%{"data" => _data}), do: true
+  defp graphql_success?(%{data: _data}), do: true
+  defp graphql_success?(_response), do: false
+
+  defp maestro_tool_executor(api_key, linear_client) do
+    fn tool, arguments ->
+      DynamicTool.execute(tool, arguments, api_key: api_key, linear_client: linear_client)
+    end
   end
 
   defp safe_failure_reason({:maestro_main_branch_prepare_failed, status, _output}) do
