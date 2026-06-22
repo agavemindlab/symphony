@@ -89,6 +89,17 @@ identity. If any required GitHub App variable is missing while another is set,
 the launcher exits instead of silently falling back, because partial app config
 usually means the bot identity rollout is broken.
 
+GitHub App repository access and API permissions are configured on the GitHub
+App installation, not in repo env files. The current `gl-symphony` installation
+is installed on all `agavemindlab` repositories and has `contents:write`,
+`pull_requests:write`, `issues:write`, `workflows:write`, `metadata:read`,
+`actions:read`, `checks:read`, and `statuses:read`, which covers branch pushes,
+PR operations, comments, workflow-file updates, and read-only check/status
+inspection for installed repositories. If an operation targets a repository
+outside the installation or needs a permission the installation does not grant,
+GitHub returns an API error; fix the installation instead of adding a PAT
+fallback in app mode.
+
 When none of the GitHub App variables are set, the launcher keeps the existing
 profile/PAT behavior. Existing Symphony processes and workspaces keep the
 tokens they were started with; restart them with `bin/symphony-run <project>`
