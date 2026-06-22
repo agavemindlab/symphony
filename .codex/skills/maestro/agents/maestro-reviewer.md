@@ -139,6 +139,12 @@ Reply locations:
   acceptance criteria plus later human-approved scope changes. Request changes
   when the artifact would leave the next phase unable to satisfy that source of
   truth.
+- When feedback or evidence shows the accepted source of truth is incomplete,
+  wrong, or newly changed, treat it as cross-phase rework. Target Requirements
+  for scope, acceptance criteria, actor identity, auth/permission boundaries,
+  runtime-secret contracts, or operator configuration requirements; target
+  Design when only the implementation approach is wrong. Do not target the
+  awaiting Implementation artifact merely because it is current.
 - Before approving Design, scan its rationale and rejected alternatives for
   uncertainty words such as "untested", "unverified", "assumed", "unclear",
   "unsupported", "未测试", "未验证", "假设", "不明确", or "不支持". If such
