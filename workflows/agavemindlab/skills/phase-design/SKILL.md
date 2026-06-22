@@ -346,11 +346,12 @@ preserve it here — do not flatten the reasoning down to a bare question.
 ```md
 ### 待确认（一次性审阅：认可全部推荐请回复「同意默认」，否则逐条说明）
 [NEEDS CLARIFICATION]
-Q1. <question> 〔影响：低〕
+**Q1. <question> 〔影响：低〕**
   背景: <一句：这个 fork 是什么 + 选错的代价>
   - A（推荐）: <answer> — <这样选的后果 / 为什么优于备选>
   - B: <answer> — <这样选的后果>
-Q2. <question> 🔴 〔影响：高 · 需明确回答〕
+
+**Q2. <question> 🔴 〔影响：高 · 需明确回答〕**
   背景: <一句：利害所在 / 为什么 blanket approval 不能覆盖>
   - A（推荐）: <answer> — <后果>
   - B: <answer> — <后果>
