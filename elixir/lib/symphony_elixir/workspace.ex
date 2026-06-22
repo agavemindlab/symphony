@@ -372,11 +372,19 @@ defmodule SymphonyElixir.Workspace do
 
     Logger.info("Running workspace hook hook=#{hook_name} #{issue_log_context(issue_context)} workspace=#{workspace} worker_host=local")
 
+    script =
+      [
+        hook_env_exports(issue_context),
+        command
+      ]
+      |> Enum.reject(&(&1 == ""))
+      |> Enum.join("\n")
+
     task =
       Task.async(fn ->
-        System.cmd("sh", ["-lc", command],
+        System.cmd("sh", ["-lc", script],
           cd: workspace,
-          env: local_hook_env(issue_context),
+          env: cleared_hook_env(),
           stderr_to_stdout: true
         )
       end)
@@ -418,11 +426,6 @@ defmodule SymphonyElixir.Workspace do
       {:error, reason} ->
         {:error, reason}
     end
-  end
-
-  defp local_hook_env(issue_context) do
-    issue_context
-    |> hook_env()
   end
 
   defp handle_hook_command_result({_output, 0}, _workspace, _issue_id, _hook_name) do
@@ -592,12 +595,33 @@ defmodule SymphonyElixir.Workspace do
     |> Kernel.++(project_hook_env(Map.get(issue_context, :project)))
   end
 
+  defp cleared_hook_env do
+    [
+      "SYMPHONY_WORKFLOW_DIR",
+      "SYMPHONY_PROJECT_DIR",
+      "SYMPHONY_LINEAR_PROJECT_ID",
+      "SYMPHONY_LINEAR_PROJECT_SLUG",
+      "SYMPHONY_LINEAR_PROJECT_NAME"
+    ]
+    |> Enum.map(&{&1, nil})
+  end
+
   defp remote_hook_env_exports(issue_context) do
-    issue_context
-    |> hook_env()
-    |> Enum.map_join("\n", fn {name, value} ->
-      "#{name}=#{shell_escape(value)}\nexport #{name}"
-    end)
+    hook_env_exports(issue_context)
+  end
+
+  defp hook_env_exports(issue_context) do
+    exports =
+      issue_context
+      |> hook_env()
+      |> Enum.map_join("\n", fn {name, value} ->
+        "#{name}=#{shell_escape(value)}\nexport #{name}"
+      end)
+
+    """
+    unset SYMPHONY_PROJECT_DIR SYMPHONY_LINEAR_PROJECT_ID SYMPHONY_LINEAR_PROJECT_SLUG SYMPHONY_LINEAR_PROJECT_NAME
+    #{exports}
+    """
   end
 
   defp project_hook_env(%{id: id, slug_id: slug_id, name: name}) do

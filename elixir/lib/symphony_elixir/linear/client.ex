@@ -322,8 +322,14 @@ defmodule SymphonyElixir.Linear.Client do
     end
   end
 
-  defp do_fetch_by_project_scope({scope_kind, projects}, state_names, assignee_filter, graphql_fun \\ &graphql/2)
-       when scope_kind in [:slug, :name] and is_list(projects) and is_list(state_names) and is_function(graphql_fun, 2) do
+  defp do_fetch_by_project_scope(
+         {scope_kind, projects},
+         state_names,
+         assignee_filter,
+         graphql_fun \\ &graphql/2
+       )
+       when scope_kind in [:slug, :name] and is_list(projects) and is_list(state_names) and
+              is_function(graphql_fun, 2) do
     projects
     |> Enum.reduce_while({:ok, []}, fn project, {:ok, acc_issues} ->
       case do_fetch_by_states(scope_kind, project, state_names, assignee_filter, graphql_fun) do
@@ -342,14 +348,24 @@ defmodule SymphonyElixir.Linear.Client do
   end
 
   defp do_fetch_by_states_page(scope_kind, project, state_names, assignee_filter, after_cursor, acc_issues, graphql_fun) do
+    variables = project_query_variables(scope_kind, project, state_names, after_cursor)
+
     with {:ok, body} <-
-           graphql_fun.(project_query(scope_kind), project_query_variables(scope_kind, project, state_names, after_cursor)),
+           graphql_fun.(project_query(scope_kind), variables),
          {:ok, issues, page_info} <- decode_linear_page_response(body, assignee_filter) do
       updated_acc = prepend_page_issues(issues, acc_issues)
 
       case next_page_cursor(page_info) do
         {:ok, next_cursor} ->
-          do_fetch_by_states_page(scope_kind, project, state_names, assignee_filter, next_cursor, updated_acc, graphql_fun)
+          do_fetch_by_states_page(
+            scope_kind,
+            project,
+            state_names,
+            assignee_filter,
+            next_cursor,
+            updated_acc,
+            graphql_fun
+          )
 
         :done ->
           {:ok, finalize_paginated_issues(updated_acc)}

@@ -121,6 +121,8 @@ defmodule SymphonyElixir.SymphonyRunTest do
       {"SYMPHONY_RUN_CAPTURE", capture_path},
       {"SYMPHONY_RUN_CALLS", calls_path},
       {"SYMPHONY_PROFILE", nil},
+      {"SYMPHONY_REPO", nil},
+      {"SYMPHONY_BASE_BRANCH", nil},
       {"AUTOMATED_REVIEWER", nil}
     ]
 

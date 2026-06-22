@@ -1179,8 +1179,6 @@ defmodule SymphonyElixir.Orchestrator do
     |> Enum.any?(&(normalize_issue_label(&1) == normalized_label))
   end
 
-  defp issue_has_label?(_issue, _label), do: false
-
   defp normalize_issue_label(label) when is_binary(label) do
     label
     |> String.trim()
