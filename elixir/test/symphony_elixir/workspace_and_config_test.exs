@@ -1520,6 +1520,9 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     previous_repo = System.get_env("SYMPHONY_REPO")
     previous_base_branch = System.get_env("SYMPHONY_BASE_BRANCH")
     previous_workflow_dir = System.get_env("SYMPHONY_WORKFLOW_DIR")
+    previous_git_config_count = System.get_env("GIT_CONFIG_COUNT")
+    previous_git_config_key_0 = System.get_env("GIT_CONFIG_KEY_0")
+    previous_git_config_value_0 = System.get_env("GIT_CONFIG_VALUE_0")
     original_workflow_path = Workflow.workflow_file_path()
 
     try do
@@ -1546,7 +1549,6 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       #!/usr/bin/env bash
       set -euo pipefail
 
-      git init -b main >/dev/null
       git config user.name "Test User"
       git config user.email "test@example.com"
       mkdir -p .agents/skills/linear
@@ -1568,9 +1570,12 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       System.put_env(workflow_root_env_var, workspace_root)
       System.put_env("PATH", fake_bin_dir <> ":" <> (previous_path || ""))
       System.put_env("SYMPHONY_TEST_CLONE_SOURCE", clone_source)
-      System.put_env("GITHUB_FORK_OWNER", "test-owner")
+      System.put_env("GITHUB_FORK_OWNER", "agavemindlab")
       System.put_env("SYMPHONY_REPO", "symphony")
       System.put_env("SYMPHONY_BASE_BRANCH", "main")
+      System.put_env("GIT_CONFIG_COUNT", "1")
+      System.put_env("GIT_CONFIG_KEY_0", "url.file://#{clone_source}.insteadOf")
+      System.put_env("GIT_CONFIG_VALUE_0", "https://github.com/agavemindlab/symphony.git")
       System.delete_env("SYMPHONY_WORKFLOW_DIR")
       Workflow.set_workflow_file_path(Path.expand(project_workflow))
 
@@ -1581,7 +1586,8 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       assert File.exists?(Path.join([workspace, ".agents", "skills", "symphony-linear", "SKILL.md"]))
       assert File.read!(Path.join([workspace, ".agents", "skills", "linear", "SKILL.md"])) == "repo version\n"
 
-      exclude = File.read!(Path.join([workspace, ".git", "info", "exclude"]))
+      {exclude_path, 0} = System.cmd("git", ["-C", workspace, "rev-parse", "--git-path", "info/exclude"])
+      exclude = File.read!(String.trim(exclude_path))
       assert exclude =~ ".agents/skills/phase-implementation/"
       assert exclude =~ ".agents/skills/symphony-commit/"
       assert exclude =~ ".agents/skills/symphony-linear/"
@@ -1600,6 +1606,9 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       restore_env("SYMPHONY_REPO", previous_repo)
       restore_env("SYMPHONY_BASE_BRANCH", previous_base_branch)
       restore_env("SYMPHONY_WORKFLOW_DIR", previous_workflow_dir)
+      restore_env("GIT_CONFIG_COUNT", previous_git_config_count)
+      restore_env("GIT_CONFIG_KEY_0", previous_git_config_key_0)
+      restore_env("GIT_CONFIG_VALUE_0", previous_git_config_value_0)
       File.rm_rf(test_root)
     end
   end
@@ -1676,6 +1685,9 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     previous_repo = System.get_env("SYMPHONY_REPO")
     previous_base_branch = System.get_env("SYMPHONY_BASE_BRANCH")
     previous_workflow_dir = System.get_env("SYMPHONY_WORKFLOW_DIR")
+    previous_git_config_count = System.get_env("GIT_CONFIG_COUNT")
+    previous_git_config_key_0 = System.get_env("GIT_CONFIG_KEY_0")
+    previous_git_config_value_0 = System.get_env("GIT_CONFIG_VALUE_0")
     original_workflow_path = Workflow.workflow_file_path()
 
     try do
@@ -1715,9 +1727,12 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       System.put_env(workflow_root_env_var, workspace_root)
       System.put_env("PATH", fake_bin_dir <> ":" <> (previous_path || ""))
       System.put_env("SYMPHONY_TEST_CLONE_SOURCE", clone_source)
-      System.put_env("GITHUB_FORK_OWNER", "test-owner")
+      System.put_env("GITHUB_FORK_OWNER", "agavemindlab")
       System.put_env("SYMPHONY_REPO", "symphony")
       System.put_env("SYMPHONY_BASE_BRANCH", "main")
+      System.put_env("GIT_CONFIG_COUNT", "1")
+      System.put_env("GIT_CONFIG_KEY_0", "url.file://#{clone_source}.insteadOf")
+      System.put_env("GIT_CONFIG_VALUE_0", "https://github.com/agavemindlab/symphony.git")
       System.delete_env("SYMPHONY_WORKFLOW_DIR")
       Workflow.set_workflow_file_path(Path.expand(project_workflow))
 
@@ -1736,6 +1751,9 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       restore_env("SYMPHONY_REPO", previous_repo)
       restore_env("SYMPHONY_BASE_BRANCH", previous_base_branch)
       restore_env("SYMPHONY_WORKFLOW_DIR", previous_workflow_dir)
+      restore_env("GIT_CONFIG_COUNT", previous_git_config_count)
+      restore_env("GIT_CONFIG_KEY_0", previous_git_config_key_0)
+      restore_env("GIT_CONFIG_VALUE_0", previous_git_config_value_0)
       File.rm_rf(test_root)
     end
   end
