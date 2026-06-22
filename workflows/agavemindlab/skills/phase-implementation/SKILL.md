@@ -187,34 +187,68 @@ comfort.
 ```md
 ## Implementation
 
-**PR**: [#NNNN](URL) · **CI**: [green|red](URL) · `<short-sha>`
+### 当前对象
 
-### 实现摘要
-<3-5 句中文 prose。回答：解决了什么；选定方案是什么；为什么改是对的
-（含关键数字 inline）；是否有 reviewer 需要知道的不放心点。
-读完 reviewer 应能 30 秒内决定是否批准。>
+- **Status**: Waiting for human PR review
+- Spec: <source issue/comment, e.g. DEV-123 `## Design` or Source comment: URL>
+- PR: <PR URL>
+- Head: `<full head sha>`
+- CI: `<workflow/check>` <passed|failed|pending>
+- Automated review: `<reviewer>` <approved|commented|timed out>, 只作为自动
+  review evidence，不等于人工批准
 
-### 验收对照（acceptance criteria）
-- **S1: <criterion>**
-  - 状态: ✅ 通过
-  - 证据: <命令或检查结果>
-- **S2: <criterion>**
-  - 状态: ⚠️ 部分通过
-  - 证据: <caveat>
-- **S3: <criterion>**
-  - 状态: ➖ N/A
-  - 证据: <原因>
+### Root cause（根因）
 
-### 看哪里（optional: non-obvious diff areas only）
-- [`path/file` L120-L145](URL) — <one sentence why reviewer should look here>
+<用中文说明 accepted root cause / chosen approach。讲清楚为什么这个改动能解决
+问题，不要把 PR 状态、验证输出和根因混在同一段。>
 
-### 风险/注意（optional）
-- <one sentence per item; omit if none>
+### Rework 已回应（omit if not rework）
 
-### Merge 后验证（optional: one entry per `延迟验收` S<N> — see below）
-- S<N>: **查询** `<exact runnable query/command against the prod log / error tracker>` · **通过判据** `<pass/fail predicate, e.g. 匹配条数 == 0>` · **观察窗口** `<length, e.g. 7 天>`
+- Source comment: <Linear / GitHub feedback URL>
+- Current-main compatibility: <当前 head 是否已刷新到 current `main`，以及
+  mergeability / 冲突状态>
+- <逐条说明旧证据、旧 head、旧假设或 reviewer feedback 如何被替换 / 回应>
 
-> 👉 **需要人工处理**：审查 PR，批准后将 issue 移至 `Merging`；需要修改则移至 `Rework`。
+### Code changes
+
+- `path/file`
+  - <中文说明该文件改了什么和为什么>
+- `path/test_file`
+  - <中文说明覆盖了哪些行为 / 回归>
+
+### Verification
+
+- <命令或检查>: `<关键结果，例如 14 passed>`
+- <CI / reviewer signal>: <当前 head 上的结论；自动 review 只能作为 evidence>
+- S2 direct verification: <对当场可验或 Implementation 阶段验收项的直接证明>
+
+### Acceptance mapping
+
+- S1: <状态 + 证据；若是延迟验收，写 S1 post-deploy close test，并给出
+  观察窗口 / 查询方法>
+- S2: <状态 + 证据；说明失败条件仍会被拒绝或不回归>
+- S<N>: <状态 + 证据>
+
+### 合并风险判断（required: 2-3 bullets）
+
+- 漏 bug 最坏影响: <如果仍有漏 bug，合并后最坏会造成什么影响>
+- 敏感风险: <是否涉及服务故障 / 数据损坏 / 权限隐私 / 不可逆状态；
+  低风险也必须说明为什么低风险>
+- 缓解措施或 Deployment 验证: <已做的缓解措施，或合并后需要如何验证>
+
+### Merge 后验证（optional: one entry per `延迟验收` S<N>）
+
+- S<N>: **查询** `<exact runnable query/command>` · **通过判据**
+  `<pass/fail predicate, e.g. 匹配条数 == 0>` · **观察窗口** `<length>`
+
+### Human action needed
+
+> 👉 **需要人工处理**：审查 PR；无异议请将 issue 移至 `Merging`，需要修改则移至
+> `Rework`。
+
+### 风险/注意（optional: non-merge caveats only）
+
+- <只列不属于合并风险判断、但仍影响 review 的事项；没有就省略>
 
 >>> 🛠️ 本次激活的 skills（mirror workpad notes: invoked + Skipped）
 - Codex session id: `<session_id | n/a>`

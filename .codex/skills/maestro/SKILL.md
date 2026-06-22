@@ -29,24 +29,67 @@ review judgment in the parent agent.
    - Gather new human feedback from every unresolved artifact thread and from
      standalone top-level human comments. Attribute unclear standalone comments
      to the awaiting-review phase.
-4. Inspect linked PRs only when `## Implementation` is awaiting review:
+   - When `## Deployment` is awaiting review, include the accepted close test:
+     the `## Requirements` acceptance criteria plus later human-approved scope
+     or verification changes.
+   - For runtime-secret contract work, include whether the named runtime
+     variables are present, without printing their values.
+4. Inspect spawned or related issues mentioned by the current artifacts and
+   Linear relations. Include each related issue's relation type, state, assignee,
+   whether it is blocked by or blocks the reviewed issue, whether downstream
+   issues have enough context to start safely after the reviewed issue is closed,
+   and whether validation or disposable issues have a durable relation plus a
+   terminal cleanup state.
+5. Inspect linked PRs when `## Implementation` is awaiting review. Also
+   inspect merged PR file lists or artifact evidence for `## Deployment` when a
+   `Type:Feature` issue appears to add user-facing configuration, commands,
+   workflow behavior, environment variables, or public usage paths, so the
+   reviewer can check for minimal usage docs or examples.
+   For Implementation:
+   - Identify the project's configured automated reviewer accounts first
+     (especially `AUTOMATED_REVIEWER` from workflow env/defaults, such as
+     `workflows/<project>/project.env*`). Treat those accounts as automated
+     even if GitHub does not mark them as bots.
    - `gh pr view <pr> --json number,title,url,state,isDraft,mergeable,reviewDecision,statusCheckRollup,reviews,comments`
    - `gh pr diff <pr>`
    - `gh pr checks <pr>` when available
-   - Treat only human PR reviews/comments as phase feedback; ignore bot approval
-     as a human approval signal.
-5. Read `agents/maestro-reviewer.md` and spawn exactly one fresh subagent with
+   - Treat only human PR reviews/comments as phase feedback; ignore bot or
+     configured automated reviewer approval as a human approval signal.
+6. Read `agents/maestro-reviewer.md` and spawn exactly one fresh subagent with
    context forking disabled. Pass only that reviewer prompt and the explicit
    evidence pack. Do not pass current conversation history, prior `$maestro`
    results, or your own expected answer.
-6. Compare the subagent's recommendation with the evidence. If it is unsupported
+7. Compare the subagent's recommendation with the evidence. If it is unsupported
    or misses later comments, correct it in the final answer and explain why.
-7. Return a concise Chinese recommendation with:
+8. Return a concise Chinese recommendation with:
    - `建议回复方式`: approve / request changes / ask clarification / merge nudge /
      completion confirmation / no reply yet.
-   - `建议回复`: a ready-to-send Chinese draft.
+   - `回复对象`: next Symphony agent / human.
+   - `回复位置`: awaiting-review artifact thread / none.
+   - `建议 issue status`: In Progress / Merging / Rework / Done / unchanged.
+   - `建议回复`: a ready-to-send Chinese draft. For approve, request changes,
+     merge nudge, and completion confirmation, set `回复对象` to next Symphony
+     agent and write it as the human's review note for the next run. For ask
+     clarification and no reply yet, set `回复对象` to human and write it for
+     the human, explaining what Maestro cannot decide.
    - `依据`: 2-5 evidence bullets.
    - `注意`: only if there is uncertainty or missing evidence.
+
+## Acting for the Human
+
+By default, `$maestro ISSUE-1234` is read-only. If the user explicitly asks you
+to send the reply for them, e.g. "帮我回复", then:
+
+1. Reply in the exact target thread:
+   - approve / request changes / ask clarification / completion confirmation:
+     reply to the awaiting-review phase artifact's thread.
+   - merge nudge: do not add a nudge comment unless the recommendation includes
+     a human-facing clarification; the state change to `Merging` is the signal.
+   - no reply yet: do not create a Linear comment.
+2. Update the issue to `建议 issue status` when it is not `unchanged`.
+3. Never resolve comments, write phase-closing replies (`✅ 已批准...`), create
+   PR comments, merge, deploy, or move to `Done` unless the recommendation says
+   `Done` and the user explicitly asked you to act.
 
 ## Evidence Pack
 
@@ -71,14 +114,54 @@ Other unresolved phase artifacts and feedback:
 Clarification markers:
 <unresolved [NEEDS CLARIFICATION] markers and human answers, or "none">
 
+Acceptance source of truth for all phases:
+<approved Requirements acceptance criteria and later human-approved changes, or "unknown">
+
+Runtime secret provisioning:
+<required variable names and present/missing status only, or "not applicable">
+
+User-facing documentation evidence:
+<docs, examples, README/config updates for new user-facing feature usage, or
+"not applicable" / "none found">
+
+Spawned or related issue evidence:
+<issue identifiers, relation types, state/assignee, blocker relation status,
+whether any downstream issue can be selected before this one is accepted,
+whether the downstream issue has enough context to start safely after the
+reviewed issue is closed, validation/disposable issue cleanup status, or "none">
+
 Linked PR evidence, only for Implementation review:
-<PR metadata, checks, human review state/comments, important diff summary, or "none">
+<PR metadata, checks, configured automated reviewer accounts, human review
+state/comments after excluding bots/automated reviewers, important diff summary,
+or "none">
+
+Behavioral diff / new failure windows, only for bugfix Implementation review:
+<side effects moved earlier/later, durable state before success, failure points
+after those side effects, and tests or explanations covering them, or "none
+identified">
 
 Task:
 1. Decide the best reply method: approve, request changes, ask clarification,
    merge nudge, completion confirmation, or no reply yet.
-2. Draft the exact Chinese reply the human could post.
-3. Cite the decisive evidence and call out missing evidence or uncertainty.
+2. State the reply audience: next Symphony agent or human.
+3. State the reply location.
+4. State the recommended Linear issue status after the reply.
+5. Draft the exact Chinese reply the human could post. For approve, request
+   changes, merge nudge, and completion confirmation, address the next Symphony
+   agent run. For ask clarification and no reply yet, address the human.
+6. For every phase, compare the artifact's evidence with the acceptance source
+   of truth; do not rely only on the Symphony agent's self-assessment or `✅`
+   statuses.
+7. Apply the relevant review lens from the reviewer prompt: Requirements /
+   Design rigor, Implementation / Deployment verification, or bugfix / rework
+   root cause.
+8. Check whether spawned or related issues have the dependency relation or
+   cleanup disposition needed to prevent unsafe parallel work or orphaned
+   validation artifacts, and whether downstream issues have enough inherited
+   context to start safely once unblocked.
+9. For bugfixes, reject artifacts that do not explain new failure windows caused
+   by moved side effects or durable state before success.
+10. Cite the decisive evidence and call out missing evidence or uncertainty.
 Keep the answer concise and do not recommend changing state directly unless the
 human's reply should explicitly instruct that.
 ```

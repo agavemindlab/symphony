@@ -138,36 +138,30 @@ defmodule SymphonyElixir.Workspace do
 
   @spec remove_issue_workspaces(term(), worker_host()) :: :ok
   def remove_issue_workspaces(issue_or_identifier, worker_host) when is_binary(worker_host) do
-    with %{issue_identifier: identifier} = issue_context when is_binary(identifier) <-
-           removable_issue_context(issue_or_identifier) do
-      safe_id = safe_identifier(identifier)
+    case removable_issue_context(issue_or_identifier) do
+      %{issue_identifier: identifier} = issue_context when is_binary(identifier) ->
+        identifier
+        |> safe_identifier()
+        |> remove_issue_workspace_for_worker(worker_host, issue_context)
 
-      case workspace_path_for_issue(safe_id, worker_host) do
-        {:ok, workspace} -> remove(workspace, worker_host, issue_context)
-        {:error, _reason} -> :ok
-      end
-    else
-      _ -> :ok
+      _ ->
+        :ok
     end
 
     :ok
   end
 
   def remove_issue_workspaces(issue_or_identifier, nil) do
-    with %{issue_identifier: identifier} = issue_context when is_binary(identifier) <-
-           removable_issue_context(issue_or_identifier) do
-      safe_id = safe_identifier(identifier)
+    case removable_issue_context(issue_or_identifier) do
+      %{issue_identifier: identifier} = issue_context when is_binary(identifier) ->
+        remove_issue_workspaces_for_configured_workers(
+          issue_or_identifier,
+          safe_identifier(identifier),
+          issue_context
+        )
 
-      case Config.settings!().worker.ssh_hosts do
-        [] ->
-          case workspace_path_for_issue(safe_id, nil) do
-            {:ok, workspace} -> remove(workspace, nil, issue_context)
-            {:error, _reason} -> :ok
-          end
-
-        worker_hosts ->
-          Enum.each(worker_hosts, &remove_issue_workspaces(issue_or_identifier, &1))
-      end
+      _ ->
+        :ok
     end
 
     :ok
@@ -175,6 +169,73 @@ defmodule SymphonyElixir.Workspace do
 
   def remove_issue_workspaces(_identifier, _worker_host) do
     :ok
+  end
+
+  @spec issue_workspace_exists?(term()) :: boolean()
+  def issue_workspace_exists?(issue_or_identifier) do
+    case removable_issue_context(issue_or_identifier) do
+      %{issue_identifier: identifier} when is_binary(identifier) ->
+        issue_workspace_exists_for_configured_workers?(safe_identifier(identifier))
+
+      _ ->
+        false
+    end
+  end
+
+  defp issue_workspace_exists_for_configured_workers?(safe_id) when is_binary(safe_id) do
+    case Config.settings!().worker.ssh_hosts do
+      [] ->
+        issue_workspace_exists_for_worker?(safe_id, nil)
+
+      worker_hosts ->
+        Enum.any?(worker_hosts, &issue_workspace_exists_for_worker?(safe_id, &1))
+    end
+  end
+
+  defp issue_workspace_exists_for_worker?(safe_id, nil) when is_binary(safe_id) do
+    with {:ok, workspace} <- workspace_path_for_issue(safe_id, nil),
+         :ok <- validate_workspace_path(workspace, nil) do
+      File.exists?(workspace)
+    else
+      _ -> false
+    end
+  end
+
+  defp issue_workspace_exists_for_worker?(safe_id, worker_host)
+       when is_binary(safe_id) and is_binary(worker_host) do
+    with {:ok, workspace} <- workspace_path_for_issue(safe_id, worker_host),
+         :ok <- validate_workspace_path(workspace, worker_host) do
+      script =
+        [
+          remote_shell_assign("workspace", workspace),
+          "[ -e \"$workspace\" ]"
+        ]
+        |> Enum.join("\n")
+
+      case run_remote_command(worker_host, script, Config.settings!().hooks.timeout_ms) do
+        {:ok, {_output, 0}} -> true
+        _ -> false
+      end
+    else
+      _ -> false
+    end
+  end
+
+  defp remove_issue_workspaces_for_configured_workers(issue_or_identifier, safe_id, issue_context) do
+    case Config.settings!().worker.ssh_hosts do
+      [] ->
+        remove_issue_workspace_for_worker(safe_id, nil, issue_context)
+
+      worker_hosts ->
+        Enum.each(worker_hosts, &remove_issue_workspaces(issue_or_identifier, &1))
+    end
+  end
+
+  defp remove_issue_workspace_for_worker(safe_id, worker_host, issue_context) do
+    case workspace_path_for_issue(safe_id, worker_host) do
+      {:ok, workspace} -> remove(workspace, worker_host, issue_context)
+      {:error, _reason} -> :ok
+    end
   end
 
   @spec run_before_run_hook(Path.t(), map() | String.t() | nil, worker_host()) ::
@@ -311,11 +372,19 @@ defmodule SymphonyElixir.Workspace do
 
     Logger.info("Running workspace hook hook=#{hook_name} #{issue_log_context(issue_context)} workspace=#{workspace} worker_host=local")
 
+    script =
+      [
+        hook_env_exports(issue_context),
+        command
+      ]
+      |> Enum.reject(&(&1 == ""))
+      |> Enum.join("\n")
+
     task =
       Task.async(fn ->
-        System.cmd("sh", ["-lc", command],
+        System.cmd("sh", ["-lc", script],
           cd: workspace,
-          env: local_hook_env(issue_context),
+          env: cleared_hook_env(),
           stderr_to_stdout: true
         )
       end)
@@ -357,11 +426,6 @@ defmodule SymphonyElixir.Workspace do
       {:error, reason} ->
         {:error, reason}
     end
-  end
-
-  defp local_hook_env(issue_context) do
-    issue_context
-    |> hook_env()
   end
 
   defp handle_hook_command_result({_output, 0}, _workspace, _issue_id, _hook_name) do
@@ -531,12 +595,33 @@ defmodule SymphonyElixir.Workspace do
     |> Kernel.++(project_hook_env(Map.get(issue_context, :project)))
   end
 
+  defp cleared_hook_env do
+    [
+      "SYMPHONY_WORKFLOW_DIR",
+      "SYMPHONY_PROJECT_DIR",
+      "SYMPHONY_LINEAR_PROJECT_ID",
+      "SYMPHONY_LINEAR_PROJECT_SLUG",
+      "SYMPHONY_LINEAR_PROJECT_NAME"
+    ]
+    |> Enum.map(&{&1, nil})
+  end
+
   defp remote_hook_env_exports(issue_context) do
-    issue_context
-    |> hook_env()
-    |> Enum.map_join("\n", fn {name, value} ->
-      "#{name}=#{shell_escape(value)}\nexport #{name}"
-    end)
+    hook_env_exports(issue_context)
+  end
+
+  defp hook_env_exports(issue_context) do
+    exports =
+      issue_context
+      |> hook_env()
+      |> Enum.map_join("\n", fn {name, value} ->
+        "#{name}=#{shell_escape(value)}\nexport #{name}"
+      end)
+
+    """
+    unset SYMPHONY_PROJECT_DIR SYMPHONY_LINEAR_PROJECT_ID SYMPHONY_LINEAR_PROJECT_SLUG SYMPHONY_LINEAR_PROJECT_NAME
+    #{exports}
+    """
   end
 
   defp project_hook_env(%{id: id, slug_id: slug_id, name: name}) do
