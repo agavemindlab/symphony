@@ -320,6 +320,29 @@ workpad Plan item), it invokes the `symphony-issue` skill. Two tiers:
   comment and creates nothing until a human replies consent in that comment's
   thread; Main Flow step 4 fulfills the consent.
 
+Canonical project routing registry for spawned issues:
+
+| Linear project | Execution domain | Route here for |
+|----------------|------------------|----------------|
+| `symphony` | Symphony orchestration and shared workflow behavior | workflow prompts, phase skills, agent state, Linear/GitHub review flow, Maestro advisor behavior |
+| `grotto` | Grotto repository delivery | app/repo code, repo CI, release workflow, repo-owned runbooks, repo-side staging gate logic |
+| `gl-infra` | Operational infrastructure | clusters/namespaces, DB/Redis/PVC/storage, secrets, NetworkPolicy, RBAC, GitHub protected environments, operator profiles, runtime accounts, reset/seed, feature-flag allowlists |
+| `gl-skills` | Reusable agent capability packages | standalone skills/plugins/tools that are not specific to the Symphony workflow itself or one product repo |
+
+Use the registry before invoking or fulfilling `symphony-issue`. Default to the
+current issue's project only when the discovered work fits that project's
+execution domain. If one discovery spans multiple execution domains, split it
+into multiple spawned issues and link the dependencies that express the real
+block. If the registry does not make the route clear, do not create a likely
+misrouted issue; ask for human routing clarification in the current phase
+artifact.
+
+Regression anchor: for DEV-5236/DEV-5324, repo-side staging gate work stays in
+`grotto`, while `grotto-staging` namespace, DB/Redis, PVC, Kubernetes secrets,
+NetworkPolicy, RBAC, GitHub protected environment, staging test user,
+reset/seed, and feature-flag allowlist prerequisites route to `gl-infra`; a
+downstream issue with no project/routing evidence is not approval-ready.
+
 Safety invariants for every spawned issue: it lands in the team's **intake
 state** (resolved by `type` — `triage` else `backlog`, never by name), is
 **assigned to the current issue's `creator`**, never to Symphony, and is
