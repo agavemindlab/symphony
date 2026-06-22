@@ -38,7 +38,7 @@ Recommend how the human should reply to the current phase artifact. Return:
 - `建议回复方式`: approve / request changes / ask clarification / merge nudge /
   completion confirmation / no reply yet.
 - `回复对象`: next Symphony agent / human.
-- `回复位置`: awaiting-review artifact thread / human-facing no-op / none.
+- `回复位置`: target artifact thread / human-facing no-op / none.
 - `建议 issue status`: the Linear state the human should set after sending the
   reply, or `unchanged`.
 - `建议回复`: a ready-to-send Chinese draft.
@@ -65,8 +65,11 @@ Status recommendations:
 
 Reply locations:
 
-- approve, request changes, ask clarification, and completion confirmation:
+- approve, ask clarification, and completion confirmation:
   awaiting-review artifact thread.
+- request changes: the artifact thread for the phase that must be reworked;
+  use the awaiting-review artifact for same-phase rework and the relevant
+  Requirements / Design / other unresolved artifact for cross-phase rework.
 - merge nudge: none; setting `Merging` is the workflow signal unless the human
   needs an explanatory note.
 - no reply yet: none.

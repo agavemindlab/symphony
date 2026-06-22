@@ -66,7 +66,7 @@ review judgment in the parent agent.
    - `建议回复方式`: approve / request changes / ask clarification / merge nudge /
      completion confirmation / no reply yet.
    - `回复对象`: next Symphony agent / human.
-   - `回复位置`: awaiting-review artifact thread / none.
+   - `回复位置`: target artifact thread / none.
    - `建议 issue status`: In Progress / Merging / Rework / Done / unchanged.
    - `建议回复`: a ready-to-send Chinese draft. For approve, request changes,
      merge nudge, and completion confirmation, set `回复对象` to next Symphony
@@ -82,8 +82,12 @@ By default, `$maestro ISSUE-1234` is read-only. If the user explicitly asks you
 to send the reply for them, e.g. "帮我回复", then:
 
 1. Reply in the exact target thread:
-   - approve / request changes / ask clarification / completion confirmation:
-     reply to the awaiting-review phase artifact's thread.
+   - approve / ask clarification / completion confirmation: reply to the
+     awaiting-review phase artifact's thread.
+   - request changes: reply to the artifact thread for the phase that must be
+     reworked; for same-phase rework this is the awaiting-review artifact, and
+     for cross-phase rework this may be Requirements, Design, or another
+     unresolved artifact.
    - merge nudge: do not add a nudge comment unless the recommendation includes
      a human-facing clarification; the state change to `Merging` is the signal.
    - no reply yet: do not create a Linear comment.
