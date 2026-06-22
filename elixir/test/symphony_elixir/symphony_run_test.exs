@@ -50,7 +50,8 @@ defmodule SymphonyElixir.SymphonyRunTest do
   test "rebuilds the escript before launching" do
     capture = run_launcher!("grandline", project_env: "SYMPHONY_PROJECT_SLUGS=\"project-a\"\n")
 
-    assert capture["CALLS"] == "exec -- mix escript.build|exec -- ./bin/symphony --i-understand-that-this-will-be-running-without-the-usual-guardrails #{capture["WORKFLOW"]}"
+    assert capture["CALLS"] ==
+             "exec -- mix escript.build|exec -- ./bin/symphony --i-understand-that-this-will-be-running-without-the-usual-guardrails #{capture["WORKFLOW"]}"
   end
 
   test "Agavemindlab Linear project slugs use Linear slugId values" do
@@ -72,6 +73,58 @@ defmodule SymphonyElixir.SymphonyRunTest do
     assert actual_slugs == expected_slugs
   end
 
+  test "mints GitHub App token when app credentials are configured" do
+    capture = run_launcher!("symphony", github_app: true)
+
+    assert capture["GH_TOKEN"] == "test-installation-token"
+    assert capture["GITHUB_TOKEN"] == "test-installation-token"
+    assert capture["GITHUB_FORK_OWNER"] == "agavemindlab"
+    assert capture["GIT_AUTHOR_NAME"] == "gl-symphony[bot]"
+    assert capture["GIT_AUTHOR_EMAIL"] == "gl-symphony[bot]@users.noreply.github.com"
+    assert capture["GIT_COMMITTER_NAME"] == "gl-symphony[bot]"
+    assert capture["GIT_COMMITTER_EMAIL"] == "gl-symphony[bot]@users.noreply.github.com"
+
+    refute String.contains?(capture["GH_TOKEN"], "BEGIN")
+    refute String.contains?(capture["GIT_AUTHOR_EMAIL"], "test-private-key")
+  end
+
+  test "GitHub App mode replaces profile GitHub credentials" do
+    capture =
+      run_launcher!("symphony",
+        github_app: true,
+        profile_env: """
+        LINEAR_API_KEY="test-token"
+        GH_TOKEN="profile-pat"
+        GITHUB_TOKEN="profile-pat"
+        GITHUB_FORK_OWNER="hongqn"
+        GITHUB_APP_ID="4075542"
+        GITHUB_APP_INSTALLATION_ID="140846909"
+        GITHUB_APP_PRIVATE_KEY_PATH="{PRIVATE_KEY_PATH}"
+        """
+      )
+
+    assert capture["GH_TOKEN"] == "test-installation-token"
+    assert capture["GITHUB_TOKEN"] == "test-installation-token"
+    assert capture["GITHUB_FORK_OWNER"] == "agavemindlab"
+  end
+
+  test "skips GitHub App API calls when app credentials are absent" do
+    capture =
+      run_launcher!("symphony",
+        profile_env: """
+        LINEAR_API_KEY="test-token"
+        GH_TOKEN="profile-pat"
+        GITHUB_TOKEN="profile-pat"
+        GITHUB_FORK_OWNER="hongqn"
+        """
+      )
+
+    assert capture["GH_TOKEN"] == "profile-pat"
+    assert capture["GITHUB_TOKEN"] == "profile-pat"
+    assert capture["GITHUB_FORK_OWNER"] == "hongqn"
+    assert capture["GITHUB_APP_API_CALLS"] == ""
+  end
+
   defp run_launcher!(project, opts \\ []) do
     run_id = System.unique_integer([:positive])
     tmp_root = Path.join(System.tmp_dir!(), "symphony-run-test-#{run_id}")
@@ -80,6 +133,8 @@ defmodule SymphonyElixir.SymphonyRunTest do
     fake_repo_root = Path.join(tmp_root, "repo")
     capture_path = Path.join(tmp_root, "capture.env")
     calls_path = Path.join(tmp_root, "calls.log")
+    curl_capture_path = Path.join(tmp_root, "curl-capture.log")
+    private_key_path = Path.join(tmp_root, "test-private-key.pem")
 
     File.mkdir_p!(Path.join(home, ".config/symphony"))
     File.mkdir_p!(fake_bin)
@@ -106,13 +161,21 @@ defmodule SymphonyElixir.SymphonyRunTest do
     File.write!(Path.join(fake_repo_root, "workflows/#{project}/project.env"), project_env)
     File.write!(Path.join(fake_repo_root, "workflows/#{project}/WORKFLOW.md"), "# Test workflow\n")
 
-    File.write!(
-      Path.join(home, ".config/symphony/grandline.env"),
-      Keyword.get(opts, :profile_env, "LINEAR_API_KEY=\"test-token\"\n")
-    )
+    profile_env =
+      opts
+      |> Keyword.get(:profile_env, profile_env(opts, private_key_path))
+      |> String.replace("{PRIVATE_KEY_PATH}", private_key_path)
+
+    File.write!(Path.join(home, ".config/symphony/grandline.env"), profile_env)
 
     File.write!(Path.join(fake_bin, "mise"), fake_mise_script())
     File.chmod!(Path.join(fake_bin, "mise"), 0o755)
+    File.write!(Path.join(fake_bin, "curl"), fake_curl_script())
+    File.chmod!(Path.join(fake_bin, "curl"), 0o755)
+
+    if Keyword.get(opts, :github_app, false) do
+      File.write!(private_key_path, test_private_key())
+    end
 
     env = [
       {"HOME", home},
@@ -120,10 +183,18 @@ defmodule SymphonyElixir.SymphonyRunTest do
       {"SYMPHONY_REPO_ROOT", fake_repo_root},
       {"SYMPHONY_RUN_CAPTURE", capture_path},
       {"SYMPHONY_RUN_CALLS", calls_path},
+      {"SYMPHONY_RUN_CURL_CAPTURE", curl_capture_path},
       {"SYMPHONY_PROFILE", nil},
       {"SYMPHONY_REPO", nil},
       {"SYMPHONY_BASE_BRANCH", nil},
-      {"AUTOMATED_REVIEWER", nil}
+      {"AUTOMATED_REVIEWER", nil},
+      {"GH_TOKEN", nil},
+      {"GITHUB_TOKEN", nil},
+      {"GITHUB_FORK_OWNER", nil},
+      {"GIT_AUTHOR_NAME", nil},
+      {"GIT_AUTHOR_EMAIL", nil},
+      {"GIT_COMMITTER_NAME", nil},
+      {"GIT_COMMITTER_EMAIL", nil}
     ]
 
     try do
@@ -133,8 +204,22 @@ defmodule SymphonyElixir.SymphonyRunTest do
       capture_path
       |> File.read!()
       |> parse_capture()
+      |> Map.put("GITHUB_APP_API_CALLS", read_if_exists(curl_capture_path))
     after
       File.rm_rf(tmp_root)
+    end
+  end
+
+  defp profile_env(opts, private_key_path) do
+    if Keyword.get(opts, :github_app, false) do
+      """
+      LINEAR_API_KEY="test-token"
+      GITHUB_APP_ID="4075542"
+      GITHUB_APP_INSTALLATION_ID="140846909"
+      GITHUB_APP_PRIVATE_KEY_PATH="#{private_key_path}"
+      """
+    else
+      "LINEAR_API_KEY=\"test-token\"\n"
     end
   end
 
@@ -159,12 +244,89 @@ defmodule SymphonyElixir.SymphonyRunTest do
       printf 'SYMPHONY_PROJECT_NAMES=%s\\n' "${SYMPHONY_PROJECT_NAMES-}"
       printf 'SYMPHONY_REPO=%s\\n' "${SYMPHONY_REPO-}"
       printf 'SYMPHONY_BASE_BRANCH=%s\\n' "${SYMPHONY_BASE_BRANCH-}"
+      printf 'GH_TOKEN=%s\\n' "${GH_TOKEN-}"
+      printf 'GITHUB_TOKEN=%s\\n' "${GITHUB_TOKEN-}"
+      printf 'GITHUB_FORK_OWNER=%s\\n' "${GITHUB_FORK_OWNER-}"
+      printf 'GIT_AUTHOR_NAME=%s\\n' "${GIT_AUTHOR_NAME-}"
+      printf 'GIT_AUTHOR_EMAIL=%s\\n' "${GIT_AUTHOR_EMAIL-}"
+      printf 'GIT_COMMITTER_NAME=%s\\n' "${GIT_COMMITTER_NAME-}"
+      printf 'GIT_COMMITTER_EMAIL=%s\\n' "${GIT_COMMITTER_EMAIL-}"
       printf 'PWD=%s\\n' "$PWD"
       printf 'ARGS=%s\\n' "$*"
       printf 'WORKFLOW=%s\\n' "$workflow"
       printf 'CALLS=%s\\n' "$(paste -sd '|' "$SYMPHONY_RUN_CALLS")"
     } > "$SYMPHONY_RUN_CAPTURE"
     """
+  end
+
+  defp fake_curl_script do
+    """
+    #!/bin/sh
+    method="GET"
+    output_file=""
+    url=""
+    status="200"
+
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        -o)
+          output_file="$2"
+          shift 2
+          ;;
+        -w)
+          shift 2
+          ;;
+        -X)
+          method="$2"
+          shift 2
+          ;;
+        -H)
+          shift 2
+          ;;
+        -s|-S|-L|-sS|-fsS)
+          shift
+          ;;
+        *)
+          url="$1"
+          shift
+          ;;
+      esac
+    done
+
+    printf '%s %s\\n' "$method" "$url" >> "$SYMPHONY_RUN_CURL_CAPTURE"
+
+    case "$method $url" in
+      "GET https://api.github.com/app/installations/140846909")
+        body='{"account":{"login":"agavemindlab"},"app_slug":"gl-symphony"}'
+        ;;
+      "POST https://api.github.com/app/installations/140846909/access_tokens")
+        body='{"token":"test-installation-token","expires_at":"2026-06-17T13:00:00Z"}'
+        ;;
+      *)
+        status="404"
+        body='{"message":"unexpected fake curl request"}'
+        ;;
+    esac
+
+    if [ -n "$output_file" ]; then
+      printf '%s' "$body" > "$output_file"
+    else
+      printf '%s' "$body"
+    fi
+
+    printf '%s' "$status"
+    """
+  end
+
+  defp test_private_key do
+    {pem, 0} =
+      System.cmd("ruby", ["-ropenssl", "-e", "puts OpenSSL::PKey::RSA.new(2048).to_pem"])
+
+    pem
+  end
+
+  defp read_if_exists(path) do
+    if File.exists?(path), do: File.read!(path), else: ""
   end
 
   defp parse_capture(contents) do

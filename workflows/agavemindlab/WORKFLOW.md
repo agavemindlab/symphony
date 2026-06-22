@@ -32,6 +32,8 @@ hooks:
 
     project_workflow_dir="${SYMPHONY_PROJECT_DIR:-$SYMPHONY_WORKFLOW_DIR}"
 
+    # App mode sets GITHUB_FORK_OWNER to the installation account.
+    # PAT/manual mode falls back to the authenticated user.
     fork_owner="${GITHUB_FORK_OWNER:-$(gh api user -q .login)}"
     : "${SYMPHONY_REPO:?SYMPHONY_REPO is not set}"
     fork_repo="$fork_owner/$SYMPHONY_REPO"
