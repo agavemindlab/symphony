@@ -177,6 +177,11 @@ defmodule SymphonyElixir.CoreTest do
     assert prompt =~ "retain each comment's `parent { id }`"
     assert prompt =~ "reply node as standalone top-level feedback"
     assert prompt =~ "## Phase Artifact Protocol"
+    assert prompt =~ "Each phase artifact version is a top-level Linear comment"
+    assert prompt =~ "clarification-answer resume"
+    assert prompt =~ "fresh top-level artifact"
+    refute prompt =~ "exactly one top-level comment"
+    refute prompt =~ "updates the existing one in place via `commentUpdate`"
     assert prompt =~ "## Workpad"
     assert prompt =~ "✅ 已批准，进入 [Next Phase]"
     assert prompt =~ "⏩ 自动进入 [Next Phase]"
@@ -207,14 +212,31 @@ defmodule SymphonyElixir.CoreTest do
   end
 
   test "requirements skill publishes reworked clarification artifacts through workflow protocol" do
+    workflow =
+      File.read!(Path.expand("../workflows/agavemindlab/WORKFLOW.md", File.cwd!()))
+
     skill =
       File.read!(Path.expand("../workflows/agavemindlab/skills/phase-requirements/SKILL.md", File.cwd!()))
 
-    assert skill =~ ~r/same-phase Rework\s+cycle/
+    assert workflow =~ "clarification-answer resume"
+    assert workflow =~ "same-phase Rework cycle"
+    assert workflow =~ "even if the Linear state is `In Progress`"
+    assert workflow =~ "post a fresh top-level artifact"
     assert skill =~ "workflow artifact protocol"
+    assert skill =~ "not the old comment body"
     refute skill =~ "Post (or update) the `## Requirements` artifact"
     refute skill =~ "Post or update the artifact comment."
     refute skill =~ "Post or update the `## Requirements` artifact"
+  end
+
+  test "design skill publishes reworked clarification artifacts through workflow protocol" do
+    skill =
+      File.read!(Path.expand("../workflows/agavemindlab/skills/phase-design/SKILL.md", File.cwd!()))
+
+    assert skill =~ "workflow artifact protocol"
+    assert skill =~ "not the old comment body"
+    refute skill =~ "Post or update the artifact comment."
+    refute skill =~ "Post or update the `## Design` artifact"
   end
 
   test "aggregate dispatch ordering interleaves projects" do

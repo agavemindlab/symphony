@@ -371,7 +371,7 @@ mis-scoped, that is a signal to propose a `sub-issue` split via `symphony-issue`
 When a batched `[NEEDS CLARIFICATION]` block remains after analysis:
 
 1. Write the batched block at the foot of the `## Design` artifact.
-2. Post or update the artifact comment.
+2. Publish the artifact through the workflow artifact protocol.
 3. Move the issue to `Human Review`.
 4. Stop.
 
@@ -389,7 +389,7 @@ When a batched `[NEEDS CLARIFICATION]` block remains after analysis:
 
 ### On resume
 
-Read the human's reply in the artifact thread and apply the consent convention:
+Read the human's reply in the artifact thread and apply the consent convention. Fold answers into the revised artifact content, not the old comment body:
 
 - For each **resolved** question, fold the chosen answer into the artifact
   (the `核心机制` / `方案（approach）` / `选择理由` / `风险/注意` as fitting) and drop
@@ -437,7 +437,7 @@ about form, not correctness:
 - Type-specific approach emphasis satisfied for `Primary:`.
 - No unresolved `[NEEDS CLARIFICATION]` markers.
 
-Post or update the `## Design` artifact and set the workpad
+Publish the `## Design` artifact through the workflow artifact protocol and set the workpad
 `current_phase: Design`. Do **not** move the issue yourself on a clean exit —
 hand back one of two outcomes (`advance` / `stop`) for Main Flow to execute.
 The decision is yours; Main Flow only carries it out.
