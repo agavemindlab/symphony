@@ -2157,6 +2157,10 @@ defmodule SymphonyElixir.CoreTest do
     assert prompt =~ "approve"
     assert prompt =~ "0-10"
     assert prompt =~ "keep the issue in `Human Review`"
+    assert prompt =~ "same current artifact/head"
+    assert prompt =~ "already contains a Maestro pre-review reply"
+    assert prompt =~ "record a short no-action reason"
+    assert prompt =~ "evidence is unavailable"
     refute prompt =~ "✅ 已批准"
 
     assert SymphonyElixir.MaestroPreReview.workspace_identifier_for_test(issue) == "MT-5316-maestro"
