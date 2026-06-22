@@ -92,6 +92,8 @@ defmodule SymphonyElixir.SymphonyRunTest do
       File.read!(Path.join(@repo_root, "workflows/agavemindlab/project.env.defaults"))
     )
 
+    File.write!(Path.join(fake_repo_root, "workflows/agavemindlab/WORKFLOW.md"), "# Test workflow\n")
+
     project_env =
       case Keyword.fetch(opts, :project_env) do
         {:ok, contents} ->
@@ -104,7 +106,7 @@ defmodule SymphonyElixir.SymphonyRunTest do
       end
 
     File.write!(Path.join(fake_repo_root, "workflows/#{project}/project.env"), project_env)
-    File.write!(Path.join(fake_repo_root, "workflows/#{project}/WORKFLOW.md"), "# Test workflow\n")
+    File.ln_s!("../agavemindlab/WORKFLOW.md", Path.join(fake_repo_root, "workflows/#{project}/WORKFLOW.md"))
 
     File.write!(
       Path.join(home, ".config/symphony/grandline.env"),

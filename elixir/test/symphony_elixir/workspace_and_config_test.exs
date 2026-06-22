@@ -92,6 +92,45 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     end
   end
 
+  test "workspace creation cleans failed new workspace before retry" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-workspace-retry-after-hook-fail-#{System.unique_integer([:positive])}"
+      )
+
+    try do
+      workspace_root = Path.join(test_root, "workspaces")
+      attempts_file = Path.join(test_root, "attempts")
+
+      write_workflow_file!(Workflow.workflow_file_path(),
+        workspace_root: workspace_root,
+        hook_after_create: """
+        attempts_file="#{attempts_file}"
+        attempts=$(cat "$attempts_file" 2>/dev/null || printf 0)
+        attempts=$((attempts + 1))
+        printf '%s' "$attempts" > "$attempts_file"
+        printf 'partial attempt %s\\n' "$attempts" > partial.txt
+        if [ "$attempts" -eq 1 ]; then
+          exit 42
+        fi
+        printf 'initialized\\n' > initialized.txt
+        """
+      )
+
+      assert {:error, {:workspace_hook_failed, "after_create", 42, _output}} =
+               Workspace.create_for_issue("MT-RETRY")
+
+      assert File.read!(attempts_file) == "1"
+
+      assert {:ok, workspace} = Workspace.create_for_issue("MT-RETRY")
+      assert File.read!(attempts_file) == "2"
+      assert File.read!(Path.join(workspace, "initialized.txt")) == "initialized\n"
+    after
+      File.rm_rf(test_root)
+    end
+  end
+
   test "workspace replaces stale non-directory paths" do
     workspace_root =
       Path.join(
@@ -1373,6 +1412,44 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert Schema.configured_project_names(%Schema.Tracker{project_names: :invalid}) == {:ok, []}
   end
 
+  test "config resolves string project names and missing env-backed project names" do
+    project_names_env_var = "SYMP_LINEAR_PROJECT_NAMES_#{System.unique_integer([:positive])}"
+    previous_project_names = System.get_env(project_names_env_var)
+
+    on_exit(fn -> restore_env(project_names_env_var, previous_project_names) end)
+    System.delete_env(project_names_env_var)
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_api_token: "token",
+      tracker_project_slug: nil,
+      tracker_project_slugs: nil,
+      tracker_project_name: nil,
+      tracker_project_names: " Project A, Project B, Project A "
+    )
+
+    assert Config.settings!().tracker.project_names == ["Project A", "Project B"]
+    assert :ok = Config.validate!()
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_api_token: "token",
+      tracker_project_slug: nil,
+      tracker_project_slugs: nil,
+      tracker_project_name: nil,
+      tracker_project_names: "$#{project_names_env_var}"
+    )
+
+    assert Config.settings!().tracker.project_names == []
+    assert {:error, :missing_linear_project_scope} = Config.validate!()
+
+    assert Schema.configured_project_names(%Schema.Tracker{project_names: "Project C,Project D"}) ==
+             {:ok, ["Project C", "Project D"]}
+
+    assert Schema.configured_project_names(%Schema.Tracker{project_names: :invalid}) == {:ok, []}
+
+    assert Schema.configured_project_names(%Schema.Tracker{project_names: [" "]}) ==
+             {:error, {:invalid_linear_project_names, :blank}}
+  end
+
   test "local workspace hooks receive workflow directory from symlinked workflow path" do
     test_root =
       Path.join(
@@ -1518,7 +1595,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     previous_fork_owner = System.get_env("GITHUB_FORK_OWNER")
     previous_repo = System.get_env("SYMPHONY_REPO")
     previous_base_branch = System.get_env("SYMPHONY_BASE_BRANCH")
-    previous_project_dir = System.get_env("SYMPHONY_PROJECT_DIR")
+    previous_workflow_dir = System.get_env("SYMPHONY_WORKFLOW_DIR")
     original_workflow_path = Workflow.workflow_file_path()
 
     try do
@@ -1572,16 +1649,20 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       System.put_env("GITHUB_FORK_OWNER", "test-owner")
       System.put_env("SYMPHONY_REPO", "symphony")
       System.put_env("SYMPHONY_BASE_BRANCH", "main")
-      System.put_env("SYMPHONY_PROJECT_DIR", project_dir)
+      System.delete_env("SYMPHONY_WORKFLOW_DIR")
       Workflow.set_workflow_file_path(Path.expand(project_workflow))
 
       assert {:ok, workspace} = Workspace.create_for_issue("MT-SKILL-INSTALL")
 
+      assert File.exists?(Path.join([workspace, ".agents", "skills", "phase-implementation", "SKILL.md"]))
       assert File.exists?(Path.join([workspace, ".agents", "skills", "symphony-commit", "SKILL.md"]))
+      assert File.exists?(Path.join([workspace, ".agents", "skills", "symphony-linear", "SKILL.md"]))
       assert File.read!(Path.join([workspace, ".agents", "skills", "linear", "SKILL.md"])) == "repo version\n"
 
       exclude = File.read!(Path.join([workspace, ".git", "info", "exclude"]))
+      assert exclude =~ ".agents/skills/phase-implementation/"
       assert exclude =~ ".agents/skills/symphony-commit/"
+      assert exclude =~ ".agents/skills/symphony-linear/"
       refute exclude =~ ".agents/skills/linear/"
 
       assert {"", 0} = System.cmd("git", ["-C", workspace, "status", "--short"])
@@ -1596,7 +1677,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       restore_env("GITHUB_FORK_OWNER", previous_fork_owner)
       restore_env("SYMPHONY_REPO", previous_repo)
       restore_env("SYMPHONY_BASE_BRANCH", previous_base_branch)
-      restore_env("SYMPHONY_PROJECT_DIR", previous_project_dir)
+      restore_env("SYMPHONY_WORKFLOW_DIR", previous_workflow_dir)
       File.rm_rf(test_root)
     end
   end
@@ -1672,7 +1753,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     previous_fork_owner = System.get_env("GITHUB_FORK_OWNER")
     previous_repo = System.get_env("SYMPHONY_REPO")
     previous_base_branch = System.get_env("SYMPHONY_BASE_BRANCH")
-    previous_project_dir = System.get_env("SYMPHONY_PROJECT_DIR")
+    previous_workflow_dir = System.get_env("SYMPHONY_WORKFLOW_DIR")
     original_workflow_path = Workflow.workflow_file_path()
 
     try do
@@ -1717,7 +1798,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       System.put_env("GITHUB_FORK_OWNER", "test-owner")
       System.put_env("SYMPHONY_REPO", "symphony")
       System.put_env("SYMPHONY_BASE_BRANCH", "main")
-      System.put_env("SYMPHONY_PROJECT_DIR", project_dir)
+      System.delete_env("SYMPHONY_WORKFLOW_DIR")
       Workflow.set_workflow_file_path(Path.expand(project_workflow))
 
       assert {:error, {:workspace_hook_failed, "after_create", 42, output}} =
@@ -1734,7 +1815,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       restore_env("GITHUB_FORK_OWNER", previous_fork_owner)
       restore_env("SYMPHONY_REPO", previous_repo)
       restore_env("SYMPHONY_BASE_BRANCH", previous_base_branch)
-      restore_env("SYMPHONY_PROJECT_DIR", previous_project_dir)
+      restore_env("SYMPHONY_WORKFLOW_DIR", previous_workflow_dir)
       File.rm_rf(test_root)
     end
   end

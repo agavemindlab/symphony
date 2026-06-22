@@ -348,11 +348,10 @@ defmodule SymphonyElixir.Linear.Client do
   end
 
   defp do_fetch_by_states_page(scope_kind, project, state_names, assignee_filter, after_cursor, acc_issues, graphql_fun) do
+    variables = project_query_variables(scope_kind, project, state_names, after_cursor)
+
     with {:ok, body} <-
-           graphql_fun.(
-             project_query(scope_kind),
-             project_query_variables(scope_kind, project, state_names, after_cursor)
-           ),
+           graphql_fun.(project_query(scope_kind), variables),
          {:ok, issues, page_info} <- decode_linear_page_response(body, assignee_filter) do
       updated_acc = prepend_page_issues(issues, acc_issues)
 

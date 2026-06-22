@@ -33,10 +33,13 @@ defmodule SymphonyElixir.TestSupport do
 
         File.mkdir_p!(workflow_root)
         workflow_file = Path.join(workflow_root, "WORKFLOW.md")
+        analytics_file = Path.join(workflow_root, "analytics.ndjson")
         previous_workflow_file_path = Application.get_env(:symphony_elixir, :workflow_file_path)
+        previous_analytics_file = Application.get_env(:symphony_elixir, :analytics_file)
 
         write_workflow_file!(workflow_file)
         Workflow.set_workflow_file_path(workflow_file)
+        Application.put_env(:symphony_elixir, :analytics_file, analytics_file)
         {:ok, _apps} = Application.ensure_all_started(:symphony_elixir)
         SymphonyElixir.TestSupport.ensure_core_children_started()
         if Process.whereis(SymphonyElixir.WorkflowStore), do: SymphonyElixir.WorkflowStore.force_reload()
@@ -47,6 +50,12 @@ defmodule SymphonyElixir.TestSupport do
             Application.delete_env(:symphony_elixir, :workflow_file_path)
           else
             Application.put_env(:symphony_elixir, :workflow_file_path, previous_workflow_file_path)
+          end
+
+          if is_nil(previous_analytics_file) do
+            Application.delete_env(:symphony_elixir, :analytics_file)
+          else
+            Application.put_env(:symphony_elixir, :analytics_file, previous_analytics_file)
           end
 
           Application.delete_env(:symphony_elixir, :server_port_override)
