@@ -56,7 +56,7 @@ defmodule SymphonyElixir.CoreTest do
       tracker_project_slug: nil
     )
 
-    assert {:error, :missing_linear_project_slug} = Config.validate!()
+    assert {:error, :missing_linear_project_scope} = Config.validate!()
 
     write_workflow_file!(Workflow.workflow_file_path(),
       tracker_api_token: "token",
@@ -67,6 +67,15 @@ defmodule SymphonyElixir.CoreTest do
     assert :ok = Config.validate!()
     assert Config.settings!().tracker.project_slug == nil
     assert Config.settings!().tracker.project_slugs == ["project-a", "project-b"]
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_api_token: "token",
+      tracker_project_slug: nil,
+      tracker_project_names: [" Project A ", "Project B", "Project A"]
+    )
+
+    assert :ok = Config.validate!()
+    assert Config.settings!().tracker.project_names == ["Project A", "Project B"]
 
     write_workflow_file!(Workflow.workflow_file_path(),
       tracker_api_token: "token",
@@ -136,15 +145,19 @@ defmodule SymphonyElixir.CoreTest do
     assert is_map(tracker)
     assert Map.get(tracker, "kind") == "linear"
     assert Map.get(tracker, "project_slug") == "$SYMPHONY_PROJECT_SLUG"
+    assert Map.get(tracker, "project_slugs") == "$SYMPHONY_PROJECT_SLUGS"
+    assert Map.get(tracker, "project_name") == "$SYMPHONY_PROJECT_NAME"
+    assert Map.get(tracker, "project_names") == "$SYMPHONY_PROJECT_NAMES"
     assert is_list(Map.get(tracker, "active_states"))
     assert is_list(Map.get(tracker, "terminal_states"))
 
     hooks = Map.get(config, "hooks", %{})
     assert is_map(hooks)
-    assert Map.get(hooks, "after_create") =~ "\"$SYMPHONY_WORKFLOW_DIR/setup.sh\""
-    assert Map.get(hooks, "after_create") =~ "\"$SYMPHONY_WORKFLOW_DIR/skills\""
+    assert Map.get(hooks, "after_create") =~ "project_workflow_dir="
+    assert Map.get(hooks, "after_create") =~ "\"$project_workflow_dir/setup.sh\""
+    assert Map.get(hooks, "after_create") =~ "\"$project_workflow_dir/skills\""
     assert Map.get(hooks, "after_create") =~ ".git/info/exclude"
-    assert Map.get(hooks, "before_remove") =~ "\"$SYMPHONY_WORKFLOW_DIR/teardown.sh\""
+    assert Map.get(hooks, "before_remove") =~ "\"$project_workflow_dir/teardown.sh\""
 
     assert String.trim(prompt) != ""
     assert is_binary(Config.workflow_prompt())
@@ -156,6 +169,7 @@ defmodule SymphonyElixir.CoreTest do
     assert prompt =~ "| Deployment | `phase-deployment` |"
     assert prompt =~ "## Main Flow"
     assert prompt =~ "Open and follow `.agents/skills/symphony-linear/SKILL.md`"
+    assert prompt =~ "create `.symphony/stop-after-turn`"
     assert prompt =~ "Do **not** open the next phase skill in this session"
     assert prompt =~ "### Rework cycle (same phase)"
     assert prompt =~ "Requirements rework must also state"
@@ -203,6 +217,24 @@ defmodule SymphonyElixir.CoreTest do
     refute skill =~ "Post or update the `## Requirements` artifact"
   end
 
+  test "aggregate dispatch ordering interleaves projects" do
+    issues = [
+      dispatch_issue("grotto-1", "DEV-1001", "grotto", ~U[2026-01-01 00:00:00Z]),
+      dispatch_issue("grotto-2", "DEV-1002", "grotto", ~U[2026-01-02 00:00:00Z]),
+      dispatch_issue("symphony-1", "DEV-2001", "symphony", ~U[2026-01-03 00:00:00Z]),
+      dispatch_issue("voxvault-1", "DEV-3001", "voxvault", ~U[2026-01-04 00:00:00Z])
+    ]
+
+    assert issues
+           |> Orchestrator.sort_issues_for_dispatch_for_test()
+           |> Enum.map(& &1.identifier) == [
+             "DEV-1001",
+             "DEV-2001",
+             "DEV-3001",
+             "DEV-1002"
+           ]
+  end
+
   test "shared phase prompts explain rework handoff gates" do
     repo_root = Path.expand("..", File.cwd!())
     workflow = File.read!(Path.join(repo_root, "workflows/agavemindlab/WORKFLOW.md"))
@@ -245,6 +277,31 @@ defmodule SymphonyElixir.CoreTest do
           "Current-main compatibility"
         ] do
       assert phase_skill =~ evidence
+    end
+
+    for merge_risk_contract <- [
+          "### 合并风险判断",
+          "required: 2-3 bullets",
+          "漏 bug 最坏影响",
+          "服务故障 / 数据损坏 / 权限隐私 / 不可逆状态",
+          "低风险也必须说明为什么低风险",
+          "缓解措施或 Deployment 验证"
+        ] do
+      assert phase_skill =~ merge_risk_contract
+    end
+  end
+
+  test "maestro reviewer requests changes for missing or stale merge risk judgment" do
+    reviewer =
+      File.read!(Path.expand("../.codex/skills/maestro/agents/maestro-reviewer.md", File.cwd!()))
+
+    for contract <- [
+          "合并风险判断",
+          "缺少合并风险判断",
+          "PR diff / evidence",
+          "request changes"
+        ] do
+      assert reviewer =~ contract
     end
   end
 
@@ -1158,6 +1215,10 @@ defmodule SymphonyElixir.CoreTest do
   end
 
   test "orchestrator startup cleanup clears stale markers for active and terminal issues" do
+    previous_running_label = System.get_env("SYMPHONY_RUNNING_LABEL")
+    System.put_env("SYMPHONY_RUNNING_LABEL", "symphony:running:default")
+    on_exit(fn -> restore_env("SYMPHONY_RUNNING_LABEL", previous_running_label) end)
+
     marker =
       Path.join(
         System.tmp_dir!(),
@@ -1174,8 +1235,20 @@ defmodule SymphonyElixir.CoreTest do
     )
 
     Application.put_env(:symphony_elixir, :memory_tracker_issues, [
-      %Issue{id: "active-1", identifier: "MT-ACTIVE", title: "Active", state: "In Progress"},
-      %Issue{id: "done-1", identifier: "MT-DONE", title: "Done", state: "Done"},
+      %Issue{
+        id: "active-1",
+        identifier: "MT-ACTIVE",
+        title: "Active",
+        state: "In Progress",
+        labels: ["symphony:running:default"]
+      },
+      %Issue{
+        id: "done-1",
+        identifier: "MT-DONE",
+        title: "Done",
+        state: "Done",
+        labels: ["symphony:running:default"]
+      },
       %Issue{id: "other-1", identifier: "MT-OTHER", title: "Other", state: "Backlog"}
     ])
 
@@ -1194,6 +1267,68 @@ defmodule SymphonyElixir.CoreTest do
              "startup_recovery|MT-ACTIVE",
              "startup_recovery|MT-DONE"
            ]
+  end
+
+  test "orchestrator startup cleanup prints progress" do
+    previous_running_label = System.get_env("SYMPHONY_RUNNING_LABEL")
+    System.put_env("SYMPHONY_RUNNING_LABEL", "symphony:running:default")
+    on_exit(fn -> restore_env("SYMPHONY_RUNNING_LABEL", previous_running_label) end)
+
+    previous_progress = Application.get_env(:symphony_elixir, :startup_cleanup_progress)
+    Application.put_env(:symphony_elixir, :startup_cleanup_progress, true)
+    on_exit(fn -> restore_app_env(:startup_cleanup_progress, previous_progress) end)
+
+    workspace_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-startup-cleanup-progress-#{System.unique_integer([:positive])}"
+      )
+
+    on_exit(fn -> File.rm_rf(workspace_root) end)
+    File.mkdir_p!(Path.join(workspace_root, "MT-DONE"))
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_kind: "memory",
+      workspace_root: workspace_root,
+      tracker_active_states: ["Todo"],
+      tracker_terminal_states: ["Done"],
+      hook_issue_stopped: "true"
+    )
+
+    Application.put_env(:symphony_elixir, :memory_tracker_issues, [
+      %Issue{
+        id: "done-1",
+        identifier: "MT-DONE",
+        title: "Done",
+        state: "Done",
+        labels: ["symphony:running:default"]
+      },
+      %Issue{
+        id: "todo-1",
+        identifier: "MT-TODO",
+        title: "Todo",
+        state: "Todo",
+        labels: ["symphony:running:default"]
+      },
+      %Issue{id: "old-1", identifier: "MT-OLD", title: "Old", state: "Done"}
+    ])
+
+    orchestrator_name = Module.concat(__MODULE__, :StartupCleanupProgressOrchestrator)
+
+    output =
+      ExUnit.CaptureIO.capture_io(:stderr, fn ->
+        {:ok, pid} = Orchestrator.start_link(name: orchestrator_name)
+
+        if Process.alive?(pid) do
+          Process.exit(pid, :normal)
+        end
+      end)
+
+    assert output =~ "startup cleanup: terminal workspaces"
+    assert output =~ "startup cleanup: terminal workspaces 1/1 MT-DONE"
+    assert output =~ "startup cleanup: issue markers 1/2 MT-DONE"
+    assert output =~ "startup cleanup: issue markers 2/2 MT-TODO"
+    assert output =~ "startup cleanup: done"
   end
 
   test "normal worker exit schedules active-state continuation retry" do
@@ -1513,6 +1648,59 @@ defmodule SymphonyElixir.CoreTest do
     assert_receive {:linear_poll, ^query, %{projectSlug: "project-b", stateNames: ["Todo"]}}
   end
 
+  test "linear client can poll configured project names" do
+    raw_issue = fn issue_id, identifier, project_name ->
+      %{
+        "id" => issue_id,
+        "identifier" => identifier,
+        "title" => "Issue #{identifier}",
+        "description" => "Project #{project_name}",
+        "state" => %{"name" => "Todo"},
+        "project" => %{
+          "id" => "project-#{project_name}",
+          "slugId" => String.downcase(project_name),
+          "name" => project_name
+        },
+        "labels" => %{"nodes" => []},
+        "inverseRelations" => %{"nodes" => []},
+        "createdAt" => "2026-01-01T00:00:00Z",
+        "updatedAt" => "2026-01-02T00:00:00Z"
+      }
+    end
+
+    parent = self()
+
+    graphql_fun = fn query, variables ->
+      send(parent, {:linear_poll, query, variables})
+
+      nodes =
+        case variables.projectName do
+          "grotto" -> [raw_issue.("issue-a", "MT-A", "grotto")]
+          "symphony" -> [raw_issue.("issue-b", "MT-B", "symphony")]
+        end
+
+      {:ok,
+       %{
+         "data" => %{
+           "issues" => %{
+             "nodes" => nodes,
+             "pageInfo" => %{"hasNextPage" => false, "endCursor" => nil}
+           }
+         }
+       }}
+    end
+
+    assert {:ok, issues} =
+             Client.fetch_issues_by_project_names_for_test(["grotto", "symphony"], ["Todo"], graphql_fun)
+
+    assert Enum.map(issues, & &1.identifier) == ["MT-A", "MT-B"]
+
+    assert_receive {:linear_poll, query, %{projectName: "grotto", stateNames: ["Todo"]}}
+    assert query =~ "project {"
+    assert query =~ "name"
+    assert_receive {:linear_poll, ^query, %{projectName: "symphony", stateNames: ["Todo"]}}
+  end
+
   test "prompt builder renders issue and attempt values from workflow template" do
     workflow_prompt =
       "Ticket {{ issue.identifier }} {{ issue.title }} labels={{ issue.labels }} attempt={{ attempt }}"
@@ -1738,6 +1926,7 @@ defmodule SymphonyElixir.CoreTest do
     assert prompt =~ "When the target phase is a rework of its own artifact"
     assert prompt =~ "Requirements rework must also state"
     assert prompt =~ "reachable only via `Merging`"
+    assert prompt =~ ".symphony/stop-after-turn"
     assert prompt =~ "Codex session id"
     assert prompt =~ "CODEX_THREAD_ID"
     refute prompt =~ "symphony_session_context"
@@ -2373,6 +2562,136 @@ defmodule SymphonyElixir.CoreTest do
     end
   end
 
+  test "agent runner stops same-session continuation when stop-after-turn marker is written" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-agent-runner-stop-after-turn-#{System.unique_integer([:positive])}"
+      )
+
+    try do
+      template_repo = Path.join(test_root, "source")
+      workspace_root = Path.join(test_root, "workspaces")
+      workspace = Path.join(workspace_root, "MT-249")
+      stop_marker = Path.join([workspace, ".symphony", "stop-after-turn"])
+      codex_binary = Path.join(test_root, "fake-codex")
+      trace_file = Path.join(test_root, "codex.trace")
+
+      File.mkdir_p!(template_repo)
+      File.write!(Path.join(template_repo, "README.md"), "# test")
+      System.cmd("git", ["-C", template_repo, "init", "-b", "main"])
+      System.cmd("git", ["-C", template_repo, "config", "user.name", "Test User"])
+      System.cmd("git", ["-C", template_repo, "config", "user.email", "test@example.com"])
+      System.cmd("git", ["-C", template_repo, "add", "README.md"])
+      System.cmd("git", ["-C", template_repo, "commit", "-m", "initial"])
+
+      File.write!(codex_binary, """
+      #!/bin/sh
+      trace_file="${SYMP_TEST_CODEx_TRACE:-/tmp/codex.trace}"
+      stop_marker="${SYMP_TEST_STOP_MARKER:?}"
+      run_id="$(date +%s%N)-$$"
+      printf 'RUN:%s\\n' "$run_id" >> "$trace_file"
+      count=0
+
+      while IFS= read -r line; do
+        count=$((count + 1))
+        printf 'JSON:%s\\n' "$line" >> "$trace_file"
+        case "$count" in
+          1)
+            printf '%s\\n' '{"id":1,"result":{}}'
+            ;;
+          2)
+            ;;
+          3)
+            printf '%s\\n' '{"id":2,"result":{"thread":{"id":"thread-stop-marker"}}}'
+            ;;
+          4)
+            mkdir -p "$(dirname "$stop_marker")"
+            : > "$stop_marker"
+            printf '%s\\n' '{"id":3,"result":{"turn":{"id":"turn-stop-marker-1"}}}'
+            printf '%s\\n' '{"method":"turn/completed"}'
+            ;;
+          5)
+            printf '%s\\n' '{"id":3,"result":{"turn":{"id":"turn-stop-marker-2"}}}'
+            printf '%s\\n' '{"method":"turn/completed"}'
+            ;;
+        esac
+      done
+      """)
+
+      File.chmod!(codex_binary, 0o755)
+      System.put_env("SYMP_TEST_CODEx_TRACE", trace_file)
+      System.put_env("SYMP_TEST_STOP_MARKER", stop_marker)
+
+      on_exit(fn ->
+        System.delete_env("SYMP_TEST_CODEx_TRACE")
+        System.delete_env("SYMP_TEST_STOP_MARKER")
+      end)
+
+      write_workflow_file!(Workflow.workflow_file_path(),
+        workspace_root: workspace_root,
+        hook_after_create: "cp #{Path.join(template_repo, "README.md")} README.md",
+        codex_command: "#{codex_binary} app-server",
+        max_turns: 3
+      )
+
+      parent = self()
+
+      state_fetcher = fn [_issue_id] ->
+        attempt = Process.get(:agent_stop_marker_fetch_count, 0) + 1
+        Process.put(:agent_stop_marker_fetch_count, attempt)
+        send(parent, {:issue_state_fetch, attempt})
+
+        state =
+          if attempt == 1 do
+            "In Progress"
+          else
+            "Done"
+          end
+
+        {:ok,
+         [
+           %Issue{
+             id: "issue-stop-marker",
+             identifier: "MT-249",
+             title: "Stop after auto-advance",
+             description: "Marker asks runner to yield to the scheduler",
+             state: state
+           }
+         ]}
+      end
+
+      issue = %Issue{
+        id: "issue-stop-marker",
+        identifier: "MT-249",
+        title: "Stop after auto-advance",
+        description: "Marker asks runner to yield to the scheduler",
+        state: "In Progress",
+        url: "https://example.org/issues/MT-249",
+        labels: []
+      }
+
+      assert :ok = AgentRunner.run(issue, nil, issue_state_fetcher: state_fetcher)
+      refute_received {:issue_state_fetch, _}
+
+      lines = File.read!(trace_file) |> String.split("\n", trim: true)
+
+      turn_starts =
+        lines
+        |> Enum.filter(&String.starts_with?(&1, "JSON:"))
+        |> Enum.map(&String.trim_leading(&1, "JSON:"))
+        |> Enum.map(&Jason.decode!/1)
+        |> Enum.count(&(&1["method"] == "turn/start"))
+
+      assert turn_starts == 1
+      assert File.exists?(stop_marker)
+    after
+      System.delete_env("SYMP_TEST_CODEx_TRACE")
+      System.delete_env("SYMP_TEST_STOP_MARKER")
+      File.rm_rf(test_root)
+    end
+  end
+
   test "agent runner stops continuing once agent.max_turns is reached" do
     test_root =
       Path.join(
@@ -2823,5 +3142,18 @@ defmodule SymphonyElixir.CoreTest do
     after
       File.rm_rf(test_root)
     end
+  end
+
+  defp dispatch_issue(id, identifier, project_slug, created_at) do
+    %Issue{
+      id: id,
+      identifier: identifier,
+      title: identifier,
+      priority: 0,
+      state: "Todo",
+      project: %{slug_id: project_slug},
+      labels: ["symphony"],
+      created_at: created_at
+    }
   end
 end

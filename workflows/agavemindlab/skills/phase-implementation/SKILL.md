@@ -229,6 +229,13 @@ comfort.
 - S2: <状态 + 证据；说明失败条件仍会被拒绝或不回归>
 - S<N>: <状态 + 证据>
 
+### 合并风险判断（required: 2-3 bullets）
+
+- 漏 bug 最坏影响: <如果仍有漏 bug，合并后最坏会造成什么影响>
+- 敏感风险: <是否涉及服务故障 / 数据损坏 / 权限隐私 / 不可逆状态；
+  低风险也必须说明为什么低风险>
+- 缓解措施或 Deployment 验证: <已做的缓解措施，或合并后需要如何验证>
+
 ### Merge 后验证（optional: one entry per `延迟验收` S<N>）
 
 - S<N>: **查询** `<exact runnable query/command>` · **通过判据**
@@ -239,9 +246,9 @@ comfort.
 > 👉 **需要人工处理**：审查 PR；无异议请将 issue 移至 `Merging`，需要修改则移至
 > `Rework`。
 
-### 风险/注意（optional）
+### 风险/注意（optional: non-merge caveats only）
 
-- <只列影响 review / merge 决策的事项；没有就省略>
+- <只列不属于合并风险判断、但仍影响 review 的事项；没有就省略>
 
 >>> 🛠️ 本次激活的 skills（mirror workpad notes: invoked + Skipped）
 - Codex session id: `<session_id | n/a>`

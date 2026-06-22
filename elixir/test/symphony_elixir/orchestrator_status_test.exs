@@ -30,7 +30,8 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
       title: "Snapshot test",
       description: "Capture codex state",
       state: "In Progress",
-      url: "https://example.org/issues/MT-188"
+      url: "https://example.org/issues/MT-188",
+      project: %{id: "project-id", slug_id: "project-slug", name: "Project Name"}
     }
 
     orchestrator_name = Module.concat(__MODULE__, :SnapshotOrchestrator)
@@ -91,6 +92,7 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
     assert %{running: [snapshot_entry]} = snapshot
     assert snapshot_entry.issue_id == issue_id
     assert snapshot_entry.issue_url == "https://example.org/issues/MT-188"
+    assert snapshot_entry.project == %{id: "project-id", slug_id: "project-slug", name: "Project Name"}
     assert snapshot_entry.session_id == "thread-live-turn-live"
     assert snapshot_entry.turn_count == 1
     assert snapshot_entry.last_codex_timestamp == now
@@ -1350,6 +1352,26 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
     refute rendered =~ "Dashboard:"
   end
 
+  test "status dashboard renders configured project names" do
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_project_slug: nil,
+      tracker_project_names: ["grotto", "gl-infra"]
+    )
+
+    snapshot_data =
+      {:ok,
+       %{
+         running: [],
+         retrying: [],
+         codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
+         rate_limits: nil
+       }}
+
+    rendered = StatusDashboard.format_snapshot_content_for_test(snapshot_data, 0.0)
+
+    assert rendered =~ "2 projects: grotto, gl-infra"
+  end
+
   test "status dashboard renders dashboard url on its own line when server port is configured" do
     previous_port_override = Application.get_env(:symphony_elixir, :server_port_override)
 
@@ -1442,6 +1464,7 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
              identifier: "MT-777",
              state: "running",
              session_id: "thread-1234567890",
+             project: %{id: "project-id", slug_id: "project-slug", name: "Project Name"},
              codex_app_server_pid: "4242",
              codex_total_tokens: 3_200,
              runtime_seconds: 75,
@@ -1469,6 +1492,8 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
     rendered = StatusDashboard.format_snapshot_content_for_test(snapshot_data, 0.0)
     plain = Regex.replace(~r/\e\[[0-9;]*m/, rendered, "")
 
+    assert plain =~ "PROJECT"
+    assert plain =~ "Project Name"
     assert plain =~ ~r/MT-777.*\r?\n│\s*\r?\n├─ Backoff queue/s
   end
 

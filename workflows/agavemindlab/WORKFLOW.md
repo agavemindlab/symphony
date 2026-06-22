@@ -2,6 +2,9 @@
 tracker:
   kind: linear
   project_slug: $SYMPHONY_PROJECT_SLUG
+  project_slugs: $SYMPHONY_PROJECT_SLUGS
+  project_name: $SYMPHONY_PROJECT_NAME
+  project_names: $SYMPHONY_PROJECT_NAMES
   required_labels: ["symphony"]
   active_states:
     - Todo
@@ -22,9 +25,15 @@ hooks:
   after_create: |
     set -e
     : "${SYMPHONY_WORKFLOW_DIR:?SYMPHONY_WORKFLOW_DIR is not set}"
-    : "${SYMPHONY_REPO:?SYMPHONY_REPO is not set}"
+
+    if [ -f "$SYMPHONY_WORKFLOW_DIR/project-for-linear-project.sh" ]; then
+      . "$SYMPHONY_WORKFLOW_DIR/project-for-linear-project.sh"
+    fi
+
+    project_workflow_dir="${SYMPHONY_PROJECT_DIR:-$SYMPHONY_WORKFLOW_DIR}"
 
     fork_owner="${GITHUB_FORK_OWNER:-$(gh api user -q .login)}"
+    : "${SYMPHONY_REPO:?SYMPHONY_REPO is not set}"
     fork_repo="$fork_owner/$SYMPHONY_REPO"
     base_branch="${SYMPHONY_BASE_BRANCH:-main}"
 
@@ -36,13 +45,13 @@ hooks:
 
     git fetch upstream "$base_branch" --prune
 
-    if [ -f "$SYMPHONY_WORKFLOW_DIR/setup.sh" ]; then
-      "$SYMPHONY_WORKFLOW_DIR/setup.sh"
+    if [ -f "$project_workflow_dir/setup.sh" ]; then
+      "$project_workflow_dir/setup.sh"
     fi
 
     mkdir -p .agents/skills
-    if [ -d "$SYMPHONY_WORKFLOW_DIR/skills" ]; then
-      for skill in "$SYMPHONY_WORKFLOW_DIR"/skills/*; do
+    if [ -d "$project_workflow_dir/skills" ]; then
+      for skill in "$project_workflow_dir"/skills/*; do
         [ -d "$skill" ] || continue
         name="${skill##*/}"
         target=".agents/skills/$name"
@@ -59,8 +68,14 @@ hooks:
   before_remove: |
     set -e
     : "${SYMPHONY_WORKFLOW_DIR:?SYMPHONY_WORKFLOW_DIR is not set}"
-    if [ -f "$SYMPHONY_WORKFLOW_DIR/teardown.sh" ]; then
-      "$SYMPHONY_WORKFLOW_DIR/teardown.sh"
+    if [ -f "$SYMPHONY_WORKFLOW_DIR/project-for-linear-project.sh" ]; then
+      . "$SYMPHONY_WORKFLOW_DIR/project-for-linear-project.sh"
+    fi
+
+    project_workflow_dir="${SYMPHONY_PROJECT_DIR:-$SYMPHONY_WORKFLOW_DIR}"
+
+    if [ -f "$project_workflow_dir/teardown.sh" ]; then
+      "$project_workflow_dir/teardown.sh"
     fi
   issue_running: |
     set -e
@@ -71,7 +86,7 @@ hooks:
     : "${SYMPHONY_WORKFLOW_DIR:?SYMPHONY_WORKFLOW_DIR is not set}"
     sh "$SYMPHONY_WORKFLOW_DIR/mark-running-issue.sh" stopped
 agent:
-  max_concurrent_agents: 1
+  max_concurrent_agents: 5
   max_turns: 20
 codex:
   command: codex --config shell_environment_policy.inherit=all --config 'model="gpt-5.5"' --config model_reasoning_effort=xhigh app-server
@@ -222,7 +237,7 @@ Symphony only starts the agent when the issue is in an active state (`Todo`, `In
 
 6. Set the workpad `current_phase` to the target phase and open the matching phase skill (per the Phase Map). The skill does its phase work, posts or updates its own artifact, and on a **clean** exit hands back one of two outcomes — the skill alone decides which (see its "Exit"); only the Requirements and Design skills ever choose `advance`:
 
-   - **`advance`** → write the `⏩ 自动进入 [Next Phase]` reply on the just-posted artifact, set the workpad `current_phase` to the next phase, keep the issue in `In Progress`, persist the agent state, and stop this agent run. Do **not** open the next phase skill in this session; the next Symphony dispatch targets the saved phase.
+   - **`advance`** → write the `⏩ 自动进入 [Next Phase]` reply on the just-posted artifact, set the workpad `current_phase` to the next phase, keep the issue in `In Progress`, persist the agent state, create `.symphony/stop-after-turn`, and stop this agent run. Do **not** open the next phase skill in this session; the next Symphony dispatch targets the saved phase.
    - **`stop`** → move the issue to `Human Review` and stop.
 
    (A skill that stops **blocked** — unresolved `[NEEDS CLARIFICATION]` / escalated high-impact decision — moves the issue to `Human Review` itself; the session ends there.)
