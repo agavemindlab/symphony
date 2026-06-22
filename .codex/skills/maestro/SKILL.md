@@ -66,7 +66,8 @@ review judgment in the parent agent.
    - `建议回复方式`: approve / request changes / ask clarification / merge nudge /
      completion confirmation / no reply yet.
    - `回复对象`: next Symphony agent / human.
-   - `回复位置`: target artifact thread / none.
+   - `回复位置`: concrete Linear comment/thread to reply to, including phase
+     heading, comment id or timestamp, or `none`.
    - `建议 issue status`: In Progress / Merging / Rework / Done / unchanged.
    - `建议回复`: a ready-to-send Chinese draft. For approve, request changes,
      merge nudge, and completion confirmation, set `回复对象` to next Symphony
@@ -111,7 +112,7 @@ Current state: <state>
 Issue type/context: <Type:Spike / normal / unknown>
 Awaiting-review phase: <Requirements | Design | Implementation | Deployment>
 Awaiting-review artifact:
-<current unresolved phase artifact text>
+<current unresolved phase artifact comment id/timestamp/thread target, then text>
 
 Other unresolved phase artifacts and feedback:
 <artifact summaries, thread replies, standalone human comments, or "none">
@@ -151,7 +152,7 @@ Task:
 1. Decide the best reply method: approve, request changes, ask clarification,
    merge nudge, completion confirmation, or no reply yet.
 2. State the reply audience: next Symphony agent or human.
-3. State the reply location.
+3. State the concrete reply location, not an abstract label.
 4. State the recommended Linear issue status after the reply.
 5. Draft the exact Chinese reply the human could post. For approve, request
    changes, merge nudge, and completion confirmation, address the next Symphony
