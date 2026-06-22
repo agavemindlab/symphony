@@ -21,6 +21,7 @@ Produce **two paired outputs** — they serve different readers (see
    in workpad `cleanup` and persisted through the Linear state attachment.
 2. The **`## Design` Linear artifact** — the **human-facing** Chinese review
    surface that summarizes the doc and gates approval, carrying:
+   - Core mechanism and end-to-end flow before approach / file-change details
    - Chosen approach direction and rationale
    - Key trade-offs and alternatives considered
    - Diagram (for non-trivial designs — see Diagram requirement below)
@@ -124,8 +125,20 @@ The approach is a **high-level direction + rationale**, not an
 implementation step list. Implementation breakdown lives in the workpad
 Plan at the Implementation phase.
 
+Start with **核心机制** before 方案选择, 仓库改动, or 文件列表. This section states
+how the system works in concrete cause/effect terms
+so a reviewer can understand the behavior without reading the diff. For
+cross-component flows, include a numbered flow or one-line pipeline covering:
+trigger（触发者）, input（输入）, key steps（关键步骤）, output（输出）, and
+blocking point（阻断点）. Prefer concrete records and predicates over
+abstractions; for example, "write `environment=staging, state=success` for this
+SHA; production checks only the current `GITHUB_SHA` for that staging success
+record."
+
 Required content:
 
+- Core mechanism (one paragraph, or numbered/pipeline flow for
+  cross-component designs).
 - Chosen direction (one or two sentences).
 - Key trade-off and why the chosen path was picked over the alternative
   (1-2 alternatives named).
@@ -262,6 +275,11 @@ them.
 ```md
 ## Design
 
+### 核心机制（mechanism）
+<how the system works end-to-end; for cross-component flows include trigger,
+input, key steps, output, and blocking point（触发者 / 输入 / 关键步骤 / 输出 /
+阻断点）>
+
 ### 方案（approach）
 <chosen direction in one or two sentences>
 
@@ -374,8 +392,8 @@ When a batched `[NEEDS CLARIFICATION]` block remains after analysis:
 Read the human's reply in the artifact thread and apply the consent convention:
 
 - For each **resolved** question, fold the chosen answer into the artifact
-  (the `方案（approach）` / `选择理由` / `风险/注意` as fitting) and drop it from
-  the batch.
+  (the `核心机制` / `方案（approach）` / `选择理由` / `风险/注意` as fitting) and drop
+  it from the batch.
 - If accepting an **early/high-fanout** answer's *non-recommended* branch
   invalidates a later question's recommendation, **re-walk only that affected
   subtree** and surface the updated questions in the next batch; questions on
@@ -408,6 +426,9 @@ about form, not correctness:
 - `.symphony/design.md` written (scaled to the change), listed in workpad
   `cleanup`, and persisted through the latest `Symphony agent state` Linear
   attachment; the `## Design` artifact faithfully summarizes it.
+- `核心机制` appears before `方案（approach）` and explains how the system works;
+  cross-component flows include trigger（触发者）, input（输入）, key steps
+  （关键步骤）, output（输出）, and blocking point（阻断点）.
 - `方案（approach）` is complete (no placeholder text).
 - Diagram included for non-trivial designs.
 - `验收方案` covers every `S<N>` with both gates (pre-PR 本地 + post-merge 最终)
