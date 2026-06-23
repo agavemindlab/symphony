@@ -215,6 +215,15 @@ codex:
 - If `WORKFLOW.md` is missing or has invalid YAML at startup, Symphony does not boot.
 - If a later reload fails, Symphony keeps running with the last known good workflow and logs the
   reload error until the file is fixed.
+- `observability.analytics_path` optionally sets the persisted NDJSON event file used by the v1
+  efficiency analytics panels. When unset, Symphony writes
+  `<runtime-log-dir>/symphony-analytics.ndjson`; with the default runtime log, that resolves to
+  `<cwd>/log/symphony-analytics.ndjson`. Path values support `~` and `$VAR` resolution.
+- Multiple Symphony OS processes that share one `observability.analytics_path` serialize append and
+  retention through a `<path>.lock` directory. Processes configured with different files are separate
+  data sources and are not merged in v1.
+- Capacity snapshots are written only when running/retry/blocked counts change, so idle polling does
+  not evict lifecycle or cost history from the retained event window.
 - `server.port` or CLI `--port` enables the optional Phoenix LiveView dashboard and JSON API at
   `/`, `/api/v1/state`, `/api/v1/<issue_identifier>`, and `/api/v1/refresh`.
 
@@ -227,6 +236,8 @@ The observability UI now runs on a minimal Phoenix stack:
 - Bandit as the HTTP server
 - Phoenix dependency static assets for the LiveView client bootstrap
 - Tracker issue identifiers link to the tracker-provided URL when it uses `http` or `https`
+- A v1 efficiency analytics section backed by persisted Symphony runtime events, with Linear and
+  GitHub coverage gaps called out in the data-quality panel
 
 ## Project Layout
 

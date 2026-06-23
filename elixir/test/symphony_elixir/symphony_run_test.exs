@@ -109,11 +109,14 @@ defmodule SymphonyElixir.SymphonyRunTest do
 
     if File.exists?(real_defaults) do
       File.mkdir_p!(Path.join(fake_repo_root, "workflows/#{namespace}"))
+
       File.write!(
         Path.join(fake_repo_root, "workflows/#{namespace}/project.env.defaults"),
         File.read!(real_defaults)
       )
     end
+
+    File.write!(Path.join(fake_repo_root, "workflows/agavemindlab/WORKFLOW.md"), "# Test workflow\n")
 
     project_env =
       case Keyword.fetch(opts, :project_env) do
@@ -127,7 +130,6 @@ defmodule SymphonyElixir.SymphonyRunTest do
       end
 
     File.write!(Path.join(fake_repo_root, "workflows/#{project}/project.env"), project_env)
-
 
     File.write!(
       Path.join(home, ".config/symphony/grandline.env"),
@@ -144,8 +146,13 @@ defmodule SymphonyElixir.SymphonyRunTest do
       {"SYMPHONY_RUN_CAPTURE", capture_path},
       {"SYMPHONY_RUN_CALLS", calls_path},
       {"SYMPHONY_PROFILE", nil},
+      {"SYMPHONY_PROJECT_SLUG", nil},
+      {"SYMPHONY_PROJECT_SLUGS", nil},
+      {"SYMPHONY_PROJECT_NAME", nil},
+      {"SYMPHONY_PROJECT_NAMES", nil},
       {"SYMPHONY_REPO", nil},
       {"SYMPHONY_BASE_BRANCH", nil},
+      {"SYMPHONY_PROJECT_DIR", nil},
       {"AUTOMATED_REVIEWER", nil}
     ]
 
