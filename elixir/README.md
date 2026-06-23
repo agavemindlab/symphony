@@ -211,8 +211,9 @@ codex:
 - If a later reload fails, Symphony keeps running with the last known good workflow and logs the
   reload error until the file is fixed.
 - `observability.analytics_path` optionally sets the persisted NDJSON event file used by the v1
-  efficiency analytics panels. When unset, Symphony writes `symphony-analytics.ndjson` next to the
-  runtime log file. Path values support `~` and `$VAR` resolution.
+  efficiency analytics panels. When unset, Symphony writes
+  `<runtime-log-dir>/symphony-analytics.ndjson`; with the default runtime log, that resolves to
+  `<cwd>/log/symphony-analytics.ndjson`. Path values support `~` and `$VAR` resolution.
 - Multiple Symphony OS processes that share one `observability.analytics_path` serialize append and
   retention through a `<path>.lock` directory. Processes configured with different files are separate
   data sources and are not merged in v1.
