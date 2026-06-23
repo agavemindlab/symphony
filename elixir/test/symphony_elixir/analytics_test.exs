@@ -93,6 +93,7 @@ defmodule SymphonyElixir.AnalyticsTest do
         retrying_count: 1,
         blocked_count: 1,
         configured_capacity: 10,
+        effective_capacity: 12,
         recorded_at: "2026-06-15T10:00:43Z"
       }
     ]
@@ -127,6 +128,7 @@ defmodule SymphonyElixir.AnalyticsTest do
 
     assert %{label: "Retry events", value: 1} in capacity_metrics
     assert %{label: "Blocked events", value: 1} in capacity_metrics
+    assert %{label: "Effective capacity", value: 12} in capacity_metrics
 
     assert "GitHub review/CI data is not configured in v1" in summary.data_quality.gaps
   end

@@ -414,6 +414,34 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
            ] = capacity_events(path)
   end
 
+  test "capacity snapshots record effective capacity expanded by configured projects" do
+    path = analytics_tmp_path("effective-capacity-snapshots.ndjson")
+    Application.put_env(:symphony_elixir, :analytics_file, path)
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_project_slug: nil,
+      tracker_project_slugs: Enum.map(1..12, &"project-#{&1}")
+    )
+
+    state = %Orchestrator.State{
+      running: %{},
+      retry_attempts: %{},
+      blocked: %{},
+      max_concurrent_agents: nil,
+      codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0}
+    }
+
+    Orchestrator.record_capacity_snapshot_for_test(state)
+
+    assert [
+             %{
+               "event_type" => "capacity_snapshot",
+               "configured_capacity" => 10,
+               "effective_capacity" => 12
+             }
+           ] = capacity_events(path)
+  end
+
   test "orchestrator snapshot tracks turn completed usage when present" do
     issue_id = "issue-turn-completed-usage"
 

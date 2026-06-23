@@ -312,11 +312,16 @@ defmodule SymphonyElixir.Analytics do
   end
 
   defp capacity_metrics(%{latest_capacity: latest_capacity} = metrics) do
+    latest_capacity = latest_capacity || %{}
+
     [
       %{label: "Retry events", value: metrics.retry_count},
       %{label: "Blocked events", value: metrics.blocked_count},
-      %{label: "Running count", value: Map.get(latest_capacity || %{}, "running_count", 0)},
-      %{label: "Configured capacity", value: Map.get(latest_capacity || %{}, "configured_capacity", 0)}
+      %{label: "Running count", value: Map.get(latest_capacity, "running_count", 0)},
+      %{
+        label: "Effective capacity",
+        value: Map.get(latest_capacity, "effective_capacity", Map.get(latest_capacity, "configured_capacity", 0))
+      }
     ]
   end
 
