@@ -84,14 +84,36 @@ defmodule SymphonyElixir.SymphonyRunTest do
     File.mkdir_p!(Path.join(home, ".config/symphony"))
     File.mkdir_p!(fake_bin)
     File.mkdir_p!(Path.join(fake_repo_root, "elixir"))
-    File.mkdir_p!(Path.join(fake_repo_root, "workflows/agavemindlab"))
     File.mkdir_p!(Path.join(fake_repo_root, "workflows/#{project}"))
+    File.mkdir_p!(Path.join(fake_repo_root, "workflows/agavemindlab"))
     File.write!(Path.join(fake_repo_root, "workflows/agavemindlab/WORKFLOW.md"), "# Test workflow\n")
 
-    File.write!(
-      Path.join(fake_repo_root, "workflows/agavemindlab/project.env.defaults"),
-      File.read!(Path.join(@repo_root, "workflows/agavemindlab/project.env.defaults"))
-    )
+    real_workflow_file = Path.join(@repo_root, "workflows/#{project}/WORKFLOW.md")
+    fake_workflow_file = Path.join(fake_repo_root, "workflows/#{project}/WORKFLOW.md")
+
+    namespace =
+      case File.read_link(real_workflow_file) do
+        {:ok, target} ->
+          File.ln_s!(target, fake_workflow_file)
+          resolved_target = Path.expand(target, Path.dirname(fake_workflow_file))
+          File.mkdir_p!(Path.dirname(resolved_target))
+          File.write!(resolved_target, "# Test workflow\n")
+          target |> Path.dirname() |> Path.basename()
+
+        {:error, _} ->
+          File.write!(fake_workflow_file, "# Test workflow\n")
+          project
+      end
+
+    real_defaults = Path.join(@repo_root, "workflows/#{namespace}/project.env.defaults")
+
+    if File.exists?(real_defaults) do
+      File.mkdir_p!(Path.join(fake_repo_root, "workflows/#{namespace}"))
+      File.write!(
+        Path.join(fake_repo_root, "workflows/#{namespace}/project.env.defaults"),
+        File.read!(real_defaults)
+      )
+    end
 
     project_env =
       case Keyword.fetch(opts, :project_env) do
@@ -105,7 +127,7 @@ defmodule SymphonyElixir.SymphonyRunTest do
       end
 
     File.write!(Path.join(fake_repo_root, "workflows/#{project}/project.env"), project_env)
-    File.ln_s!("../agavemindlab/WORKFLOW.md", Path.join(fake_repo_root, "workflows/#{project}/WORKFLOW.md"))
+
 
     File.write!(
       Path.join(home, ".config/symphony/grandline.env"),

@@ -604,7 +604,45 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert Orchestrator.should_dispatch_issue_for_test(next_issue, %{state | max_concurrent_agents: 2})
   end
 
-  test "multiple configured projects expand effective dispatch slots" do
+  test "multiple configured projects expand effective default dispatch slots" do
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_api_token: "token",
+      tracker_project_slug: nil,
+      tracker_project_slugs: Enum.map(1..12, &"project-#{&1}")
+    )
+
+    running_issues =
+      Enum.map(1..10, fn i ->
+        %Issue{
+          id: "issue-#{i}",
+          identifier: "MT-#{i}",
+          title: "Project #{i} issue",
+          state: "Todo",
+          project: %{id: "project-#{i}-id", slug_id: "project-#{i}", name: "Project #{i}"}
+        }
+      end)
+
+    next_issue = %Issue{
+      id: "issue-11",
+      identifier: "MT-11",
+      title: "Project 11 issue",
+      state: "Todo",
+      project: %{id: "project-11-id", slug_id: "project-11", name: "Project 11"}
+    }
+
+    state = %Orchestrator.State{
+      max_concurrent_agents: nil,
+      running: Enum.into(running_issues, %{}, fn ri -> {ri.id, %{issue: ri, worker_host: nil}} end),
+      claimed: MapSet.new(Enum.map(running_issues, & &1.id)),
+      blocked: %{},
+      retry_attempts: %{},
+      codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0}
+    }
+
+    assert Orchestrator.should_dispatch_issue_for_test(next_issue, state)
+  end
+
+  test "explicit max_concurrent_agents is strictly respected and not expanded by projects" do
     write_workflow_file!(Workflow.workflow_file_path(),
       tracker_api_token: "token",
       tracker_project_slug: nil,
@@ -639,7 +677,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0}
     }
 
-    assert Orchestrator.should_dispatch_issue_for_test(next_issue, state)
+    refute Orchestrator.should_dispatch_issue_for_test(next_issue, state)
   end
 
   test "todo issue with non-terminal blocker is not dispatch-eligible" do

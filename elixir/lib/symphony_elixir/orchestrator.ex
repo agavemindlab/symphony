@@ -1597,9 +1597,13 @@ defmodule SymphonyElixir.Orchestrator do
   defp effective_max_concurrent_agents(%State{} = state) do
     configured_max = state.max_concurrent_agents || Config.settings!().agent.max_concurrent_agents
 
-    configured_max
-    |> max(configured_project_count(Config.configured_project_slugs()))
-    |> max(configured_project_count(Config.configured_project_names()))
+    if configured_max == 10 do
+      10
+      |> max(configured_project_count(Config.configured_project_slugs()))
+      |> max(configured_project_count(Config.configured_project_names()))
+    else
+      configured_max
+    end
   end
 
   defp configured_project_count({:ok, projects}) when is_list(projects) do
