@@ -109,6 +109,7 @@ defmodule SymphonyElixir.SymphonyRunTest do
 
     if File.exists?(real_defaults) do
       File.mkdir_p!(Path.join(fake_repo_root, "workflows/#{namespace}"))
+
       File.write!(
         Path.join(fake_repo_root, "workflows/#{namespace}/project.env.defaults"),
         File.read!(real_defaults)
@@ -129,7 +130,6 @@ defmodule SymphonyElixir.SymphonyRunTest do
       end
 
     File.write!(Path.join(fake_repo_root, "workflows/#{project}/project.env"), project_env)
-
 
     File.write!(
       Path.join(home, ".config/symphony/grandline.env"),
