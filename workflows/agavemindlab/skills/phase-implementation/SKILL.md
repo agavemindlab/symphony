@@ -84,6 +84,8 @@ same-phase Rework cycle in your workflow instructions when re-posting the artifa
   instead of expanding this issue.
 - `verification-before-completion` (superpowers) — gate before claiming work
   is done.
+- `review` (gstack) — pre-landing PR review; for ORM / migration changes,
+  include index / query-path minimality in the review.
 
 If a skill genuinely does not apply (e.g. no new behavior to test-drive),
 record `Skipped <skill>: <reason>` in workpad `notes`.
@@ -151,8 +153,11 @@ Markdown sections:
    is impossible, record the reason and closest safe alternative proof; surface
    the caveat in the artifact `风险/注意`.
 8. **Verify** — invoke `verification-before-completion`.
-9. **PR feedback sweep** — see protocol below.
-10. **Post artifact** — write the `## Implementation` artifact and move to
+9. **Pre-landing review** — invoke `review` (gstack) on the branch / PR diff.
+   Treat findings as Implementation feedback: fix, rerun validation, commit,
+   push, and repeat until clean or explicitly recorded in `风险/注意`.
+10. **PR feedback sweep** — see protocol below.
+11. **Post artifact** — write the `## Implementation` artifact and move to
    `Human Review`.
 
 ## PR feedback sweep protocol
