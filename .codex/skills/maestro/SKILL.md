@@ -18,6 +18,12 @@ review judgment in the parent agent.
 2. Read the issue and verify it is currently in `Human Review`.
    - Prefer available Linear tooling for issue title, description, state,
      comments, attachments, and links.
+   - For image links or image attachments in relevant comments/artifacts, use
+     Linear tooling first so authenticated assets are downloaded (for example,
+     `linear issue view <ISSUE> --no-pager`, then open the local
+     `linear-cli-images/...` path). Summarize the visible facts in the evidence
+     pack; do not rely on surrounding text alone when the image carries the
+     evidence.
    - If direct Linear tools are unavailable, use local project CLIs or logs only
      when they provide reliable evidence; otherwise report the blocker.
 3. Read active unresolved Phase artifacts: `## Requirements`, `## Design`,
@@ -129,6 +135,10 @@ Runtime secret provisioning:
 User-facing documentation evidence:
 <docs, examples, README/config updates for new user-facing feature usage, or
 "not applicable" / "none found">
+
+Visual evidence:
+<relevant screenshots/images from comments or attachments and the visible facts
+they show, or "none">
 
 Spawned or related issue evidence:
 <issue identifiers, relation types, state/assignee, blocker relation status,
