@@ -346,7 +346,7 @@ When a batched `[NEEDS CLARIFICATION]` block remains after honest analysis:
 
 ### On resume
 
-Read the human's reply in the artifact thread and apply the consent convention:
+Read the human's reply in the artifact thread and apply the consent convention. Fold answers into the revised artifact content, not the old comment body:
 
 - For each **resolved** question, fold the chosen answer into the artifact
   (into `要解决的问题` / `为什么解决` / `验收标准` / `关键假设` as fitting) and
