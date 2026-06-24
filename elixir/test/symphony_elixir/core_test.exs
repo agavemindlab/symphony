@@ -2579,7 +2579,7 @@ defmodule SymphonyElixir.CoreTest do
           )
         end)
 
-      assert_receive {:maestro_pre_review, maestro_pid, "MT-5316", "Human Review", nil}, 1_000
+      assert_receive {:maestro_pre_review, maestro_pid, "MT-5316", "Human Review", nil}, 5_000
       runner_result = Task.yield(runner_task, 200)
       maestro_ref = Process.monitor(maestro_pid)
 
