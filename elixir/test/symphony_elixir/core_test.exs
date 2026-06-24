@@ -180,6 +180,7 @@ defmodule SymphonyElixir.CoreTest do
     assert prompt =~ "Each phase artifact version is a top-level Linear comment"
     assert prompt =~ "clarification-answer resume"
     assert prompt =~ "fresh top-level artifact"
+    refute prompt =~ "posts or updates its own artifact"
     refute prompt =~ "exactly one top-level comment"
     refute prompt =~ "updates the existing one in place via `commentUpdate`"
     assert prompt =~ "## Workpad"
@@ -237,6 +238,45 @@ defmodule SymphonyElixir.CoreTest do
     assert skill =~ "not the old comment body"
     refute skill =~ "Post or update the artifact comment."
     refute skill =~ "Post or update the `## Design` artifact"
+  end
+
+  test "DEV-5321 style clarification resume fixture publishes a fresh artifact version" do
+    workflow = shared_workflow_prompt()
+
+    old_artifact = %{
+      id: "80905809-e1e6-4ff6-a275-c94c2415e7ce",
+      created_at: ~U[2026-06-20 01:00:00Z]
+    }
+
+    for phase <- ["Requirements", "Design"] do
+      new_artifact = fresh_artifact_version(old_artifact)
+      calls = dry_run_artifact_calls(workflow, :clarification_answer, phase, old_artifact)
+
+      assert calls == [
+               {:commentResolve, old_artifact.id},
+               {:commentCreate, :top_level_phase_artifact, "## #{phase}"},
+               {:commentCreate, {:reply_to_new_artifact, new_artifact.id}, "clarification summary"}
+             ]
+
+      assert new_artifact.id != old_artifact.id
+      assert DateTime.compare(new_artifact.created_at, old_artifact.created_at) == :gt
+      refute_called_comment_update_for_artifact(calls, old_artifact.id)
+    end
+  end
+
+  test "DEV-5338 style question discussion fixture replies without rewriting artifacts" do
+    workflow = shared_workflow_prompt()
+    artifact = %{id: "requirements-question-thread", created_at: ~U[2026-06-23 01:00:00Z]}
+
+    calls = dry_run_artifact_calls(workflow, :question_discussion, "Requirements", artifact)
+
+    assert calls == [{:commentCreate, {:reply_to_artifact, artifact.id}, "answer Requirements question"}]
+    refute Enum.any?(calls, fn {operation, _, _} -> operation in [:commentResolve, :commentUpdate] end)
+
+    refute Enum.any?(calls, fn
+             {:commentCreate, :top_level_phase_artifact, _body} -> true
+             _ -> false
+           end)
   end
 
   test "aggregate dispatch ordering interleaves projects" do
@@ -2950,5 +2990,61 @@ defmodule SymphonyElixir.CoreTest do
       labels: ["symphony"],
       created_at: created_at
     }
+  end
+
+  defp shared_workflow_prompt do
+    File.read!(Path.expand("../workflows/agavemindlab/WORKFLOW.md", File.cwd!()))
+  end
+
+  defp dry_run_artifact_calls(workflow, :clarification_answer, phase, old_artifact) do
+    required_contracts = [
+      "clarification-answer resume",
+      "even if the Linear state is `In Progress`",
+      "resolve the old artifact",
+      "post a fresh top-level artifact",
+      "do not `commentUpdate` the old artifact",
+      "resolves the old artifact with `commentResolve`",
+      "fresh top-level artifact with `commentCreate`"
+    ]
+
+    if Enum.all?(required_contracts, &String.contains?(workflow, &1)) do
+      new_artifact = fresh_artifact_version(old_artifact)
+
+      [
+        {:commentResolve, old_artifact.id},
+        {:commentCreate, :top_level_phase_artifact, "## #{phase}"},
+        {:commentCreate, {:reply_to_new_artifact, new_artifact.id}, "clarification summary"}
+      ]
+    else
+      [{:commentUpdate, old_artifact.id, "## #{phase}"}]
+    end
+  end
+
+  defp dry_run_artifact_calls(workflow, :question_discussion, phase, artifact) do
+    required_contracts = [
+      "**Question / discussion**",
+      "answer in that artifact's thread",
+      "Do **not** write an approval reply, advance, resolve, or re-post the artifact"
+    ]
+
+    if Enum.all?(required_contracts, &String.contains?(workflow, &1)) do
+      [{:commentCreate, {:reply_to_artifact, artifact.id}, "answer #{phase} question"}]
+    else
+      [{:commentUpdate, artifact.id, "## #{phase}"}]
+    end
+  end
+
+  defp fresh_artifact_version(old_artifact) do
+    %{
+      id: "fresh-#{old_artifact.id}",
+      created_at: DateTime.add(old_artifact.created_at, 1, :second)
+    }
+  end
+
+  defp refute_called_comment_update_for_artifact(calls, artifact_id) do
+    refute Enum.any?(calls, fn
+             {:commentUpdate, ^artifact_id, _body} -> true
+             _ -> false
+           end)
   end
 end
