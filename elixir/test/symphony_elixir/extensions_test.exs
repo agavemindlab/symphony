@@ -778,6 +778,10 @@ defmodule SymphonyElixir.ExtensionsTest do
       assert html =~ title
     end
 
+    assert html =~ "Can accepted issues move faster with the current persisted signals?"
+    assert html =~ "Direct (可直接展示)"
+    assert html =~ "Partial (可展示但样本不足)"
+    assert html =~ "Gap (仅展示数据质量/缺口)"
     assert html =~ "GitHub review/CI data is not configured in v1"
   end
 
