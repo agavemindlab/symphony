@@ -97,8 +97,8 @@ Reply locations:
   temporary queue position. Require evidence that the reviewed issue `blocks`
   the downstream issue, or another durable dependency gate that keeps Symphony
   from selecting it early. Request changes when a prerequisite/follow-up issue
-  lacks project/routing evidence, is routed to the wrong execution domain, or
-  mixes multiple execution domains that should have been split. If a Deployment
+  lacks project/routing evidence, is routed to the wrong target project, or
+  mixes multiple target projects that should have been split. If a Deployment
   artifact creates a validation, disposable, or cleanup issue as proof for the
   close test, require a durable relation to the reviewed issue and evidence that
   the helper issue is closed, canceled, or otherwise explicitly disposed before
@@ -107,11 +107,6 @@ Reply locations:
   issue is closed has enough current context to start safely; if key constraints,
   accepted facts, follow-up scope, or routing are missing, recommend adding that
   context first.
-- Regression anchor: in DEV-5236/DEV-5324-style staging work, repo-side gate
-  changes belong in `grotto`, while namespace, DB/Redis, PVC, Kubernetes
-  secrets, NetworkPolicy, RBAC, GitHub protected environment, test user,
-  reset/seed, and feature-flag allowlist prerequisites need `gl-infra` routing.
-  Missing routing evidence is request-changes, not approve-with-caution.
 - For `## Deployment`, compare the artifact's evidence against the issue's
   close test: the approved `## Requirements` acceptance criteria plus later
   human-approved scope or verification changes. Do not accept `✅` statuses on

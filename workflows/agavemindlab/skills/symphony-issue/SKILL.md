@@ -39,22 +39,17 @@ Linear relation.
 
 Also assign a type label: `Bug | Feature | Refactor | Performance | Migration | Chore | Spike | Other`.
 
-## Execution domain routing
+## Project routing
 
-Before dedup or creation, classify the discovery against the WORKFLOW
-"Canonical project routing registry". Route by the work's execution domain, not
-by where it was discovered:
+Before dedup or creation, choose the target project from the WORKFLOW
+"Canonical project routing registry". Route by target project, not by where the
+work was discovered:
 
-- Use the current issue's project only when the discovery belongs to that same
-  execution domain.
-- Route operational infrastructure work to `gl-infra`: clusters/namespaces,
-  DB/Redis/PVC/storage, secrets, NetworkPolicy, RBAC, GitHub protected
-  environments, operator profiles, runtime accounts, reset/seed, and
-  feature-flag allowlists.
-- If a discovery spans multiple domains, split it into one spawned issue per
-  domain. Pick the kind/relation for each split by the real dependency; e.g.
-  repo-side staging gate work stays in `grotto`, while `grotto-staging`
-  operational prerequisites route to `gl-infra`.
+- Use the current issue's project only when the registry routes the discovery
+  there.
+- If a discovery spans multiple target projects, split it into one spawned issue
+  per target project. Pick the kind/relation for each split by the real
+  dependency.
 - If the target project is unclear, create/propose nothing. Add a
   `[NEEDS CLARIFICATION: which Linear project should own <work>?]` marker in
   the current phase artifact with the candidate routes and stop per that phase's
@@ -68,8 +63,8 @@ by where it was discovered:
    `active_states`, so Symphony never auto-works it.
 2. **`assignee` = the current issue's `creator`.** Never assign a spawned
    issue to Symphony's own account.
-3. **`team` = current issue's team; `project` = the routed execution-domain
-   project.** Resolve the target project's `projectId` and pass it to
+3. **`team` = current issue's team; `project` = the routed target project.**
+   Resolve the target project's `projectId` and pass it to
    `issueCreate`; omit `projectId` only when the current issue has no project
    and the registry also says there is no project route.
 4. **Idempotency.** The workpad `## Spawned Issues` section records every item
@@ -96,7 +91,7 @@ by where it was discovered:
 
    ```md
    **来源**: 由 symphony 处理 <当前 issue 的 identifier，如 ENG-123，裸写让 Linear 渲染引用> 时发现
-   **执行域 / project**: <execution domain> / <Linear project>
+   **目标 project**: <Linear project>
    **背景（why）**: <发现了什么、为什么该独立成一个 issue>
    **建议范围（what）**: <大致要做什么>
    ```
@@ -123,7 +118,7 @@ thread is a dedicated consent channel:
 ## 建议新建 issue：<建议标题>
 - **类型**: blocking / sub-issue
 - **类型标签**: Type:Xxx
-- **执行域 / project**: <execution domain> / <Linear project>
+- **目标 project**: <Linear project>
 - **关系**: 阻塞当前 issue（裸 identifier，如 ENG-123）/ 当前 issue 的子任务
 - **理由**: <为什么需要、为什么不能并进当前 issue>
 
@@ -185,9 +180,8 @@ record it and move on. Both paths coexist.
   artifact; workpad `已创建 ENG-123`.
 - **implementation ticket that depends on the current artifact** → `downstream
   blocked`, linked as current `blocks` new.
-- **repo gate plus operational prerequisites** → split into `grotto` repo-side
-  work and `gl-infra` operational work, as in DEV-5236/DEV-5324; link them by
-  the dependency that actually blocks execution.
+- **multi-project discovery** → split into one issue per target project and
+  link them by the dependency that actually blocks execution.
 - **blocking dependency found** → proposal comment + blocker callout on the
   artifact + `Human Review`; nothing created until consent.
 - **consent reply in a proposal thread** → issue created, `已创建 ENG-123`
