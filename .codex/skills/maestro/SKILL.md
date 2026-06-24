@@ -87,12 +87,13 @@ Task:
 8. Apply the relevant review lens from the reviewer prompt: Requirements /
    Design rigor, Implementation / Deployment verification, or bugfix / rework
    root cause.
-9. Check whether spawned or related issues have the dependency relation or
-   cleanup disposition needed to prevent unsafe parallel work or orphaned
-   validation artifacts, whether accepted but excluded prerequisite work has a
-   durable follow-up issue, whether the reviewed issue has concrete value before
-   that prerequisite completes, and whether downstream issues have enough
-   inherited context to start safely once unblocked.
+9. Check whether spawned or related issues have the dependency relation,
+   project/routing evidence, and cleanup disposition needed to prevent unsafe
+   parallel work, misrouted execution, or orphaned validation artifacts; whether
+   accepted but excluded prerequisite work has a durable follow-up issue;
+   whether the reviewed issue has concrete value before that prerequisite
+   completes; and whether downstream issues have enough inherited context to
+   start safely once unblocked.
 10. For bugfixes, reject artifacts that do not explain new failure windows caused
    by moved side effects or durable state before success.
 11. Cite the decisive evidence and call out missing evidence or uncertainty.

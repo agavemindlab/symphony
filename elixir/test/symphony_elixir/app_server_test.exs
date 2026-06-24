@@ -183,6 +183,122 @@ defmodule SymphonyElixir.AppServerTest do
     end
   end
 
+  test "app server sources per-project env before launching local codex" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-app-server-project-env-#{System.unique_integer([:positive])}"
+      )
+
+    original_workflow_path = Workflow.workflow_file_path()
+
+    try do
+      workflow_dir = Path.join(test_root, "workflows/grandline")
+      project_dir = Path.join(test_root, "workflows/grotto")
+      workflow_file = Path.join(workflow_dir, "WORKFLOW.md")
+      workspace_root = Path.join(test_root, "workspaces")
+      workspace = Path.join(workspace_root, "MT-PROJECT-ENV")
+      codex_binary = Path.join(test_root, "fake-codex")
+      trace_file = Path.join(test_root, "codex-project-env.trace")
+      previous_trace = System.get_env("SYMP_TEST_CODEx_TRACE")
+      previous_repo = System.get_env("SYMPHONY_REPO")
+      previous_base_branch = System.get_env("SYMPHONY_BASE_BRANCH")
+      previous_project_dir = System.get_env("SYMPHONY_PROJECT_DIR")
+
+      on_exit(fn ->
+        if is_binary(previous_trace) do
+          System.put_env("SYMP_TEST_CODEx_TRACE", previous_trace)
+        else
+          System.delete_env("SYMP_TEST_CODEx_TRACE")
+        end
+
+        restore_env("SYMPHONY_REPO", previous_repo)
+        restore_env("SYMPHONY_BASE_BRANCH", previous_base_branch)
+        restore_env("SYMPHONY_PROJECT_DIR", previous_project_dir)
+      end)
+
+      File.mkdir_p!(workflow_dir)
+      File.mkdir_p!(project_dir)
+      File.mkdir_p!(workspace)
+
+      File.write!(workflow_file, "# aggregate workflow\n")
+
+      File.write!(Path.join(project_dir, "project.env"), """
+      SYMPHONY_PROJECT_SLUG="grotto-slug"
+      SYMPHONY_REPO="grotto"
+      SYMPHONY_BASE_BRANCH="main"
+      """)
+
+      File.write!(Path.join(workflow_dir, "project-for-linear-project.sh"), """
+      case "${SYMPHONY_LINEAR_PROJECT_SLUG:-}" in
+        grotto-slug) SYMPHONY_PROJECT_DIR="$SYMPHONY_WORKFLOW_DIR/../grotto" ;;
+        *) echo "unknown project: ${SYMPHONY_LINEAR_PROJECT_SLUG:-}" >&2; exit 66 ;;
+      esac
+      SYMPHONY_PROJECT_DIR="$(cd "$SYMPHONY_PROJECT_DIR" && pwd)"
+      set -a
+      . "$SYMPHONY_PROJECT_DIR/project.env"
+      set +a
+      export SYMPHONY_PROJECT_DIR
+      """)
+
+      File.write!(codex_binary, """
+      #!/bin/sh
+      trace_file="${SYMP_TEST_CODEx_TRACE:-/tmp/codex-project-env.trace}"
+      {
+        printf 'SYMPHONY_REPO=%s\\n' "${SYMPHONY_REPO:-}"
+        printf 'SYMPHONY_BASE_BRANCH=%s\\n' "${SYMPHONY_BASE_BRANCH:-}"
+        printf 'SYMPHONY_PROJECT_DIR=%s\\n' "${SYMPHONY_PROJECT_DIR:-}"
+        printf 'SYMPHONY_LINEAR_PROJECT_SLUG=%s\\n' "${SYMPHONY_LINEAR_PROJECT_SLUG:-}"
+      } > "$trace_file"
+
+      count=0
+      while IFS= read -r line; do
+        count=$((count + 1))
+        case "$count" in
+          1) printf '%s\\n' '{"id":1,"result":{}}' ;;
+          2) printf '%s\\n' '{"id":2,"result":{"thread":{"id":"thread-project-env"}}}' ;;
+          3) printf '%s\\n' '{"id":3,"result":{"turn":{"id":"turn-project-env"}}}' ;;
+          4) printf '%s\\n' '{"method":"turn/completed"}'; exit 0 ;;
+          *) exit 0 ;;
+        esac
+      done
+      """)
+
+      File.chmod!(codex_binary, 0o755)
+      System.put_env("SYMP_TEST_CODEx_TRACE", trace_file)
+      System.put_env("SYMPHONY_REPO", "wrong-repo")
+      System.put_env("SYMPHONY_BASE_BRANCH", "wrong-branch")
+      System.delete_env("SYMPHONY_PROJECT_DIR")
+      Workflow.set_workflow_file_path(workflow_file)
+
+      write_workflow_file!(Workflow.workflow_file_path(),
+        workspace_root: workspace_root,
+        codex_command: "#{codex_binary} app-server"
+      )
+
+      issue = %Issue{
+        id: "issue-project-env",
+        identifier: "MT-PROJECT-ENV",
+        title: "Route project env",
+        state: "In Progress",
+        project: %{id: "project-id", slug_id: "grotto-slug", name: "Grotto"}
+      }
+
+      assert {:ok, _result} = AppServer.run(workspace, "Validate project env", issue)
+
+      assert File.read!(trace_file) ==
+               """
+               SYMPHONY_REPO=grotto
+               SYMPHONY_BASE_BRANCH=main
+               SYMPHONY_PROJECT_DIR=#{project_dir}
+               SYMPHONY_LINEAR_PROJECT_SLUG=grotto-slug
+               """
+    after
+      Workflow.set_workflow_file_path(original_workflow_path)
+      File.rm_rf(test_root)
+    end
+  end
+
   test "app server marks request-for-input events as a hard failure" do
     test_root =
       Path.join(
@@ -1426,10 +1542,10 @@ defmodule SymphonyElixir.AppServerTest do
 
       assert argv_line = Enum.find(lines, &String.starts_with?(&1, "ARGV:"))
       assert argv_line =~ "-T -p 2200 worker-01 bash -lc"
-      assert argv_line =~ "cd "
-      assert argv_line =~ remote_workspace
-      assert argv_line =~ "exec "
-      assert argv_line =~ "fake-remote-codex app-server"
+      assert trace =~ "cd "
+      assert trace =~ remote_workspace
+      assert trace =~ "exec "
+      assert trace =~ "fake-remote-codex app-server"
 
       expected_turn_policy = %{
         "type" => "workspaceWrite",

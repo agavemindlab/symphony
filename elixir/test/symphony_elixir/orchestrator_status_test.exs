@@ -30,7 +30,8 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
       title: "Snapshot test",
       description: "Capture codex state",
       state: "In Progress",
-      url: "https://example.org/issues/MT-188"
+      url: "https://example.org/issues/MT-188",
+      project: %{id: "project-id", slug_id: "project-slug", name: "Project Name"}
     }
 
     orchestrator_name = Module.concat(__MODULE__, :SnapshotOrchestrator)
@@ -91,6 +92,7 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
     assert %{running: [snapshot_entry]} = snapshot
     assert snapshot_entry.issue_id == issue_id
     assert snapshot_entry.issue_url == "https://example.org/issues/MT-188"
+    assert snapshot_entry.project == %{id: "project-id", slug_id: "project-slug", name: "Project Name"}
     assert snapshot_entry.session_id == "thread-live-turn-live"
     assert snapshot_entry.turn_count == 1
     assert snapshot_entry.last_codex_timestamp == now
@@ -198,6 +200,246 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
     assert completed_state.codex_totals.output_tokens == 4
     assert completed_state.codex_totals.total_tokens == 16
     assert is_integer(completed_state.codex_totals.seconds_running)
+  end
+
+  test "orchestrator records analytics events for usage, completion, and retry" do
+    path = analytics_tmp_path("orchestrator-events.ndjson")
+    previous_analytics_file = Application.get_env(:symphony_elixir, :analytics_file)
+
+    on_exit(fn ->
+      if is_nil(previous_analytics_file) do
+        Application.delete_env(:symphony_elixir, :analytics_file)
+      else
+        Application.put_env(:symphony_elixir, :analytics_file, previous_analytics_file)
+      end
+    end)
+
+    Application.put_env(:symphony_elixir, :analytics_file, path)
+
+    issue_id = "issue-analytics"
+
+    issue = %Issue{
+      id: issue_id,
+      identifier: "MT-ANALYTICS",
+      title: "Analytics event test",
+      description: "Record runtime analytics",
+      state: "In Progress",
+      url: "https://example.org/issues/MT-ANALYTICS"
+    }
+
+    orchestrator_name = Module.concat(__MODULE__, :AnalyticsEventsOrchestrator)
+    {:ok, pid} = Orchestrator.start_link(name: orchestrator_name)
+
+    on_exit(fn ->
+      if Process.alive?(pid) do
+        Process.exit(pid, :normal)
+      end
+    end)
+
+    initial_state = :sys.get_state(pid)
+    process_ref = make_ref()
+
+    running_entry = %{
+      pid: self(),
+      ref: process_ref,
+      identifier: issue.identifier,
+      issue: issue,
+      worker_host: "local-worker",
+      workspace_path: "/workspaces/MT-ANALYTICS",
+      session_id: nil,
+      turn_count: 0,
+      last_codex_message: nil,
+      last_codex_timestamp: nil,
+      last_codex_event: nil,
+      codex_input_tokens: 0,
+      codex_output_tokens: 0,
+      codex_total_tokens: 0,
+      codex_last_reported_input_tokens: 0,
+      codex_last_reported_output_tokens: 0,
+      codex_last_reported_total_tokens: 0,
+      retry_attempt: 0,
+      started_at: DateTime.utc_now()
+    }
+
+    :sys.replace_state(pid, fn _ ->
+      initial_state
+      |> Map.put(:running, %{issue_id => running_entry})
+      |> Map.put(:claimed, MapSet.put(initial_state.claimed, issue_id))
+    end)
+
+    send(
+      pid,
+      {:codex_worker_update, issue_id,
+       %{
+         event: :notification,
+         payload: %{
+           "method" => "thread/tokenUsage/updated",
+           "params" => %{
+             "tokenUsage" => %{
+               "total" => %{"inputTokens" => 12, "outputTokens" => 4, "totalTokens" => 16}
+             }
+           }
+         },
+         timestamp: DateTime.utc_now(),
+         codex_app_server_pid: "5252"
+       }}
+    )
+
+    send(pid, {:DOWN, process_ref, :process, self(), :normal})
+
+    assert_eventually(fn ->
+      event_types =
+        [path: path]
+        |> SymphonyElixir.Analytics.read_events()
+        |> Map.fetch!(:events)
+        |> Enum.map(& &1["event_type"])
+
+      "cost_snapshot" in event_types and
+        "run_completed" in event_types and
+        "retry_scheduled" in event_types
+    end)
+
+    events = SymphonyElixir.Analytics.read_events(path: path).events
+
+    assert Enum.any?(events, fn event ->
+             event["event_type"] == "cost_snapshot" and
+               event["issue_identifier"] == "MT-ANALYTICS" and
+               get_in(event, ["tokens", "total_tokens"]) == 16
+           end)
+  end
+
+  test "orchestrator records run completion when reconcile stops a running issue" do
+    path = analytics_tmp_path("reconcile-completion-events.ndjson")
+    previous_analytics_file = Application.get_env(:symphony_elixir, :analytics_file)
+
+    on_exit(fn ->
+      if is_nil(previous_analytics_file) do
+        Application.delete_env(:symphony_elixir, :analytics_file)
+      else
+        Application.put_env(:symphony_elixir, :analytics_file, previous_analytics_file)
+      end
+    end)
+
+    Application.put_env(:symphony_elixir, :analytics_file, path)
+
+    issue_id = "issue-reconcile-completion"
+
+    agent_pid =
+      spawn(fn ->
+        receive do
+          :stop -> :ok
+        end
+      end)
+
+    state = %Orchestrator.State{
+      running: %{
+        issue_id => %{
+          pid: agent_pid,
+          ref: make_ref(),
+          identifier: "MT-RECONCILE",
+          issue: %Issue{
+            id: issue_id,
+            identifier: "MT-RECONCILE",
+            state: "In Progress",
+            url: "https://example.org/issues/MT-RECONCILE"
+          },
+          session_id: "thread-reconcile",
+          started_at: DateTime.add(DateTime.utc_now(), -3, :second),
+          codex_input_tokens: 8,
+          codex_output_tokens: 5,
+          codex_total_tokens: 13
+        }
+      },
+      claimed: MapSet.new([issue_id]),
+      codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
+      retry_attempts: %{}
+    }
+
+    issue = %Issue{
+      id: issue_id,
+      identifier: "MT-RECONCILE",
+      state: "Human Review",
+      title: "Review",
+      description: "No longer active",
+      labels: []
+    }
+
+    updated_state = Orchestrator.reconcile_issue_states_for_test([issue], state)
+
+    refute Map.has_key?(updated_state.running, issue_id)
+    refute MapSet.member?(updated_state.claimed, issue_id)
+    refute Process.alive?(agent_pid)
+
+    assert Enum.any?(SymphonyElixir.Analytics.read_events(path: path).events, fn event ->
+             event["event_type"] == "run_completed" and
+               event["issue_identifier"] == "MT-RECONCILE" and
+               get_in(event, ["tokens", "total_tokens"]) == 13
+           end)
+  end
+
+  test "orchestrator records capacity snapshots only when counts change" do
+    path = analytics_tmp_path("capacity-snapshots.ndjson")
+    previous_analytics_file = Application.get_env(:symphony_elixir, :analytics_file)
+
+    on_exit(fn ->
+      if is_nil(previous_analytics_file) do
+        Application.delete_env(:symphony_elixir, :analytics_file)
+      else
+        Application.put_env(:symphony_elixir, :analytics_file, previous_analytics_file)
+      end
+    end)
+
+    Application.put_env(:symphony_elixir, :analytics_file, path)
+
+    state = %Orchestrator.State{
+      running: %{},
+      retry_attempts: %{},
+      blocked: %{},
+      max_concurrent_agents: 4,
+      codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0}
+    }
+
+    state = Orchestrator.record_capacity_snapshot_for_test(state)
+    state = Orchestrator.record_capacity_snapshot_for_test(state)
+
+    assert [%{"event_type" => "capacity_snapshot", "running_count" => 0}] =
+             capacity_events(path)
+
+    %{state | running: %{"issue-running" => %{}}}
+    |> Orchestrator.record_capacity_snapshot_for_test()
+
+    assert [
+             %{"event_type" => "capacity_snapshot", "running_count" => 0},
+             %{"event_type" => "capacity_snapshot", "running_count" => 1}
+           ] = capacity_events(path)
+  end
+
+  test "capacity snapshots record effective capacity expanded by configured projects" do
+    path = analytics_tmp_path("effective-capacity-snapshots.ndjson")
+    Application.put_env(:symphony_elixir, :analytics_file, path)
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_project_slug: nil,
+      tracker_project_slugs: Enum.map(1..12, &"project-#{&1}")
+    )
+
+    state = %Orchestrator.State{
+      running: %{},
+      retry_attempts: %{},
+      blocked: %{},
+      max_concurrent_agents: nil,
+      codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0}
+    }
+
+    Orchestrator.record_capacity_snapshot_for_test(state)
+
+    assert [
+             %{
+               "event_type" => "capacity_snapshot",
+               "configured_capacity" => 10,
+               "effective_capacity" => 12
+             }
+           ] = capacity_events(path)
   end
 
   test "orchestrator snapshot tracks turn completed usage when present" do
@@ -1350,6 +1592,26 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
     refute rendered =~ "Dashboard:"
   end
 
+  test "status dashboard renders configured project names" do
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_project_slug: nil,
+      tracker_project_names: ["grotto", "gl-infra"]
+    )
+
+    snapshot_data =
+      {:ok,
+       %{
+         running: [],
+         retrying: [],
+         codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
+         rate_limits: nil
+       }}
+
+    rendered = StatusDashboard.format_snapshot_content_for_test(snapshot_data, 0.0)
+
+    assert rendered =~ "2 projects: grotto, gl-infra"
+  end
+
   test "status dashboard renders dashboard url on its own line when server port is configured" do
     previous_port_override = Application.get_env(:symphony_elixir, :server_port_override)
 
@@ -1442,6 +1704,7 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
              identifier: "MT-777",
              state: "running",
              session_id: "thread-1234567890",
+             project: %{id: "project-id", slug_id: "project-slug", name: "Project Name"},
              codex_app_server_pid: "4242",
              codex_total_tokens: 3_200,
              runtime_seconds: 75,
@@ -1469,6 +1732,8 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
     rendered = StatusDashboard.format_snapshot_content_for_test(snapshot_data, 0.0)
     plain = Regex.replace(~r/\e\[[0-9;]*m/, rendered, "")
 
+    assert plain =~ "PROJECT"
+    assert plain =~ "Project Name"
     assert plain =~ ~r/MT-777.*\r?\n│\s*\r?\n├─ Backoff queue/s
   end
 
@@ -1919,6 +2184,38 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
     deadline_ms = System.monotonic_time(:millisecond) + timeout_ms
     do_wait_for_snapshot(pid, predicate, deadline_ms)
   end
+
+  defp analytics_tmp_path(name) do
+    root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-orchestrator-analytics-#{System.unique_integer([:positive])}"
+      )
+
+    File.mkdir_p!(root)
+    on_exit(fn -> File.rm_rf(root) end)
+    Path.join(root, name)
+  end
+
+  defp capacity_events(path) do
+    [path: path]
+    |> SymphonyElixir.Analytics.read_events()
+    |> Map.fetch!(:events)
+    |> Enum.filter(&(&1["event_type"] == "capacity_snapshot"))
+  end
+
+  defp assert_eventually(fun, attempts \\ 20)
+
+  defp assert_eventually(fun, attempts) when attempts > 0 do
+    if fun.() do
+      true
+    else
+      Process.sleep(25)
+      assert_eventually(fun, attempts - 1)
+    end
+  end
+
+  defp assert_eventually(_fun, 0), do: flunk("condition not met in time")
 
   defp do_wait_for_snapshot(pid, predicate, deadline_ms) do
     snapshot = GenServer.call(pid, :snapshot)
