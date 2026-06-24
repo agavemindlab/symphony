@@ -93,9 +93,10 @@ Task:
 9. Check whether spawned or related issues have the dependency relation or
    cleanup disposition needed to prevent unsafe parallel work or orphaned
    validation artifacts, whether accepted but excluded prerequisite work has a
-   durable follow-up issue, whether the reviewed issue has concrete value before
-   that prerequisite completes, and whether downstream issues have enough
-   inherited context to start safely once unblocked.
+   durable follow-up issue that blocks the reviewed issue, whether the reviewed
+   issue has concrete value before that prerequisite completes, and whether
+   downstream issues have enough inherited context to start safely once
+   unblocked.
 10. For bugfixes, reject artifacts that do not explain new failure windows caused
    by moved side effects or durable state before success. When required
    regression validation, a `回归例`, or a historical issue anchor lacks a

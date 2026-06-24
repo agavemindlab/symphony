@@ -146,11 +146,13 @@ Reply locations:
   from selecting it early. If the accepted scope excludes prerequisite
   operational work that is still required before safe use, such as real infra,
   secrets, environment protection, credentials, or data reset setup, require a
-  follow-up issue with enough context and a durable dependency relation instead
-  of treating "out of scope" as disposed. That relation is not enough when the
-  reviewed issue has no safe, independently useful effect until the prerequisite
-  finishes. For soft-start gates, environment scaffolds, disabled runtime paths,
-  or repo-side gate wiring, require the artifact to state what merge makes
+  prerequisite issue that blocks the reviewed issue and has enough context,
+  instead of treating "out of scope" as disposed. A relation where the reviewed
+  issue blocks that prerequisite is reversed; request changes even if the path
+  is default-off or the prerequisite is in backlog. That relation is not enough
+  when the reviewed issue has no safe, independently useful effect until the
+  prerequisite finishes. For soft-start gates, environment scaffolds, disabled
+  runtime paths, or repo-side gate wiring, require the artifact to state what merge makes
   positively usable before the prerequisite finishes. A safe no-op, default-off
   scaffold, placeholder, future wiring, documentation, dependency relation, or
   proof that a disabled path would fail closed if enabled is not concrete value.
