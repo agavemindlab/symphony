@@ -134,16 +134,22 @@ Reply locations:
   artifact closes the actual rework request without invalidating the accepted
   source of truth.
 - Inspect spawned or related issues mentioned by current artifacts and Linear
-  relations. Include relation type, state, assignee, blocker direction, whether
-  downstream issues or accepted out-of-scope prerequisites can start safely
-  after the reviewed issue is closed, and whether validation/disposable issues
-  have a durable relation plus terminal cleanup state.
-- For spawned or related issues, verify the relation matches the dependency. If
+  relations. Include relation type, state, assignee, project/routing evidence,
+  blocker direction, whether downstream issues or accepted out-of-scope
+  prerequisites can start safely after the reviewed issue is closed, and whether
+  validation/disposable issues have a durable relation plus terminal cleanup
+  state.
+- For spawned or related issues, verify both relation and routing. The relation
+  must match the dependency, and the downstream issue's Linear project/routing
+  label or description must match the WORKFLOW project routing registry. If
   downstream work must wait for the reviewed issue to be accepted, merged, or
   closed, `related` is not enough, and a current intake/backlog state is only a
   temporary queue position. Require evidence that the reviewed issue `blocks`
   the downstream issue, or another durable dependency gate that keeps Symphony
-  from selecting it early. If the accepted scope excludes prerequisite
+  from selecting it early. Request changes when a prerequisite/follow-up issue
+  lacks project/routing evidence, is routed to the wrong target project, or
+  mixes multiple target projects that should have been split. If the accepted
+  scope excludes prerequisite
   operational work that is still required before safe use, such as real infra,
   secrets, environment protection, credentials, or data reset setup, require a
   prerequisite issue that blocks the reviewed issue and has enough context,
@@ -167,8 +173,8 @@ Reply locations:
   reviewed issue. Before recommending `Merging` or `Done`, also check whether
   any downstream issue that becomes selectable after the reviewed issue is
   closed has enough current context to start safely; if key constraints,
-  accepted facts, or follow-up scope are missing, recommend adding that context
-  first. Request changes when the artifact creates prerequisite follow-up work
+  accepted facts, follow-up scope, or routing are missing, recommend adding that
+  context first. Request changes when the artifact creates prerequisite follow-up work
   without that gate, or leaves validation artifacts open or unlinked.
 - For `## Deployment`, compare the artifact's evidence against the issue's
   close test: the approved `## Requirements` acceptance criteria plus later

@@ -10,8 +10,8 @@
 │ Next refresh: n/a
 ├─ Running
 │
-│   ID       STAGE          PID      AGE / TURN   TOKENS     SESSION        EVENT                                  
-│   ───────────────────────────────────────────────────────────────────────────────────────────────────────────────
+│   ID       PROJECT        STAGE          PID      AGE / TURN   TOKENS     SESSION        EVENT
+│   ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
 │  No active agents
 │
 ├─ Backoff queue

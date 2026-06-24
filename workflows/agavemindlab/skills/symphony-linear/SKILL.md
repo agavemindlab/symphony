@@ -388,11 +388,11 @@ mutation AttachURL($issueId: String!, $url: String!, $title: String) {
 
 ### Spawn a Linear issue (create + link)
 
-Used by the `symphony-issue` skill. Three reads to gather ids, then create,
-then link.
+Used by the `symphony-issue` skill. Resolve the routed target project from the
+WORKFLOW project routing registry, then gather ids, create, and link.
 
 **1. Read the fields needed to spawn from the current issue** — its
-`creator`, `team`, and `project`:
+`creator`, `team`, and current `project`:
 
 ```graphql
 query SpawnContext($id: String!) {
@@ -402,17 +402,32 @@ query SpawnContext($id: String!) {
     url
     creator { id }
     team { id }
-    project { id }
+    project { id name }
   }
 }
 ```
 
-**2. Resolve the intake `stateId` by `type`, never by name.** Reuse the
+**2. Resolve the routed `projectId`.** If the routing registry names a target
+project, look it up and pass its id to `issueCreate`:
+
+```graphql
+query ProjectByName($name: String!) {
+  projects(filter: { name: { eqIgnoreCase: $name } }, first: 2) {
+    nodes { id name }
+  }
+}
+```
+
+If the route is unclear, do not create a likely wrong issue; let
+`symphony-issue` ask for human routing clarification in the current phase
+artifact.
+
+**3. Resolve the intake `stateId` by `type`, never by name.** Reuse the
 `IssueTeamStates` query above; from `team.states.nodes`, pick the state with
 `type == "triage"` if one exists, else `type == "backlog"`. Teams rename
 states, so matching the literal name "Backlog" is wrong — match on `type`.
 
-**3. Resolve the `Type:Xxx` `labelId`** from the team's labels:
+**4. Resolve the `Type:Xxx` `labelId`** from the team's labels:
 
 ```graphql
 query TeamLabels($id: String!) {
@@ -427,7 +442,7 @@ query TeamLabels($id: String!) {
 }
 ```
 
-**4. Create the issue.** `parentId` only for sub-issues; omit otherwise.
+**5. Create the issue.** `parentId` only for sub-issues; omit otherwise.
 
 ```graphql
 mutation CreateIssue($input: IssueCreateInput!) {
@@ -442,9 +457,9 @@ mutation CreateIssue($input: IssueCreateInput!) {
 }
 ```
 
-`input`: `{ teamId, title, description, stateId, assigneeId, labelIds, parentId? }`.
+`input`: `{ teamId, title, description, stateId, assigneeId, labelIds, projectId?, parentId? }`.
 
-**5. Link the issue** (skip for sub-issues — parent-child is set via
+**6. Link the issue** (skip for sub-issues — parent-child is set via
 `parentId` above, not a relation):
 
 ```graphql

@@ -33,10 +33,13 @@ defmodule SymphonyElixir.TestSupport do
 
         File.mkdir_p!(workflow_root)
         workflow_file = Path.join(workflow_root, "WORKFLOW.md")
+        analytics_file = Path.join(workflow_root, "analytics.ndjson")
         previous_workflow_file_path = Application.get_env(:symphony_elixir, :workflow_file_path)
+        previous_analytics_file = Application.get_env(:symphony_elixir, :analytics_file)
 
         write_workflow_file!(workflow_file)
         Workflow.set_workflow_file_path(workflow_file)
+        Application.put_env(:symphony_elixir, :analytics_file, analytics_file)
         {:ok, _apps} = Application.ensure_all_started(:symphony_elixir)
         SymphonyElixir.TestSupport.ensure_core_children_started()
         if Process.whereis(SymphonyElixir.WorkflowStore), do: SymphonyElixir.WorkflowStore.force_reload()
@@ -47,6 +50,12 @@ defmodule SymphonyElixir.TestSupport do
             Application.delete_env(:symphony_elixir, :workflow_file_path)
           else
             Application.put_env(:symphony_elixir, :workflow_file_path, previous_workflow_file_path)
+          end
+
+          if is_nil(previous_analytics_file) do
+            Application.delete_env(:symphony_elixir, :analytics_file)
+          else
+            Application.put_env(:symphony_elixir, :analytics_file, previous_analytics_file)
           end
 
           Application.delete_env(:symphony_elixir, :server_port_override)
@@ -147,6 +156,8 @@ defmodule SymphonyElixir.TestSupport do
           tracker_api_token: "token",
           tracker_project_slug: "project",
           tracker_project_slugs: nil,
+          tracker_project_name: nil,
+          tracker_project_names: nil,
           tracker_assignee: nil,
           tracker_required_labels: [],
           tracker_active_states: ["Todo", "In Progress"],
@@ -176,6 +187,7 @@ defmodule SymphonyElixir.TestSupport do
           observability_enabled: true,
           observability_refresh_ms: 1_000,
           observability_render_interval_ms: 16,
+          observability_analytics_path: nil,
           server_port: nil,
           server_host: nil,
           prompt: @workflow_prompt
@@ -188,6 +200,8 @@ defmodule SymphonyElixir.TestSupport do
     tracker_api_token = Keyword.get(config, :tracker_api_token)
     tracker_project_slug = Keyword.get(config, :tracker_project_slug)
     tracker_project_slugs = Keyword.get(config, :tracker_project_slugs)
+    tracker_project_name = Keyword.get(config, :tracker_project_name)
+    tracker_project_names = Keyword.get(config, :tracker_project_names)
     tracker_assignee = Keyword.get(config, :tracker_assignee)
     tracker_required_labels = Keyword.get(config, :tracker_required_labels)
     tracker_active_states = Keyword.get(config, :tracker_active_states)
@@ -217,6 +231,7 @@ defmodule SymphonyElixir.TestSupport do
     observability_enabled = Keyword.get(config, :observability_enabled)
     observability_refresh_ms = Keyword.get(config, :observability_refresh_ms)
     observability_render_interval_ms = Keyword.get(config, :observability_render_interval_ms)
+    observability_analytics_path = Keyword.get(config, :observability_analytics_path)
     server_port = Keyword.get(config, :server_port)
     server_host = Keyword.get(config, :server_host)
     prompt = Keyword.get(config, :prompt)
@@ -230,6 +245,8 @@ defmodule SymphonyElixir.TestSupport do
         "  api_key: #{yaml_value(tracker_api_token)}",
         "  project_slug: #{yaml_value(tracker_project_slug)}",
         tracker_project_slugs_entry(tracker_project_slugs),
+        tracker_project_name_entry(tracker_project_name),
+        tracker_project_names_entry(tracker_project_names),
         "  assignee: #{yaml_value(tracker_assignee)}",
         "  required_labels: #{yaml_value(tracker_required_labels)}",
         "  active_states: #{yaml_value(tracker_active_states)}",
@@ -261,7 +278,12 @@ defmodule SymphonyElixir.TestSupport do
           hook_issue_stopped,
           hook_timeout_ms
         ),
-        observability_yaml(observability_enabled, observability_refresh_ms, observability_render_interval_ms),
+        observability_yaml(
+          observability_enabled,
+          observability_refresh_ms,
+          observability_render_interval_ms,
+          observability_analytics_path
+        ),
         server_yaml(server_port, server_host),
         "---",
         prompt
@@ -340,12 +362,25 @@ defmodule SymphonyElixir.TestSupport do
     "  project_slugs: #{yaml_value(project_slugs)}"
   end
 
-  defp observability_yaml(enabled, refresh_ms, render_interval_ms) do
+  defp tracker_project_name_entry(nil), do: nil
+
+  defp tracker_project_name_entry(project_name) do
+    "  project_name: #{yaml_value(project_name)}"
+  end
+
+  defp tracker_project_names_entry(nil), do: nil
+
+  defp tracker_project_names_entry(project_names) do
+    "  project_names: #{yaml_value(project_names)}"
+  end
+
+  defp observability_yaml(enabled, refresh_ms, render_interval_ms, analytics_path) do
     [
       "observability:",
       "  dashboard_enabled: #{yaml_value(enabled)}",
       "  refresh_ms: #{yaml_value(refresh_ms)}",
-      "  render_interval_ms: #{yaml_value(render_interval_ms)}"
+      "  render_interval_ms: #{yaml_value(render_interval_ms)}",
+      "  analytics_path: #{yaml_value(analytics_path)}"
     ]
     |> Enum.join("\n")
   end
