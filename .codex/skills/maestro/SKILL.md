@@ -95,8 +95,10 @@ Task:
    parallel work, misrouted execution, or orphaned validation artifacts; whether
    accepted but excluded prerequisite work has a durable follow-up issue that
    blocks the reviewed issue; whether the reviewed issue has concrete value
-   before that prerequisite completes; and whether downstream issues have enough
-   inherited context to start safely once unblocked.
+   before that prerequisite completes; whether an artifact says the reviewed
+   work must not be enabled until a prerequisite issue finishes; and whether
+   downstream issues have enough inherited context to start safely once
+   unblocked.
 10. For bugfixes, reject artifacts that do not explain new failure windows caused
    by moved side effects or durable state before success. When required
    regression validation, a `回归例`, or a historical issue anchor lacks a

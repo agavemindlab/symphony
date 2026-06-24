@@ -155,8 +155,10 @@ Reply locations:
   prerequisite issue that blocks the reviewed issue and has enough context,
   instead of treating "out of scope" as disposed. A relation where the reviewed
   issue blocks that prerequisite is reversed; request changes even if the path
-  is default-off or the prerequisite is in backlog. That relation is not enough
-  when the reviewed issue has no safe, independently useful effect until the
+  is default-off or the prerequisite is in backlog. If the artifact says not to
+  enable, deploy, or run acceptance until that issue finishes, that issue is a
+  prerequisite blocker for the reviewed issue. That relation is not enough when
+  the reviewed issue has no safe, independently useful effect until the
   prerequisite finishes. For soft-start gates, environment scaffolds, disabled
   runtime paths, or repo-side gate wiring, require the artifact to state what merge makes
   positively usable before the prerequisite finishes. A safe no-op, default-off
