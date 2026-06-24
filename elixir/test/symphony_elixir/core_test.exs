@@ -273,6 +273,69 @@ defmodule SymphonyElixir.CoreTest do
     end
   end
 
+  test "maestro reviewer challenges undersized retention windows for trend claims" do
+    reviewer =
+      File.read!(Path.expand("../.codex/skills/maestro/agents/maestro-reviewer.md", File.cwd!()))
+
+    for contract <- [
+          "retention window",
+          "long-term",
+          "large enough",
+          "request changes or ask clarification"
+        ] do
+      assert reviewer =~ contract
+    end
+  end
+
+  test "maestro reviewer does not overstate readback as regression verification" do
+    reviewer =
+      File.read!(Path.expand("../.codex/skills/maestro/agents/maestro-reviewer.md", File.cwd!()))
+
+    for contract <- [
+          "merged-file readback",
+          "Linear relation checks",
+          "regression verification/evidence",
+          "command, log, test, or manual exercise"
+        ] do
+      assert reviewer =~ contract
+    end
+  end
+
+  test "maestro reviewer blocks Done when required regression validation is missing" do
+    reviewer =
+      File.read!(Path.expand("../.codex/skills/maestro/agents/maestro-reviewer.md", File.cwd!()))
+
+    for contract <- [
+          "required regression validation",
+          "回归例",
+          "historical issue",
+          "sole evidence",
+          "close-test gap",
+          "request changes",
+          "not completion",
+          "Readback cannot satisfy it",
+          "manual exercise of the affected behavior"
+        ] do
+      assert reviewer =~ contract
+    end
+  end
+
+  test "maestro launcher task repeats required regression validation gate" do
+    skill = File.read!(Path.expand("../.codex/skills/maestro/SKILL.md", File.cwd!()))
+
+    for contract <- [
+          "required",
+          "regression validation",
+          "回归例",
+          "historical issue",
+          "command, log, test, or manual exercise",
+          "request changes instead of completion",
+          "confirmation"
+        ] do
+      assert skill =~ contract
+    end
+  end
+
   test "linear api token resolves from LINEAR_API_KEY env var" do
     previous_linear_api_key = System.get_env("LINEAR_API_KEY")
     env_api_key = "test-linear-api-key"

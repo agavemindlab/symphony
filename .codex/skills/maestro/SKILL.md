@@ -17,10 +17,12 @@ the reviewer subagent must collect evidence itself from the issue key.
 
 1. Parse the issue key from the invocation, e.g. `$maestro DEV-1234`.
 2. Read `agents/maestro-reviewer.md`.
-3. Spawn exactly one fresh subagent with context forking disabled. Pass only:
-   the reviewer prompt, the issue key, and the task statement below. Do not pass
-   current conversation history, issue title/state, artifact text, comment
-   summaries, PR facts, prior `$maestro` results, or your expected answer.
+3. Spawn exactly one fresh subagent with context forking disabled through the
+   multi-agent tool, not `codex exec`. Pass only a plain-text message containing
+   the full reviewer prompt, the issue key, and the task statement below. Do not
+   pass current conversation history, issue title/state, artifact text, comment
+   summaries, PR facts, prior `$maestro` results, your expected answer, or the
+   reviewer prompt as a skill/file reference.
 4. Wait for the subagent result. If required output fields are missing, ask the
    same subagent once to fix only the format; do not supply issue facts.
 5. Return the subagent's concise Chinese recommendation with:
@@ -94,7 +96,10 @@ Task:
    that prerequisite completes, and whether downstream issues have enough
    inherited context to start safely once unblocked.
 10. For bugfixes, reject artifacts that do not explain new failure windows caused
-   by moved side effects or durable state before success.
+   by moved side effects or durable state before success. When required
+   regression validation, a `回归例`, or a historical issue anchor lacks a
+   command, log, test, or manual exercise, request changes instead of completion
+   confirmation.
 11. Cite the decisive evidence and call out missing evidence or uncertainty.
 Keep the answer concise and do not recommend changing state directly unless the
 human's reply should explicitly instruct that.
