@@ -122,8 +122,8 @@ When a post-merge acceptance check requires logged-in user state:
    (e.g. `ENG-123`); do not expand this issue.
 
 A `❌ 失败` means the shipped change did not meet its criterion — a real
-regression. Do not auto-fix it from here: state it plainly, `@`-mention the
-issue's `creator`, and leave it for the human to route to `Rework`.
+regression. If the fix is agent-actionable, immediately follow Cross-phase
+rework below; use `⚠️ 待观察` only for checks that are not runnable yet.
 
 ## `## Deployment` artifact template
 
@@ -170,8 +170,11 @@ and production-log access alone.
 ## Cross-phase rework
 
 If post-deploy verification reveals the implementation was fundamentally
-wrong and a new PR is required, follow the cross-phase rework protocol in your workflow instructions: resolve `## Deployment`, update workpad
-`current_phase: Implementation`, and open `phase-implementation`.
+wrong and a new PR is required, follow the workflow's Cross-phase rework
+protocol in this run: resolve `## Deployment`, update workpad
+`current_phase: Implementation`, and open `phase-implementation`. If the root
+cause belongs to Design or Requirements, target that earlier phase instead. Do
+not create a fix PR while `current_phase` remains Deployment.
 
 ## Exit
 
@@ -179,6 +182,9 @@ After posting or updating the `## Deployment` artifact:
 
 1. Move the issue back to `Human Review`.
 2. Stop. Do **not** move the issue to `Done`.
+
+If Cross-phase rework opened an earlier phase, follow that phase's Exit instead
+of this Deployment Exit.
 
 The posted `> 👉` callout tells the human how to proceed: close on all-resolved,
 move back to `In Progress` to re-enter verification while items remain
