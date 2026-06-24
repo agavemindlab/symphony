@@ -73,8 +73,9 @@ repo metadata. Ignore any prior conversation context and parent-agent
 interpretation. Do not mutate Linear, GitHub, files, or issue state.
 
 Task:
-1. Fetch and inspect the issue, active unresolved Phase artifacts, human
-   feedback, related issues, and PR evidence needed by the reviewer prompt.
+1. Fetch and inspect the issue, active unresolved Phase artifacts with no
+   phase-closing reply, human feedback, related issues, and PR evidence needed
+   by the reviewer prompt.
 2. Decide the best reply method: approve, request changes, ask clarification,
    merge nudge, completion confirmation, or no reply yet.
 3. State the reply audience: next Symphony agent or human.
@@ -90,13 +91,19 @@ Task:
 8. Apply the relevant review lens from the reviewer prompt: Requirements /
    Design rigor, Implementation / Deployment verification, or bugfix / rework
    root cause.
-9. Check whether spawned or related issues have the dependency relation,
-   project/routing evidence, and cleanup disposition needed to prevent unsafe
-   parallel work, misrouted execution, or orphaned validation artifacts; whether
-   accepted but excluded prerequisite work has a durable follow-up issue that
-   blocks the reviewed issue; whether the reviewed issue has concrete value
-   before that prerequisite completes; whether an artifact says the reviewed
-   work must not be enabled until a prerequisite issue finishes; and whether
+9. Check spawned or related issues for dependency direction, project/routing
+   evidence, and cleanup disposition. For Implementation, if the reviewed issue
+   has no independent runtime/deployment value until related operational work
+   finishes (infra, secrets, protected environments, test users, data
+   reset/seed, allowlists, or "do not enable/deploy/run acceptance until X"),
+   that related work is a prerequisite blocker and must block the reviewed
+   issue; code that can land first, a default-off/no-op path, soft-start
+   feedback, or merge-risk-only feedback does not make it a downstream
+   follow-up. If the relation is reversed, request changes / `Rework`, make
+   blocker direction the primary reason, and do not recommend `Merging` unless
+   you cite exact current-artifact approval text saying to merge/approve before
+   the prerequisite finishes; conditional soft-start guidance such as "if this
+   issue merges first, it must..." is not approval. Also check whether true
    downstream issues have enough inherited context to start safely once
    unblocked.
 10. For bugfixes, reject artifacts that do not explain new failure windows caused

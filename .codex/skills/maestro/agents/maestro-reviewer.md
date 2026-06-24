@@ -61,15 +61,31 @@ For approve, request changes, merge nudge, and completion confirmation, set
 note for the next run. For ask clarification and no reply yet, set `回复对象`
 to `human` and write the draft for the human, explaining what Maestro cannot
 decide from the evidence.
+Approve or merge nudge drafts must not include caveats such as "do not enable",
+"do not deploy", or "do not run acceptance until another issue finishes"; those
+caveats mean the reviewed issue is blocked and needs request changes.
+For Implementation, code that can merge but must stay default-off/no-op until
+real infra, secrets, protected environments, test users, data reset/seed, or
+allowlist work finishes has no independent runtime/deployment value yet. That
+related work is a prerequisite blocker for the reviewed issue, not a downstream
+follow-up, and the recommendation must be request changes / `Rework`.
+Before returning, scan your own draft and `依据`: if you wrote that human
+feedback explicitly accepted a soft-start, waiver, default-off/no-op merge, or
+merge before a prerequisite, but you did not cite the exact human text saying
+that the issue should merge or be approved before the prerequisite finishes,
+change the recommendation to request changes.
+Conditional wording such as "if this issue needs to merge first, it must
+soft-start" or "then this issue may block the prerequisite" is implementation
+guidance, not current-artifact approval.
 
 Status recommendations:
 
 - Requirements / Design approve -> `In Progress`.
-- Implementation approve with a real PR -> `Merging`; for no-PR `Type:Spike`
-  findings accepted -> `Done`.
+- Implementation approve with a real PR and no prerequisite blocker ->
+  `Merging`; for no-PR `Type:Spike` findings accepted -> `Done`.
 - Request changes -> `Rework`.
 - Ask clarification or no reply yet -> `unchanged`.
-- Implementation merge nudge -> `Merging`.
+- Implementation merge nudge with no prerequisite blocker -> `Merging`.
 - Deployment completion accepted -> `Done`; Deployment still waiting for
   verification -> `In Progress`; Deployment failed or needs correction ->
   `Rework`.
@@ -104,11 +120,21 @@ Reply locations:
   image and cite visible facts. Do not rely on surrounding text alone when an
   image carries the evidence.
 - The review target is the awaiting-review Phase artifact: the most recent
-  `## Requirements`, `## Design`, `## Implementation`, or `## Deployment`
-  artifact with no closing reply (`✅ 已批准...` or `⏩ 自动进入...`).
-- Use feedback from every unresolved artifact thread and standalone top-level
-  human comments. Attribute unclear standalone comments to the awaiting-review
-  phase.
+  unresolved top-level `## Requirements`, `## Design`, `## Implementation`, or
+  `## Deployment` artifact with no closing reply (`✅ 已批准...` or `⏩ 自动进入...`).
+  If an unresolved artifact already has a closing reply, treat it as stale
+  cleanup, not as current review context.
+- Use feedback from every active artifact thread (unresolved and no closing
+  reply) and standalone top-level human comments. Attribute unclear standalone
+  comments to the awaiting-review phase.
+- Treat human feedback as accepting a prerequisite-blocked soft-start only when
+  it explicitly says to move the issue to `Merging`, merge, or approve before
+  the prerequisite finishes despite a default-off or no-op runtime path. A
+  request to refresh merge-risk evidence, accept a soft-start shape, or keep a
+  gate disabled is not that waiver. Conditional wording such as "if this issue
+  merges first, it must..." or "then this issue may block the prerequisite" is
+  not that waiver. If you cannot cite exact current-artifact approval text in
+  `依据`, assume there is no waiver.
 - Drop resolved artifacts unless a current comment explicitly refers back to
   that prior round.
 - When `## Deployment` is awaiting review, derive the close test from the
@@ -139,35 +165,25 @@ Reply locations:
   prerequisites can start safely after the reviewed issue is closed, and whether
   validation/disposable issues have a durable relation plus terminal cleanup
   state.
-- For spawned or related issues, verify both relation and routing. The relation
-  must match the dependency, and the downstream issue's Linear project/routing
-  label or description must match the WORKFLOW project routing registry. If
-  downstream work must wait for the reviewed issue to be accepted, merged, or
-  closed, `related` is not enough, and a current intake/backlog state is only a
-  temporary queue position. Require evidence that the reviewed issue `blocks`
-  the downstream issue, or another durable dependency gate that keeps Symphony
-  from selecting it early. Request changes when a prerequisite/follow-up issue
-  lacks project/routing evidence, is routed to the wrong target project, or
-  mixes multiple target projects that should have been split. If the accepted
-  scope excludes prerequisite
-  operational work that is still required before safe use, such as real infra,
-  secrets, environment protection, credentials, or data reset setup, require a
-  prerequisite issue that blocks the reviewed issue and has enough context,
-  instead of treating "out of scope" as disposed. A relation where the reviewed
-  issue blocks that prerequisite is reversed; request changes even if the path
-  is default-off or the prerequisite is in backlog. If the artifact says not to
-  enable, deploy, or run acceptance until that issue finishes, that issue is a
-  prerequisite blocker for the reviewed issue. That relation is not enough when
-  the reviewed issue has no safe, independently useful effect until the
-  prerequisite finishes. For soft-start gates, environment scaffolds, disabled
-  runtime paths, or repo-side gate wiring, require the artifact to state what merge makes
-  positively usable before the prerequisite finishes. A safe no-op, default-off
-  scaffold, placeholder, future wiring, documentation, dependency relation, or
-  proof that a disabled path would fail closed if enabled is not concrete value.
-  If the artifact cannot name that usable effect, request cross-phase rework so
-  the prerequisite blocks the reviewed issue. Only an explicit human-approved
-  Requirements or Design scope change may rescope a runtime/deployment issue to
-  a repo-side scaffold with no pre-prerequisite runtime value. If a
+- For spawned or related issues, classify by useful value before relation
+  direction. Operational work needed before write-capable acceptance or real use
+  -- infra, secrets, protected environments, test users, data reset/seed, or
+  allowlists -- is a prerequisite blocker when the reviewed issue has no safe,
+  independently useful runtime/deployment effect before that work finishes.
+  Default-off/no-op code, backlog state, or soft-start feedback does not create
+  that value. The prerequisite must block the reviewed issue; if the reviewed
+  issue blocks the prerequisite, request changes and lead with the reversed
+  blocker direction. Conditional soft-start instructions do not override this.
+  Request changes when a
+  prerequisite/follow-up issue lacks project/routing evidence, is routed to the
+  wrong target project, or mixes multiple target projects that should have been
+  split. If the artifact says not to enable, deploy, or run acceptance until
+  another issue finishes, that issue is a prerequisite blocker for the reviewed
+  issue. If the reviewed issue has no safe, independently useful effect until a
+  prerequisite finishes, require cross-phase rework so the prerequisite blocks
+  the reviewed issue. Only an explicit human-approved Requirements or Design
+  scope change may rescope a runtime/deployment issue to a repo-side scaffold
+  with no pre-prerequisite runtime value. If a
   Deployment artifact creates a validation,
   disposable, or cleanup issue as proof for the close test, require a durable
   relation to the reviewed issue and evidence that the helper issue is closed,
@@ -262,6 +278,16 @@ Reply locations:
   rework of the relevant earlier phase.
 - For `## Implementation`, request changes when the artifact 缺少合并风险判断,
   or when its 合并风险判断 is clearly contradicted by the PR diff / evidence.
+- For `## Implementation`, request changes instead of approve/merge nudge when
+  a related issue contains operational prerequisites and the reviewed issue has
+  no independent runtime/deployment value until that work finishes. If the
+  relation is reviewed issue `blocks` prerequisite, the blocker direction is
+  reversed; make that the primary reply reason. Human feedback accepting a
+  soft-start shape or asking only for refreshed merge-risk evidence is not a
+  waiver unless it explicitly says to move the issue to `Merging`, merge, or
+  approve the current artifact before the prerequisite finishes, and you cite
+  that exact current-artifact approval text in `依据`. Conditional text such as
+  "if this issue merges first, it must soft-start" is not approval.
 - Request changes when fresh PR metadata contradicts the artifact's claimed
   mergeability, check, or review state and the artifact uses that state as
   acceptance evidence. Approve only if the contradiction is clearly irrelevant
@@ -276,8 +302,9 @@ Reply locations:
 - Ask clarification when the next action requires human judgment, product scope,
   or risk acceptance rather than agent work.
 - Use a merge nudge only when the awaiting-review artifact is
-  `## Implementation` and normal Implementation appears accepted but the
-  workflow requires the human to move the issue to `Merging`.
+  `## Implementation`, no prerequisite blocker exists, and normal
+  Implementation appears accepted but the workflow requires the human to move
+  the issue to `Merging`.
 - For a no-PR `Type:Spike` whose `## Implementation` findings are accepted,
   the draft reply must explicitly say the human can move the issue straight to
   `Done`, not `Merging`.
