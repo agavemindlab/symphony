@@ -115,6 +115,44 @@ defmodule SymphonyElixirWeb.DashboardLive do
         <section class="section-card">
           <div class="section-header">
             <div>
+              <h2 class="section-title">Efficiency Analytics</h2>
+              <p class="section-copy">
+                Durable runtime events and v1 data-quality status for the metrics catalog.
+              </p>
+            </div>
+            <span class="state-badge">
+              <%= format_int(analytics_payload(@payload).event_sample_count) %> events
+            </span>
+          </div>
+
+          <div class="analytics-grid">
+            <article class="analytics-card" :for={panel <- analytics_panels(@payload)}>
+              <div class="analytics-card-head">
+                <h3 class="analytics-title"><%= panel.title %></h3>
+                <span class={analytics_status_class(panel.status)}>
+                  <%= analytics_status_label(panel.status) %>
+                </span>
+              </div>
+
+              <dl class="analytics-metrics">
+                <div :for={metric <- panel.metrics} class="analytics-metric">
+                  <dt><%= metric.label %></dt>
+                  <dd><%= format_metric_value(metric.value) %></dd>
+                </div>
+              </dl>
+            </article>
+          </div>
+
+          <%= if analytics_gaps(@payload) != [] do %>
+            <ul class="quality-list">
+              <li :for={gap <- analytics_gaps(@payload)}><%= gap %></li>
+            </ul>
+          <% end %>
+        </section>
+
+        <section class="section-card">
+          <div class="section-header">
+            <div>
               <h2 class="section-title">Rate limits</h2>
               <p class="section-copy">Latest upstream rate-limit snapshot, when available.</p>
             </div>
@@ -436,6 +474,39 @@ defmodule SymphonyElixirWeb.DashboardLive do
       true -> base
     end
   end
+
+  defp analytics_payload(%{analytics: %{} = analytics}), do: analytics
+  defp analytics_payload(_payload), do: %{event_sample_count: 0, panels: [], data_quality: %{gaps: []}}
+
+  defp analytics_panels(payload) do
+    payload
+    |> analytics_payload()
+    |> Map.get(:panels, [])
+  end
+
+  defp analytics_gaps(payload) do
+    payload
+    |> analytics_payload()
+    |> Map.get(:data_quality, %{})
+    |> Map.get(:gaps, [])
+  end
+
+  defp analytics_status_class("direct"), do: "analytics-status analytics-status-direct"
+  defp analytics_status_class("partial"), do: "analytics-status analytics-status-partial"
+  defp analytics_status_class("gap"), do: "analytics-status analytics-status-gap"
+  defp analytics_status_class(_status), do: "analytics-status"
+
+  defp analytics_status_label("direct"), do: "Direct"
+  defp analytics_status_label("partial"), do: "Partial"
+  defp analytics_status_label("gap"), do: "Gap"
+  defp analytics_status_label(status) when is_binary(status), do: status
+  defp analytics_status_label(_status), do: "Unknown"
+
+  defp format_metric_value(value) when is_integer(value), do: format_int(value)
+  defp format_metric_value(value) when is_float(value), do: :erlang.float_to_binary(value, decimals: 1)
+  defp format_metric_value(value) when is_binary(value), do: value
+  defp format_metric_value(nil), do: "n/a"
+  defp format_metric_value(value), do: inspect(value)
 
   defp schedule_runtime_tick do
     Process.send_after(self(), :runtime_tick, @runtime_tick_ms)

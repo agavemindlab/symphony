@@ -26,7 +26,13 @@ fi
 
 workflow_dir="$repo_root/workflows/$project"
 workflow_file="$workflow_dir/WORKFLOW.md"
-defaults_env="$repo_root/workflows/agavemindlab/project.env.defaults"
+if [ -L "$workflow_file" ]; then
+  link_target="$(readlink "$workflow_file")"
+  namespace="$(basename "$(dirname "$link_target")")"
+else
+  namespace="$project"
+fi
+defaults_env="$repo_root/workflows/$namespace/project.env.defaults"
 project_env="$workflow_dir/project.env"
 local_env="$workflow_dir/project.env.local"
 

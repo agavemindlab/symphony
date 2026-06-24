@@ -9,10 +9,10 @@
 │ Next refresh: n/a
 ├─ Running
 │
-│   ID       PROJECT        STAGE          PID      AGE / TURN   TOKENS     SESSION        EVENT                   
+│   ID       PROJECT        STAGE          PID      AGE / TURN   TOKENS     SESSION        EVENT
 │   ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
 │ ● MT-101   n/a            running        4242     13m 5s / 11     120,450 thre...567890  turn completed (compl...
-│ ● MT-102   n/a            running        5252     6m 52s / 4       89,200 thre...567890  mix test --cover        
+│ ● MT-102   n/a            running        5252     6m 52s / 4       89,200 thre...567890  mix test --cover
 │
 ├─ Backoff queue
 │

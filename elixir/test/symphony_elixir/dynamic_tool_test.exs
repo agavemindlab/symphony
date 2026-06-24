@@ -65,6 +65,24 @@ defmodule SymphonyElixir.Codex.DynamicToolTest do
     assert response["contentItems"] == [%{"type" => "inputText", "text" => response["output"]}]
   end
 
+  test "linear_graphql forwards an explicit api key to the Linear client" do
+    test_pid = self()
+
+    response =
+      DynamicTool.execute(
+        "linear_graphql",
+        %{"query" => "query Viewer { viewer { id } }"},
+        api_key: "maestro-token",
+        linear_client: fn query, variables, opts ->
+          send(test_pid, {:linear_client_called, query, variables, opts})
+          {:ok, %{"data" => %{"viewer" => %{"id" => "usr_maestro"}}}}
+        end
+      )
+
+    assert_received {:linear_client_called, "query Viewer { viewer { id } }", %{}, [api_key: "maestro-token"]}
+    assert response["success"] == true
+  end
+
   test "linear_graphql accepts a raw GraphQL query string" do
     test_pid = self()
 

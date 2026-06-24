@@ -92,6 +92,45 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     end
   end
 
+  test "workspace creation cleans failed new workspace before retry" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-workspace-retry-after-hook-fail-#{System.unique_integer([:positive])}"
+      )
+
+    try do
+      workspace_root = Path.join(test_root, "workspaces")
+      attempts_file = Path.join(test_root, "attempts")
+
+      write_workflow_file!(Workflow.workflow_file_path(),
+        workspace_root: workspace_root,
+        hook_after_create: """
+        attempts_file="#{attempts_file}"
+        attempts=$(cat "$attempts_file" 2>/dev/null || printf 0)
+        attempts=$((attempts + 1))
+        printf '%s' "$attempts" > "$attempts_file"
+        printf 'partial attempt %s\\n' "$attempts" > partial.txt
+        if [ "$attempts" -eq 1 ]; then
+          exit 42
+        fi
+        printf 'initialized\\n' > initialized.txt
+        """
+      )
+
+      assert {:error, {:workspace_hook_failed, "after_create", 42, _output}} =
+               Workspace.create_for_issue("MT-RETRY")
+
+      assert File.read!(attempts_file) == "1"
+
+      assert {:ok, workspace} = Workspace.create_for_issue("MT-RETRY")
+      assert File.read!(attempts_file) == "2"
+      assert File.read!(Path.join(workspace, "initialized.txt")) == "initialized\n"
+    after
+      File.rm_rf(test_root)
+    end
+  end
+
   test "workspace replaces stale non-directory paths" do
     workspace_root =
       Path.join(
@@ -476,6 +515,25 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert log =~ "Variable \\\"$ids\\\" got invalid value"
   end
 
+  test "linear client can use an explicit api key without mutating tracker auth" do
+    write_workflow_file!(Workflow.workflow_file_path(), tracker_api_token: "symphony-token")
+
+    assert {:ok, %{"data" => %{"viewer" => %{"id" => "usr_maestro"}}}} =
+             Client.graphql(
+               "query Viewer { viewer { id } }",
+               %{},
+               api_key: "maestro-token",
+               request_fun: fn _payload, headers ->
+                 assert {"Authorization", "maestro-token"} in headers
+                 refute {"Authorization", "symphony-token"} in headers
+
+                 {:ok, %{status: 200, body: %{"data" => %{"viewer" => %{"id" => "usr_maestro"}}}}}
+               end
+             )
+
+    assert Config.settings!().tracker.api_key == "symphony-token"
+  end
+
   test "orchestrator sorts dispatch by priority then oldest created_at" do
     issue_same_priority_older = %Issue{
       id: "issue-old-high",
@@ -546,7 +604,45 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert Orchestrator.should_dispatch_issue_for_test(next_issue, %{state | max_concurrent_agents: 2})
   end
 
-  test "multiple configured projects expand effective dispatch slots" do
+  test "multiple configured projects expand effective default dispatch slots" do
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_api_token: "token",
+      tracker_project_slug: nil,
+      tracker_project_slugs: Enum.map(1..12, &"project-#{&1}")
+    )
+
+    running_issues =
+      Enum.map(1..10, fn i ->
+        %Issue{
+          id: "issue-#{i}",
+          identifier: "MT-#{i}",
+          title: "Project #{i} issue",
+          state: "Todo",
+          project: %{id: "project-#{i}-id", slug_id: "project-#{i}", name: "Project #{i}"}
+        }
+      end)
+
+    next_issue = %Issue{
+      id: "issue-11",
+      identifier: "MT-11",
+      title: "Project 11 issue",
+      state: "Todo",
+      project: %{id: "project-11-id", slug_id: "project-11", name: "Project 11"}
+    }
+
+    state = %Orchestrator.State{
+      max_concurrent_agents: nil,
+      running: Enum.into(running_issues, %{}, fn ri -> {ri.id, %{issue: ri, worker_host: nil}} end),
+      claimed: MapSet.new(Enum.map(running_issues, & &1.id)),
+      blocked: %{},
+      retry_attempts: %{},
+      codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0}
+    }
+
+    assert Orchestrator.should_dispatch_issue_for_test(next_issue, state)
+  end
+
+  test "explicit max_concurrent_agents is strictly respected and not expanded by projects" do
     write_workflow_file!(Workflow.workflow_file_path(),
       tracker_api_token: "token",
       tracker_project_slug: nil,
@@ -581,7 +677,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0}
     }
 
-    assert Orchestrator.should_dispatch_issue_for_test(next_issue, state)
+    refute Orchestrator.should_dispatch_issue_for_test(next_issue, state)
   end
 
   test "todo issue with non-terminal blocker is not dispatch-eligible" do
@@ -1182,11 +1278,46 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert Config.settings!().codex.command == "codex app-server"
   end
 
+  test "config reads observability analytics path from workflow" do
+    previous_analytics_file = Application.get_env(:symphony_elixir, :analytics_file)
+
+    on_exit(fn ->
+      if is_nil(previous_analytics_file) do
+        Application.delete_env(:symphony_elixir, :analytics_file)
+      else
+        Application.put_env(:symphony_elixir, :analytics_file, previous_analytics_file)
+      end
+    end)
+
+    Application.delete_env(:symphony_elixir, :analytics_file)
+
+    analytics_path =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-analytics-#{System.unique_integer([:positive])}.ndjson"
+      )
+
+    write_workflow_file!(Workflow.workflow_file_path(), observability_analytics_path: analytics_path)
+
+    config = Config.settings!()
+    assert config.observability.analytics_path == analytics_path
+    assert SymphonyElixir.Analytics.file_path() == analytics_path
+
+    home_relative_path = Path.join(["~", "symphony", "events.ndjson"])
+
+    write_workflow_file!(Workflow.workflow_file_path(), observability_analytics_path: home_relative_path)
+
+    config = Config.settings!()
+    assert config.observability.analytics_path == Path.expand(home_relative_path)
+    assert SymphonyElixir.Analytics.file_path() == Path.expand(home_relative_path)
+  end
+
   test "config resolves $VAR references for env-backed secret and path values" do
     workspace_env_var = "SYMP_WORKSPACE_ROOT_#{System.unique_integer([:positive])}"
     api_key_env_var = "SYMP_LINEAR_API_KEY_#{System.unique_integer([:positive])}"
     project_slug_env_var = "SYMP_LINEAR_PROJECT_SLUG_#{System.unique_integer([:positive])}"
     project_slugs_env_var = "SYMP_LINEAR_PROJECT_SLUGS_#{System.unique_integer([:positive])}"
+    missing_project_slugs_env_var = "SYMP_MISSING_LINEAR_PROJECT_SLUGS_#{System.unique_integer([:positive])}"
     project_names_env_var = "SYMP_LINEAR_PROJECT_NAMES_#{System.unique_integer([:positive])}"
     workspace_root = Path.join("/tmp", "symphony-workspace-root")
     api_key = "resolved-secret"
@@ -1197,12 +1328,14 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     previous_api_key = System.get_env(api_key_env_var)
     previous_project_slug = System.get_env(project_slug_env_var)
     previous_project_slugs = System.get_env(project_slugs_env_var)
+    previous_missing_project_slugs = System.get_env(missing_project_slugs_env_var)
     previous_project_names = System.get_env(project_names_env_var)
 
     System.put_env(workspace_env_var, workspace_root)
     System.put_env(api_key_env_var, api_key)
     System.put_env(project_slug_env_var, project_slug)
     System.put_env(project_slugs_env_var, " project-a,project-b,project-a ")
+    System.delete_env(missing_project_slugs_env_var)
     System.put_env(project_names_env_var, " grotto,symphony,grotto ")
 
     on_exit(fn ->
@@ -1210,6 +1343,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       restore_env(api_key_env_var, previous_api_key)
       restore_env(project_slug_env_var, previous_project_slug)
       restore_env(project_slugs_env_var, previous_project_slugs)
+      restore_env(missing_project_slugs_env_var, previous_missing_project_slugs)
       restore_env(project_names_env_var, previous_project_names)
     end)
 
@@ -1241,6 +1375,15 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     write_workflow_file!(Workflow.workflow_file_path(),
       tracker_api_token: "$#{api_key_env_var}",
       tracker_project_slug: nil,
+      tracker_project_slugs: "$#{missing_project_slugs_env_var}"
+    )
+
+    config = Config.settings!()
+    assert config.tracker.project_slugs == []
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_api_token: "$#{api_key_env_var}",
+      tracker_project_slug: nil,
       tracker_project_names: "$#{project_names_env_var}",
       workspace_root: "$#{workspace_env_var}"
     )
@@ -1266,12 +1409,19 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert StringOrStringList.dump(%{}) == :error
   end
 
-  test "config resolves string project slugs and missing env-backed project slugs" do
+  test "config resolves string and missing env-backed project scopes" do
     project_slugs_env_var = "SYMP_LINEAR_PROJECT_SLUGS_#{System.unique_integer([:positive])}"
+    project_names_env_var = "SYMP_LINEAR_PROJECT_NAMES_#{System.unique_integer([:positive])}"
     previous_project_slugs = System.get_env(project_slugs_env_var)
+    previous_project_names = System.get_env(project_names_env_var)
 
-    on_exit(fn -> restore_env(project_slugs_env_var, previous_project_slugs) end)
+    on_exit(fn ->
+      restore_env(project_slugs_env_var, previous_project_slugs)
+      restore_env(project_names_env_var, previous_project_names)
+    end)
+
     System.delete_env(project_slugs_env_var)
+    System.delete_env(project_names_env_var)
 
     write_workflow_file!(Workflow.workflow_file_path(),
       tracker_api_token: "token",
@@ -1295,6 +1445,28 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
              {:ok, ["project-c", "project-d"]}
 
     assert Schema.configured_project_slugs(%Schema.Tracker{project_slugs: :invalid}) == {:ok, []}
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_api_token: "token",
+      tracker_project_slug: nil,
+      tracker_project_name: " "
+    )
+
+    assert Config.settings!().tracker.project_name == nil
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_api_token: "token",
+      tracker_project_slug: nil,
+      tracker_project_names: "$#{project_names_env_var}"
+    )
+
+    assert Config.settings!().tracker.project_names == []
+    assert {:error, :missing_linear_project_scope} = Config.validate!()
+
+    assert Schema.configured_project_names(%Schema.Tracker{project_names: "grotto,symphony"}) ==
+             {:ok, ["grotto", "symphony"]}
+
+    assert Schema.configured_project_names(%Schema.Tracker{project_names: :invalid}) == {:ok, []}
   end
 
   test "config resolves string project names and missing env-backed project names" do
@@ -1484,6 +1656,8 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     original_workflow_path = Workflow.workflow_file_path()
 
     try do
+      configure_fake_gh_clone!(test_root)
+
       canonical_workflow = Path.expand("../workflows/agavemindlab/WORKFLOW.md", File.cwd!())
       canonical_skills = Path.expand("../workflows/agavemindlab/skills", File.cwd!())
       canonical_dir = Path.join(test_root, "agavemindlab")
@@ -1537,11 +1711,15 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
 
       assert {:ok, workspace} = Workspace.create_for_issue("MT-SKILL-INSTALL")
 
+      assert File.exists?(Path.join([workspace, ".agents", "skills", "phase-implementation", "SKILL.md"]))
       assert File.exists?(Path.join([workspace, ".agents", "skills", "symphony-commit", "SKILL.md"]))
+      assert File.exists?(Path.join([workspace, ".agents", "skills", "symphony-linear", "SKILL.md"]))
       assert File.read!(Path.join([workspace, ".agents", "skills", "linear", "SKILL.md"])) == "repo version\n"
 
       exclude = File.read!(Path.join([workspace, ".git", "info", "exclude"]))
+      assert exclude =~ ".agents/skills/phase-implementation/"
       assert exclude =~ ".agents/skills/symphony-commit/"
+      assert exclude =~ ".agents/skills/symphony-linear/"
       refute exclude =~ ".agents/skills/linear/"
 
       assert {"", 0} = System.cmd("git", ["-C", workspace, "status", "--short"])
@@ -1636,6 +1814,8 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     original_workflow_path = Workflow.workflow_file_path()
 
     try do
+      configure_fake_gh_clone!(test_root)
+
       canonical_workflow = Path.expand("../workflows/agavemindlab/WORKFLOW.md", File.cwd!())
       canonical_skills = Path.expand("../workflows/agavemindlab/skills", File.cwd!())
       canonical_dir = Path.join(test_root, "agavemindlab")
@@ -1808,6 +1988,22 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert {:ok, %{"a" => 1}} = StringOrMap.dump(%{"a" => 1})
     assert :error = StringOrMap.dump(123)
 
+    assert StringOrStringList.type() == :any
+    assert StringOrStringList.embed_as(:json) == :self
+    assert StringOrStringList.equal?(["a"], ["a"])
+    refute StringOrStringList.equal?(["a"], ["b"])
+
+    assert {:ok, "value"} = StringOrStringList.cast("value")
+    assert {:ok, ["a", "b"]} = StringOrStringList.cast(["a", "b"])
+    assert :error = StringOrStringList.cast(["a", 1])
+    assert :error = StringOrStringList.cast(123)
+
+    assert {:ok, ["a"]} = StringOrStringList.load(["a"])
+    assert :error = StringOrStringList.load([1])
+
+    assert {:ok, "a,b"} = StringOrStringList.dump("a,b")
+    assert :error = StringOrStringList.dump(%{a: 1})
+
     assert Schema.normalize_state_limits(nil) == %{}
 
     assert Schema.normalize_state_limits(%{"In Progress" => 2, todo: 1}) == %{
@@ -1824,6 +2020,18 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
              limits: {"state names must not be blank", []},
              limits: {"limits must be positive integers", []}
            ]
+
+    assert {:ok, ["project-a", "project-b"]} =
+             Schema.configured_project_slugs(%Schema.Tracker{
+               project_slug: nil,
+               project_slugs: " project-a,project-b,project-a "
+             })
+
+    assert {:ok, []} =
+             Schema.configured_project_slugs(%Schema.Tracker{
+               project_slug: nil,
+               project_slugs: 123
+             })
   end
 
   test "schema parse normalizes policy keys and env-backed fallbacks" do
@@ -2142,6 +2350,63 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     after
       File.rm_rf(test_root)
     end
+  end
+
+  defp configure_fake_gh_clone!(test_root) do
+    source_repo = Path.join(test_root, "source-repo")
+    fake_bin = Path.join(test_root, "bin")
+    fake_gh = Path.join(fake_bin, "gh")
+
+    File.mkdir_p!(source_repo)
+    File.mkdir_p!(fake_bin)
+    File.write!(Path.join(source_repo, "README.md"), "source repo\n")
+    System.cmd("git", ["-C", source_repo, "init", "-b", "main"])
+    System.cmd("git", ["-C", source_repo, "config", "user.name", "Test User"])
+    System.cmd("git", ["-C", source_repo, "config", "user.email", "test@example.com"])
+    System.cmd("git", ["-C", source_repo, "add", "README.md"])
+    System.cmd("git", ["-C", source_repo, "commit", "-m", "initial"])
+
+    File.write!(fake_gh, """
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    case "${1:-} ${2:-}" in
+      "repo clone")
+        destination="${4:-.}"
+        git clone --depth 1 "$SYMPHONY_TEST_SOURCE_REPO" "$destination" >/dev/null 2>&1
+        git -C "$destination" remote add upstream "$SYMPHONY_TEST_SOURCE_REPO" >/dev/null 2>&1 || true
+        ;;
+      "api user")
+        printf 'test-owner\\n'
+        ;;
+      *)
+        printf 'unexpected gh invocation: %s\\n' "$*" >&2
+        exit 2
+        ;;
+    esac
+    """)
+
+    File.chmod!(fake_gh, 0o755)
+
+    previous_path = System.get_env("PATH")
+    previous_repo = System.get_env("SYMPHONY_REPO")
+    previous_source_repo = System.get_env("SYMPHONY_TEST_SOURCE_REPO")
+    previous_fork_owner = System.get_env("GITHUB_FORK_OWNER")
+    previous_base_branch = System.get_env("SYMPHONY_BASE_BRANCH")
+
+    System.put_env("PATH", fake_bin <> ":" <> (previous_path || ""))
+    System.put_env("SYMPHONY_REPO", "source-repo")
+    System.put_env("SYMPHONY_TEST_SOURCE_REPO", source_repo)
+    System.put_env("GITHUB_FORK_OWNER", "test-owner")
+    System.put_env("SYMPHONY_BASE_BRANCH", "main")
+
+    on_exit(fn ->
+      restore_env("PATH", previous_path)
+      restore_env("SYMPHONY_REPO", previous_repo)
+      restore_env("SYMPHONY_TEST_SOURCE_REPO", previous_source_repo)
+      restore_env("GITHUB_FORK_OWNER", previous_fork_owner)
+      restore_env("SYMPHONY_BASE_BRANCH", previous_base_branch)
+    end)
   end
 
   defp read_skill_front_matter(path) do
