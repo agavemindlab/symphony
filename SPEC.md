@@ -1096,7 +1096,8 @@ Optional client-side tool extension:
 `linear_graphql` extension contract:
 
 - Purpose: execute a raw GraphQL query or mutation against Linear using Symphony's configured
-  tracker auth for the current session.
+  tracker auth for the current session, unless the host binds that session to an explicit Linear
+  API key such as the dedicated Maestro token.
 - Availability: only meaningful when `tracker.kind == "linear"` and valid Linear auth is configured.
 - Preferred input shape:
 
@@ -1335,6 +1336,10 @@ SHOULD return:
   - `total_tokens`
   - `seconds_running` (aggregate runtime seconds as of snapshot time, including active sessions)
 - `rate_limits` (latest coding-agent rate limit payload, if available)
+- `analytics` (optional persisted-efficiency summary), when implemented:
+  - SHOULD identify direct, partial, and missing data sources
+  - SHOULD keep GitHub/Linear-derived metrics separate from runtime-derived metrics unless the data
+    source is actually collected
 
 RECOMMENDED snapshot error modes:
 
@@ -2141,10 +2146,9 @@ Use the same validation profiles as Section 17:
 - HTTP server extension honors CLI `--port` over `server.port`, uses a safe default bind host, and
   exposes the baseline endpoints/error semantics in Section 13.7 if shipped.
 - `linear_graphql` client-side tool extension exposes raw Linear GraphQL access through the
-  app-server session using configured Symphony auth.
+  app-server session using configured Symphony auth or an explicit host-bound token.
 - TODO: Persist retry queue and session metadata across process restarts.
-- TODO: Make observability settings configurable in workflow front matter without prescribing UI
-  implementation details.
+- TODO: Define analytics retention and optional Linear/GitHub aggregation jobs beyond runtime events.
 - TODO: Add first-class tracker write APIs (comments/state transitions) in the orchestrator instead
   of only via agent tools.
 - TODO: Add pluggable issue tracker adapters beyond Linear.

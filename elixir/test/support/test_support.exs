@@ -33,10 +33,13 @@ defmodule SymphonyElixir.TestSupport do
 
         File.mkdir_p!(workflow_root)
         workflow_file = Path.join(workflow_root, "WORKFLOW.md")
+        analytics_file = Path.join(workflow_root, "analytics.ndjson")
         previous_workflow_file_path = Application.get_env(:symphony_elixir, :workflow_file_path)
+        previous_analytics_file = Application.get_env(:symphony_elixir, :analytics_file)
 
         write_workflow_file!(workflow_file)
         Workflow.set_workflow_file_path(workflow_file)
+        Application.put_env(:symphony_elixir, :analytics_file, analytics_file)
         {:ok, _apps} = Application.ensure_all_started(:symphony_elixir)
         SymphonyElixir.TestSupport.ensure_core_children_started()
         if Process.whereis(SymphonyElixir.WorkflowStore), do: SymphonyElixir.WorkflowStore.force_reload()
@@ -47,6 +50,12 @@ defmodule SymphonyElixir.TestSupport do
             Application.delete_env(:symphony_elixir, :workflow_file_path)
           else
             Application.put_env(:symphony_elixir, :workflow_file_path, previous_workflow_file_path)
+          end
+
+          if is_nil(previous_analytics_file) do
+            Application.delete_env(:symphony_elixir, :analytics_file)
+          else
+            Application.put_env(:symphony_elixir, :analytics_file, previous_analytics_file)
           end
 
           Application.delete_env(:symphony_elixir, :server_port_override)
@@ -178,6 +187,7 @@ defmodule SymphonyElixir.TestSupport do
           observability_enabled: true,
           observability_refresh_ms: 1_000,
           observability_render_interval_ms: 16,
+          observability_analytics_path: nil,
           server_port: nil,
           server_host: nil,
           prompt: @workflow_prompt
@@ -221,6 +231,7 @@ defmodule SymphonyElixir.TestSupport do
     observability_enabled = Keyword.get(config, :observability_enabled)
     observability_refresh_ms = Keyword.get(config, :observability_refresh_ms)
     observability_render_interval_ms = Keyword.get(config, :observability_render_interval_ms)
+    observability_analytics_path = Keyword.get(config, :observability_analytics_path)
     server_port = Keyword.get(config, :server_port)
     server_host = Keyword.get(config, :server_host)
     prompt = Keyword.get(config, :prompt)
@@ -267,7 +278,12 @@ defmodule SymphonyElixir.TestSupport do
           hook_issue_stopped,
           hook_timeout_ms
         ),
-        observability_yaml(observability_enabled, observability_refresh_ms, observability_render_interval_ms),
+        observability_yaml(
+          observability_enabled,
+          observability_refresh_ms,
+          observability_render_interval_ms,
+          observability_analytics_path
+        ),
         server_yaml(server_port, server_host),
         "---",
         prompt
@@ -358,12 +374,13 @@ defmodule SymphonyElixir.TestSupport do
     "  project_names: #{yaml_value(project_names)}"
   end
 
-  defp observability_yaml(enabled, refresh_ms, render_interval_ms) do
+  defp observability_yaml(enabled, refresh_ms, render_interval_ms, analytics_path) do
     [
       "observability:",
       "  dashboard_enabled: #{yaml_value(enabled)}",
       "  refresh_ms: #{yaml_value(refresh_ms)}",
-      "  render_interval_ms: #{yaml_value(render_interval_ms)}"
+      "  render_interval_ms: #{yaml_value(render_interval_ms)}",
+      "  analytics_path: #{yaml_value(analytics_path)}"
     ]
     |> Enum.join("\n")
   end
