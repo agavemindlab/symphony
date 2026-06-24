@@ -36,7 +36,8 @@ Apply the relevant lens before approving:
   approved Requirements artifact or human Requirements clarification explicitly
   says root-cause discovery happens after merge. Do not treat approved Design,
   Implementation scope boundaries, or Deployment smoke/hard gates as that
-  deferral.
+  deferral, and do not offer Requirements rework/rescoping as an alternative
+  unless newer human feedback already asks to change that scope.
 
 ## Task
 
