@@ -119,6 +119,11 @@ Reply locations:
   their own. If Deployment weakens or substitutes required verification, require
   changes when an agent can add evidence, or ask clarification when only the
   human can accept the risk.
+- When acceptance criteria require the delivered surface to explain how humans
+  should interpret, operate, compare, or trust it, verify that explanatory
+  content directly. Tests, screenshots, panel names, or object existence are not
+  enough unless the artifact, UI, output, or docs also show the required
+  meaning, status labels, decision boundary, or usage guidance.
 - For `Type:Feature` issues that add or change user-facing configuration,
   commands, workflow behavior, environment variables, or public usage paths,
   check for minimal user-facing docs, examples, README, or config updates before
