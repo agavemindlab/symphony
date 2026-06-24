@@ -328,6 +328,13 @@ Canonical project routing registry for spawned issues:
 | `grotto` | Grotto repository delivery | app/repo code, repo CI, release workflow, repo-owned runbooks, repo-owned environment gate logic |
 | `gl-infra` | Operational infrastructure | clusters/namespaces, DB/Redis/PVC/storage, secrets, NetworkPolicy, RBAC, GitHub protected environments, operator profiles, runtime accounts, reset/seed, feature-flag allowlists |
 | `gl-skills` | Reusable agent capability packages | standalone skills/plugins/tools that are not specific to the Symphony workflow itself or one product repo |
+| `voxvault` | VoxVault repository delivery | app/repo code, repo CI, release workflow, repo-owned runbooks, repo-owned environment gate logic |
+
+Known Linear projects that are not spawned-issue targets in this workflow:
+`grandline` is the multi-project launcher/profile, and `lain` has no workflow
+directory or project mapping here. If discovered work appears to route to either
+one, do not create/propose there; ask for human routing clarification with the
+candidate concrete projects.
 
 Use the registry before invoking or fulfilling `symphony-issue`. Default to the
 current issue's project only when the discovered work fits that project's row.
