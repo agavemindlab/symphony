@@ -133,11 +133,17 @@ defmodule SymphonyElixirWeb.DashboardLive do
                   <%= analytics_status_label(panel.status) %>
                 </span>
               </div>
+              <p class="analytics-question"><%= panel.question %></p>
 
               <dl class="analytics-metrics">
                 <div :for={metric <- panel.metrics} class="analytics-metric">
                   <dt><%= metric.label %></dt>
-                  <dd><%= format_metric_value(metric.value) %></dd>
+                  <dd>
+                    <span><%= format_metric_value(metric.value) %></span>
+                    <span class={analytics_metric_status_class(metric, panel)}>
+                      <%= analytics_status_label(metric_status(metric, panel)) %>
+                    </span>
+                  </dd>
                 </div>
               </dl>
             </article>
@@ -496,11 +502,22 @@ defmodule SymphonyElixirWeb.DashboardLive do
   defp analytics_status_class("gap"), do: "analytics-status analytics-status-gap"
   defp analytics_status_class(_status), do: "analytics-status"
 
-  defp analytics_status_label("direct"), do: "Direct"
-  defp analytics_status_label("partial"), do: "Partial"
-  defp analytics_status_label("gap"), do: "Gap"
+  defp analytics_status_label("direct"), do: "Direct (可直接展示)"
+  defp analytics_status_label("partial"), do: "Partial (可展示但样本不足)"
+  defp analytics_status_label("gap"), do: "Gap (仅展示数据质量/缺口)"
   defp analytics_status_label(status) when is_binary(status), do: status
   defp analytics_status_label(_status), do: "Unknown"
+
+  defp analytics_metric_status_class(metric, panel) do
+    metric
+    |> metric_status(panel)
+    |> analytics_status_class()
+    |> Kernel.<>(" analytics-metric-status")
+  end
+
+  defp metric_status(%{status: status}, _panel) when is_binary(status), do: status
+  defp metric_status(_metric, %{status: status}) when is_binary(status), do: status
+  defp metric_status(_metric, _panel), do: "gap"
 
   defp format_metric_value(value) when is_integer(value), do: format_int(value)
   defp format_metric_value(value) when is_float(value), do: :erlang.float_to_binary(value, decimals: 1)

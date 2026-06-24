@@ -112,23 +112,37 @@ defmodule SymphonyElixir.AnalyticsTest do
              "data_quality_exclusions"
            ]
 
+    assert Enum.all?(summary.panels, &(is_binary(&1.question) and &1.question != ""))
+
+    assert Enum.all?(summary.panels, fn panel ->
+             Enum.all?(panel.metrics, &(&1.status in ["direct", "partial", "gap"]))
+           end)
+
+    assert %{question: "Can accepted issues move faster with the current persisted signals?"} =
+             panel(summary, "delivery_cycle")
+
     assert %{status: "direct", metrics: cost_metrics} =
              panel(summary, "cost_per_accepted_issue")
 
-    assert %{label: "Runtime seconds", value: 42} in cost_metrics
-    assert %{label: "Total tokens", value: 14} in cost_metrics
+    assert %{label: "Runtime seconds", value: 42, status: "partial"} in cost_metrics
+    assert %{label: "Total tokens", value: 14, status: "partial"} in cost_metrics
 
     assert %{status: "partial", metrics: autonomy_metrics} =
              panel(summary, "autonomy_funnel")
 
-    assert %{label: "Phase events", value: 1} in autonomy_metrics
+    assert %{label: "Phase events", value: 1, status: "direct"} in autonomy_metrics
+
+    assert %{status: "gap", metrics: quality_metrics} =
+             panel(summary, "quality_rework")
+
+    assert %{label: "PR review quality", value: "GitHub review/CI data gap", status: "gap"} in quality_metrics
 
     assert %{status: "direct", metrics: capacity_metrics} =
              panel(summary, "capacity_reliability")
 
-    assert %{label: "Retry events", value: 1} in capacity_metrics
-    assert %{label: "Blocked events", value: 1} in capacity_metrics
-    assert %{label: "Effective capacity", value: 12} in capacity_metrics
+    assert %{label: "Retry events", value: 1, status: "partial"} in capacity_metrics
+    assert %{label: "Blocked events", value: 1, status: "partial"} in capacity_metrics
+    assert %{label: "Effective capacity", value: 12, status: "partial"} in capacity_metrics
 
     assert "GitHub review/CI data is not configured in v1" in summary.data_quality.gaps
   end
@@ -167,9 +181,9 @@ defmodule SymphonyElixir.AnalyticsTest do
       |> Analytics.summary()
       |> panel("cost_per_accepted_issue")
 
-    assert %{label: "Total tokens", value: 9} in cost_metrics
-    assert %{label: "Input tokens", value: 6} in cost_metrics
-    assert %{label: "Output tokens", value: 3} in cost_metrics
+    assert %{label: "Total tokens", value: 9, status: "partial"} in cost_metrics
+    assert %{label: "Input tokens", value: 6, status: "partial"} in cost_metrics
+    assert %{label: "Output tokens", value: 3, status: "partial"} in cost_metrics
   end
 
   test "handles best-effort write and timestamp edge cases" do
@@ -261,8 +275,8 @@ defmodule SymphonyElixir.AnalyticsTest do
              |> Analytics.summary()
              |> panel("cost_per_accepted_issue")
 
-    assert %{label: "Runtime seconds", value: 4} in cost_metrics
-    assert %{label: "Total tokens", value: 1} in cost_metrics
+    assert %{label: "Runtime seconds", value: 4, status: "partial"} in cost_metrics
+    assert %{label: "Total tokens", value: 1, status: "partial"} in cost_metrics
 
     unreadable_path = tmp_path("unreadable.ndjson")
     File.write!(unreadable_path, "{}\n")

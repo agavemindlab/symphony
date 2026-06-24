@@ -257,70 +257,80 @@ defmodule SymphonyElixir.Analytics do
       %{
         id: "delivery_cycle",
         title: "Delivery Cycle",
+        question: "Can accepted issues move faster with the current persisted signals?",
         status: "partial",
         metrics: [
-          %{label: "Runtime-backed runs", value: metrics.run_count},
-          %{label: "Completed runs", value: metrics.completed_count}
+          metric("Runtime-backed runs", metrics.run_count, "partial"),
+          metric("Completed runs", metrics.completed_count, "partial")
         ]
       },
       %{
         id: "autonomy_funnel",
         title: "Autonomy Funnel",
+        question: "How often does Symphony advance without human intervention?",
         status: "partial",
         metrics: [
-          %{label: "Phase events", value: metrics.phase_event_count},
-          %{label: "Auto-advance rate", value: "Linear phase comments required"},
-          %{label: "Human touch count", value: "Linear comments required"}
+          metric("Phase events", metrics.phase_event_count, "direct"),
+          metric("Auto-advance rate", "Linear phase comments required", "gap"),
+          metric("Human touch count", "Linear comments required", "gap")
         ]
       },
       %{
         id: "quality_rework",
         title: "Quality / Rework",
+        question: "How much accepted work comes back as rework or PR/CI failure?",
         status: "gap",
         metrics: [
-          %{label: "Rework rate", value: "Linear state history required"},
-          %{label: "PR review quality", value: "GitHub review/CI data gap"}
+          metric("Rework rate", "Linear state history required", "gap"),
+          metric("PR review quality", "GitHub review/CI data gap", "gap")
         ]
       },
       %{
         id: "cost_per_accepted_issue",
         title: "Cost Per Accepted Issue",
+        question: "What token and runtime cost is attached to accepted issues?",
         status: "direct",
         metrics: [
-          %{label: "Runtime seconds", value: metrics.runtime_seconds},
-          %{label: "Total tokens", value: metrics.total_tokens},
-          %{label: "Input tokens", value: metrics.input_tokens},
-          %{label: "Output tokens", value: metrics.output_tokens}
+          metric("Runtime seconds", metrics.runtime_seconds, "partial"),
+          metric("Total tokens", metrics.total_tokens, "partial"),
+          metric("Input tokens", metrics.input_tokens, "partial"),
+          metric("Output tokens", metrics.output_tokens, "partial")
         ]
       },
       %{
         id: "capacity_reliability",
         title: "Capacity / Reliability",
+        question: "Where do retries, blockers, or capacity pressure stall throughput?",
         status: "direct",
         metrics: capacity_metrics(metrics)
       },
       %{
         id: "data_quality_exclusions",
         title: "Data Quality / Exclusions",
+        question: "Which signals are safe to use, and which are only gaps?",
         status: "direct",
         metrics: [
-          %{label: "Direct sources", value: 1},
-          %{label: "Gap sources", value: 2}
+          metric("Direct sources", 1, "direct"),
+          metric("Partial sources", 1, "partial"),
+          metric("Gap sources", 2, "gap")
         ]
       }
     ]
   end
 
+  defp metric(label, value, status), do: %{label: label, value: value, status: status}
+
   defp capacity_metrics(%{latest_capacity: latest_capacity} = metrics) do
     latest_capacity = latest_capacity || %{}
 
     [
-      %{label: "Retry events", value: metrics.retry_count},
-      %{label: "Blocked events", value: metrics.blocked_count},
-      %{label: "Running count", value: Map.get(latest_capacity, "running_count", 0)},
+      metric("Retry events", metrics.retry_count, "partial"),
+      metric("Blocked events", metrics.blocked_count, "partial"),
+      metric("Running count", Map.get(latest_capacity, "running_count", 0), "partial"),
       %{
         label: "Effective capacity",
-        value: Map.get(latest_capacity, "effective_capacity", Map.get(latest_capacity, "configured_capacity", 0))
+        value: Map.get(latest_capacity, "effective_capacity", Map.get(latest_capacity, "configured_capacity", 0)),
+        status: "partial"
       }
     ]
   end
