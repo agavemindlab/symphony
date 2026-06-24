@@ -219,11 +219,12 @@ codex:
   efficiency analytics panels. When unset, Symphony writes
   `<runtime-log-dir>/symphony-analytics.ndjson`; with the default runtime log, that resolves to
   `<cwd>/log/symphony-analytics.ndjson`. Path values support `~` and `$VAR` resolution.
-- Multiple Symphony OS processes that share one `observability.analytics_path` serialize append and
-  retention through a `<path>.lock` directory. Processes configured with different files are separate
-  data sources and are not merged in v1.
+- Multiple Symphony OS processes that share one `observability.analytics_path` serialize append
+  through a `<path>.lock` directory. Dashboard reads use the latest bounded window and report
+  truncation in Data Quality when older append-only events are outside that window. Processes
+  configured with different files are separate data sources and are not merged in v1.
 - Capacity snapshots are written only when running/retry/blocked counts change, so idle polling does
-  not evict lifecycle or cost history from the retained event window.
+  not flood the bounded dashboard read window.
 - `server.port` or CLI `--port` enables the optional Phoenix LiveView dashboard and JSON API at
   `/`, `/api/v1/state`, `/api/v1/<issue_identifier>`, and `/api/v1/refresh`.
 

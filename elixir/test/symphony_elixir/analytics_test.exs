@@ -238,22 +238,6 @@ defmodule SymphonyElixir.AnalyticsTest do
                         path: Path.join(not_a_directory, "events.ndjson")
                       )
            end) =~ "Failed to create analytics directory"
-
-    write_only_path = tmp_path("write-only-events.ndjson")
-    File.write!(write_only_path, "")
-    File.chmod!(write_only_path, 0o200)
-
-    try do
-      assert capture_log(fn ->
-               assert :ok =
-                        Analytics.record_event(
-                          %{event_type: :run_started},
-                          path: write_only_path
-                        )
-             end) =~ "Failed to retain analytics event file"
-    after
-      File.chmod!(write_only_path, 0o600)
-    end
   end
 
   test "reads truncated windows and reports unreadable files" do
@@ -292,7 +276,7 @@ defmodule SymphonyElixir.AnalyticsTest do
     end
   end
 
-  test "retains a bounded analytics event file on write" do
+  test "keeps analytics event files append-only and bounds reads" do
     path = tmp_path("retained-events.ndjson")
 
     1..505
@@ -305,14 +289,36 @@ defmodule SymphonyElixir.AnalyticsTest do
     end)
 
     lines = path |> File.read!() |> String.split("\n", trim: true)
-    assert length(lines) == 500
+    assert length(lines) == 505
 
     assert %{
              events: [%{"issue_id" => "issue-6"} | _] = events,
+             truncated?: true
+           } = Analytics.read_events(path: path)
+
+    assert List.last(events)["issue_id"] == "issue-505"
+
+    assert %{
+             events: [%{"issue_id" => "issue-1"} | all_events],
              truncated?: false
            } = Analytics.read_events(path: path, max_events: :all)
 
-    assert List.last(events)["issue_id"] == "issue-505"
+    assert length(all_events) == 504
+
+    assert "Analytics event file was truncated to the latest window" in Analytics.summary(path: path).data_quality.gaps
+  end
+
+  test "bounded reads do not scan old bytes outside the latest window" do
+    path = tmp_path("large-events.ndjson")
+    latest = Jason.encode!(%{event_type: :run_started, issue_id: "latest"})
+
+    File.write!(path, <<255>> <> String.duplicate("x", 70_000) <> "\n" <> latest <> "\n")
+
+    assert %{
+             events: [%{"event_type" => "run_started", "issue_id" => "latest"}],
+             warnings: [],
+             truncated?: true
+           } = Analytics.read_events(path: path, max_events: 1)
   end
 
   test "serializes analytics writes with a filesystem lock" do

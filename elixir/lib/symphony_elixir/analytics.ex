@@ -8,7 +8,7 @@ defmodule SymphonyElixir.Analytics do
   alias SymphonyElixir.{Config, LogFile}
 
   @default_max_events 500
-  @retained_event_lines @default_max_events
+  @read_chunk_bytes 65_536
   @lock_retry_ms 10
   @lock_timeout_ms 5_000
 
@@ -44,11 +44,8 @@ defmodule SymphonyElixir.Analytics do
     max_events = Keyword.get(opts, :max_events, @default_max_events)
 
     with true <- File.regular?(path),
-         {:ok, content} <- File.read(path) do
-      content
-      |> String.split("\n", trim: true)
-      |> maybe_take_latest(max_events)
-      |> decode_event_lines()
+         {:ok, indexed_lines} <- read_event_lines(path, max_events) do
+      decode_event_lines(indexed_lines)
     else
       false ->
         %{events: [], warnings: [], truncated?: false}
@@ -128,7 +125,7 @@ defmodule SymphonyElixir.Analytics do
   defp append_event_line(path, json) do
     case File.write(path, json <> "\n", [:append]) do
       :ok ->
-        retain_event_file(path)
+        :ok
 
       {:error, reason} ->
         Logger.warning("Failed to write analytics event: #{inspect(reason)}")
@@ -170,50 +167,55 @@ defmodule SymphonyElixir.Analytics do
     :ok
   end
 
-  defp retain_event_file(path) do
-    case File.read(path) do
-      {:ok, content} ->
-        retain_event_lines(path, String.split(content, "\n", trim: true))
-
-      {:error, reason} ->
-        Logger.warning("Failed to retain analytics event file: #{inspect(reason)}")
-        :ok
+  defp read_event_lines(path, max_events) when is_integer(max_events) and max_events > 0 do
+    with {:ok, file} <- :file.open(String.to_charlist(path), [:read, :binary, :raw]) do
+      try do
+        read_latest_event_lines(file, max_events)
+      after
+        :file.close(file)
+      end
     end
   end
 
-  defp retain_event_lines(path, lines) do
-    if length(lines) > @retained_event_lines do
-      retained_content = Enum.join(Enum.take(lines, -@retained_event_lines), "\n") <> "\n"
-      tmp_path = path <> ".#{System.unique_integer([:positive])}.tmp"
-
-      File.write(tmp_path, retained_content)
-      File.rename(tmp_path, path)
-      File.rm(tmp_path)
-      :ok
-    else
-      :ok
-    end
-  end
-
-  defp maybe_take_latest(lines, max_events) when is_integer(max_events) and max_events > 0 do
-    line_count = length(lines)
-
-    if line_count > max_events do
-      lines
+  defp read_event_lines(path, _max_events) do
+    with {:ok, content} <- File.read(path) do
+      content
+      |> String.split("\n", trim: true)
       |> Enum.with_index(1)
-      |> Enum.take(-max_events)
-      |> then(&{&1, true})
-    else
-      lines
-      |> Enum.with_index(1)
-      |> then(&{&1, false})
+      |> then(&{:ok, {&1, false}})
     end
   end
 
-  defp maybe_take_latest(lines, _max_events) do
-    lines
+  defp read_latest_event_lines(file, max_events) do
+    with {:ok, size} <- :file.position(file, :eof) do
+      read_latest_event_lines(file, size, "", max_events)
+    end
+  end
+
+  defp read_latest_event_lines(_file, 0, content, _max_events) do
+    content
+    |> String.split("\n", trim: true)
     |> Enum.with_index(1)
-    |> then(&{&1, false})
+    |> then(&{:ok, {&1, false}})
+  end
+
+  defp read_latest_event_lines(file, offset, content, max_events) do
+    chunk_size = min(@read_chunk_bytes, offset)
+    next_offset = offset - chunk_size
+
+    with {:ok, chunk} <- :file.pread(file, next_offset, chunk_size) do
+      content = chunk <> content
+      lines = String.split(content, "\n", trim: true)
+
+      if length(lines) > max_events do
+        lines
+        |> Enum.take(-max_events)
+        |> Enum.with_index(1)
+        |> then(&{:ok, {&1, true}})
+      else
+        read_latest_event_lines(file, next_offset, content, max_events)
+      end
+    end
   end
 
   defp decode_event_lines({indexed_lines, truncated?}) do
