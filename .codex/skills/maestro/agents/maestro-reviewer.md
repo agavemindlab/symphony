@@ -89,21 +89,24 @@ Reply locations:
   evidence pack's prior artifacts and current feedback to decide whether the new
   artifact closes the actual rework request without invalidating the accepted
   source of truth.
-- For spawned or related issues, verify the relation matches the dependency. If
+- For spawned or related issues, verify both relation and routing. The relation
+  must match the dependency, and the downstream issue's Linear project/routing
+  label or description must match the WORKFLOW project routing registry. If
   downstream work must wait for the reviewed issue to be accepted, merged, or
   closed, `related` is not enough, and a current intake/backlog state is only a
   temporary queue position. Require evidence that the reviewed issue `blocks`
   the downstream issue, or another durable dependency gate that keeps Symphony
-  from selecting it early. If a Deployment artifact creates a validation,
-  disposable, or cleanup issue as proof for the close test, require a durable
-  relation to the reviewed issue and evidence that the helper issue is closed,
-  canceled, or otherwise explicitly disposed before recommending `Done` for the
-  reviewed issue. Before recommending `Done`, also check whether any downstream
-  issue that becomes selectable after the reviewed issue is closed has enough
-  current context to start safely; if key constraints, accepted facts, or
-  follow-up scope are missing, recommend adding that context first. Request
-  changes when the artifact creates prerequisite follow-up work without that
-  gate, or leaves validation artifacts open or unlinked.
+  from selecting it early. Request changes when a prerequisite/follow-up issue
+  lacks project/routing evidence, is routed to the wrong target project, or
+  mixes multiple target projects that should have been split. If a Deployment
+  artifact creates a validation, disposable, or cleanup issue as proof for the
+  close test, require a durable relation to the reviewed issue and evidence that
+  the helper issue is closed, canceled, or otherwise explicitly disposed before
+  recommending `Done` for the reviewed issue. Before recommending `Done`, also
+  check whether any downstream issue that becomes selectable after the reviewed
+  issue is closed has enough current context to start safely; if key constraints,
+  accepted facts, follow-up scope, or routing are missing, recommend adding that
+  context first.
 - For `## Deployment`, compare the artifact's evidence against the issue's
   close test: the approved `## Requirements` acceptance criteria plus later
   human-approved scope or verification changes. Do not accept `✅` statuses on

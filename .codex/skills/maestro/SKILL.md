@@ -36,10 +36,11 @@ review judgment in the parent agent.
      variables are present, without printing their values.
 4. Inspect spawned or related issues mentioned by the current artifacts and
    Linear relations. Include each related issue's relation type, state, assignee,
-   whether it is blocked by or blocks the reviewed issue, whether downstream
-   issues have enough context to start safely after the reviewed issue is closed,
-   and whether validation or disposable issues have a durable relation plus a
-   terminal cleanup state.
+   project, routing label or description evidence, whether the route matches
+   the WORKFLOW project routing registry, whether it is blocked by or blocks the
+   reviewed issue, whether downstream issues have enough context to start safely
+   after the reviewed issue is closed, and whether validation or disposable
+   issues have a durable relation plus a terminal cleanup state.
 5. Inspect linked PRs when `## Implementation` is awaiting review. Also
    inspect merged PR file lists or artifact evidence for `## Deployment` when a
    `Type:Feature` issue appears to add user-facing configuration, commands,
@@ -125,10 +126,12 @@ User-facing documentation evidence:
 "not applicable" / "none found">
 
 Spawned or related issue evidence:
-<issue identifiers, relation types, state/assignee, blocker relation status,
-whether any downstream issue can be selected before this one is accepted,
-whether the downstream issue has enough context to start safely after the
-reviewed issue is closed, validation/disposable issue cleanup status, or "none">
+<issue identifiers, relation types, state/assignee/project, routing label or
+description evidence, whether the project/routing matches the WORKFLOW registry,
+blocker relation status, whether any downstream issue can be selected before
+this one is accepted, whether the downstream issue has enough context to start
+safely after the reviewed issue is closed, validation/disposable issue cleanup
+status, or "none">
 
 Linked PR evidence, only for Implementation review:
 <PR metadata, checks, configured automated reviewer accounts, human review
@@ -155,10 +158,11 @@ Task:
 7. Apply the relevant review lens from the reviewer prompt: Requirements /
    Design rigor, Implementation / Deployment verification, or bugfix / rework
    root cause.
-8. Check whether spawned or related issues have the dependency relation or
-   cleanup disposition needed to prevent unsafe parallel work or orphaned
-   validation artifacts, and whether downstream issues have enough inherited
-   context to start safely once unblocked.
+8. Check whether spawned or related issues have the dependency relation and
+   project/routing evidence needed to prevent unsafe parallel work or misrouted
+   execution, whether cleanup disposition prevents orphaned validation
+   artifacts, and whether downstream issues have enough inherited context to
+   start safely once unblocked.
 9. For bugfixes, reject artifacts that do not explain new failure windows caused
    by moved side effects or durable state before success.
 10. Cite the decisive evidence and call out missing evidence or uncertainty.

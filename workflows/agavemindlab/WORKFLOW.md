@@ -320,6 +320,29 @@ workpad Plan item), it invokes the `symphony-issue` skill. Two tiers:
   comment and creates nothing until a human replies consent in that comment's
   thread; Main Flow step 4 fulfills the consent.
 
+Canonical project routing registry for spawned issues:
+
+| Linear project | Project owns | Route here for |
+|----------------|--------------|----------------|
+| `symphony` | Symphony orchestration and shared workflow behavior | workflow prompts, phase skills, agent state, Linear/GitHub review flow, Maestro advisor behavior |
+| `grotto` | Grotto repository delivery | app/repo code, repo CI, release workflow, repo-owned runbooks, repo-owned environment gate logic |
+| `gl-infra` | Operational infrastructure | clusters/namespaces, DB/Redis/PVC/storage, secrets, NetworkPolicy, RBAC, GitHub protected environments, operator profiles, runtime accounts, reset/seed, feature-flag allowlists |
+| `gl-skills` | Reusable agent capability packages | standalone skills/plugins/tools that are not specific to the Symphony workflow itself or one product repo |
+| `voxvault` | VoxVault repository delivery | app/repo code, repo CI, release workflow, repo-owned runbooks, repo-owned environment gate logic |
+
+Known Linear projects that are not spawned-issue targets in this workflow:
+`grandline` is the multi-project launcher/profile, and `lain` has no workflow
+directory or project mapping here. If discovered work appears to route to either
+one, do not create/propose there; ask for human routing clarification with the
+candidate concrete projects.
+
+Use the registry before invoking or fulfilling `symphony-issue`. Default to the
+current issue's project only when the discovered work fits that project's row.
+If one discovery spans multiple target projects, split it into multiple spawned
+issues and link the dependencies that express the real block. If the registry
+does not make the route clear, do not create a likely misrouted issue; ask for
+human routing clarification in the current phase artifact.
+
 Safety invariants for every spawned issue: it lands in the team's **intake
 state** (resolved by `type` — `triage` else `backlog`, never by name), is
 **assigned to the current issue's `creator`**, never to Symphony, and is
