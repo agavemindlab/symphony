@@ -149,10 +149,15 @@ Reply locations:
   follow-up issue with enough context and a durable dependency relation instead
   of treating "out of scope" as disposed. That relation is not enough when the
   reviewed issue has no safe, independently useful effect until the prerequisite
-  finishes. For soft-start gates, environment scaffolds, or disabled runtime
-  paths, require evidence of concrete value before the prerequisite; otherwise
-  request cross-phase rework so the prerequisite blocks the reviewed issue, or
-  the reviewed issue is explicitly rescoped to a repo-side scaffold. If a
+  finishes. For soft-start gates, environment scaffolds, disabled runtime paths,
+  or repo-side gate wiring, require the artifact to state what merge makes
+  positively usable before the prerequisite finishes. A safe no-op, default-off
+  scaffold, placeholder, future wiring, documentation, dependency relation, or
+  proof that a disabled path would fail closed if enabled is not concrete value.
+  If the artifact cannot name that usable effect, request cross-phase rework so
+  the prerequisite blocks the reviewed issue. Only an explicit human-approved
+  Requirements or Design scope change may rescope a runtime/deployment issue to
+  a repo-side scaffold with no pre-prerequisite runtime value. If a
   Deployment artifact creates a validation,
   disposable, or cleanup issue as proof for the close test, require a durable
   relation to the reviewed issue and evidence that the helper issue is closed,
@@ -175,6 +180,12 @@ Reply locations:
   or historical issue anchor, missing command, log, test, or manual exercise of
   the affected behavior is a close-test gap: request changes, not completion
   confirmation. Readback cannot satisfy it as the sole evidence.
+  For workflow/prompt behavior regressions, exercise the workflow path with the
+  example input; changed-file readback or existing Linear state is not exercise.
+  If an artifact says readback satisfies an `S<N>` group and any item in that
+  group is a regression example, request changes unless that item has separate
+  behavior exercise evidence. A generic human request to reread main does not
+  waive this; require explicit readback-only risk acceptance for that item.
 - If `## Deployment` finds an agent-actionable defect that needs a new PR,
   require Cross-phase rework to the earliest responsible phase, usually
   `## Implementation`; do not accept a fix PR attached only to Deployment.
@@ -228,8 +239,10 @@ Reply locations:
 
 - Approve only when the awaiting-review artifact is acceptable for its phase,
   is supported by the collected evidence, and newer human feedback does not request
-  concrete changes. For Deployment, this means the close test is satisfied; the
-  draft may say the issue can move to `Done`.
+  concrete changes. For Deployment, this means each close-test item has
+  separate evidence; do not approve a bundled `S1-S6` / main-readback summary when any
+  item has regression or historical issue semantics. When satisfied, the draft
+  may say the issue can move to `Done`.
 - Request changes when the next action is agent-actionable: missing acceptance
   evidence, unresolved artifact feedback, failing relevant checks, stale
   artifact content, implementation/spec mismatch, or an unanswered

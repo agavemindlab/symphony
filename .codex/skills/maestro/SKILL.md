@@ -85,7 +85,8 @@ Task:
    agent run. For ask clarification and no reply yet, address the human.
 7. For every phase, compare the artifact's evidence with the acceptance source
    of truth; do not rely only on the Symphony agent's self-assessment or `✅`
-   statuses.
+   statuses. For Deployment, do not approve a bundled `S1-S6` / main-readback
+   summary when any item needs separate regression or historical evidence.
 8. Apply the relevant review lens from the reviewer prompt: Requirements /
    Design rigor, Implementation / Deployment verification, or bugfix / rework
    root cause.
@@ -99,7 +100,10 @@ Task:
    by moved side effects or durable state before success. When required
    regression validation, a `回归例`, or a historical issue anchor lacks a
    command, log, test, or manual exercise, request changes instead of completion
-   confirmation.
+   confirmation. For workflow path regressions, readback or existing Linear
+   state is not enough. If readback satisfies an `S<N>` group containing a
+   regression example, require separate behavior evidence or explicit
+   readback-only risk acceptance.
 11. Cite the decisive evidence and call out missing evidence or uncertainty.
 Keep the answer concise and do not recommend changing state directly unless the
 human's reply should explicitly instruct that.
