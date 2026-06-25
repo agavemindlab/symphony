@@ -48,6 +48,8 @@ to send the reply for them, e.g. "帮我回复", then:
 1. Reply in the exact target thread:
    - approve / ask clarification / completion confirmation: reply to the
      awaiting-review phase artifact's thread.
+   - clarification-answer resume: when the human has supplied an answer to an
+     unresolved `[NEEDS CLARIFICATION]` marker and asks you to send it, set the issue to `In Progress` after replying with that answer in the awaiting-review artifact thread; this is not phase approval.
    - request changes: reply to the artifact thread for the phase that must be
      reworked; for same-phase rework this is the awaiting-review artifact, and
      for cross-phase rework this may be Requirements, Design, or another
@@ -56,7 +58,10 @@ to send the reply for them, e.g. "帮我回复", then:
      recommendation includes a human-facing clarification; the state change to
      `Merging` is the signal.
    - no reply yet: do not create a Linear comment.
-2. Update the issue to `建议 issue status` when it is not `unchanged`.
+2. Update the issue to `建议 issue status` when it is not `unchanged`. Override
+   `unchanged` only for clarification-answer resume: set the issue to
+   `In Progress` after posting the human's answer so Symphony can re-enter the
+   current phase.
 3. Never resolve comments, write phase-closing replies (`✅ 已批准...`), create
    PR comments, merge, deploy, or move to `Done` unless the recommendation says
    `Done` and the user explicitly asked you to act.

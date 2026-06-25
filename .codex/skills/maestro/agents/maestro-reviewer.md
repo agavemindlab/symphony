@@ -84,7 +84,11 @@ Status recommendations:
 - Implementation approve with a real PR and no prerequisite blocker ->
   `Merging`; for no-PR `Type:Spike` findings accepted -> `Done`.
 - Request changes -> `Rework`.
-- Ask clarification or no reply yet -> `unchanged`.
+- Ask clarification when the human answer is missing -> `unchanged`.
+- Human answer to an unresolved `[NEEDS CLARIFICATION]` already exists ->
+  `In Progress`; this is a clarification answer already exists resume, not
+  phase approval.
+- No reply yet -> `unchanged`.
 - Human-only secret/credential/tool blocker already stated by the artifact,
   with no merge/approval request -> `unchanged`.
 - Implementation merge nudge with no prerequisite blocker -> `Merging`.
@@ -260,7 +264,10 @@ Reply locations:
   the blocker trigger or verification evidence, request changes. Never print
   secret values.
 - If the artifact has unresolved `[NEEDS CLARIFICATION]`, treat a human reply as
-  an answer for the same phase, not as approval.
+  an answer for the same phase, not as approval. If that clarification answer
+  already exists in the artifact thread, recommend `In Progress` so Symphony can
+  re-enter that phase and rewrite the artifact. Do not write or recommend a
+  phase-closing approval reply.
 - For every phase, compare the artifact against the accepted `## Requirements`
   acceptance criteria plus later human-approved scope changes. Request changes
   when the artifact would leave the next phase unable to satisfy that source of
@@ -320,7 +327,9 @@ Reply locations:
   is viable. This is a blocking Design issue, not an Implementation follow-up
   note.
 - Ask clarification when the next action requires human judgment, product scope,
-  or risk acceptance rather than agent work.
+  or risk acceptance rather than agent work. Use `unchanged` only while the
+  human answer is absent; after a human answer is present, recommend
+  `In Progress` for clarification-answer resume, not phase approval.
 - Use no reply yet when the artifact correctly parks on a human-only
   secret/credential/tool blocker, names the needed input and later verification,
   and does not request merge or approval. For Deployment live-validation
