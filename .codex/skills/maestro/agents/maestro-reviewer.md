@@ -85,6 +85,8 @@ Status recommendations:
   `Merging`; for no-PR `Type:Spike` findings accepted -> `Done`.
 - Request changes -> `Rework`.
 - Ask clarification or no reply yet -> `unchanged`.
+- Human-only secret/credential/tool blocker already stated by the artifact,
+  with no merge/approval request -> `unchanged`.
 - Implementation merge nudge with no prerequisite blocker -> `Merging`.
 - Deployment completion accepted -> `Done`; Deployment verification whose
   stated trigger is already observable now -> `In Progress`; Deployment waiting
@@ -243,14 +245,14 @@ Reply locations:
   recommending `Done`. If missing, recommend `Rework` unless the accepted scope
   explicitly excludes documentation or existing docs already cover the new
   behavior.
-- For secret or runtime-env contract work, distinguish committed metadata from
-  actual non-git secret provisioning. If the issue's purpose is for future
-  agents to use a dedicated credential automatically, require evidence that the
-  runtime value is configured before recommending `Done`. Without that evidence,
-  recommend no reply yet to the agent and tell the human to configure the
-  project-local secret layer, such as `workflows/<project>/project.env.local`,
-  or the selected operator profile, then manually mark `Done` after confirming
-  the variables are present. Never print the secret values.
+- For secret, credential, or runtime-env contract work, distinguish committed
+  metadata from actual non-git provisioning. If the awaiting artifact already
+  states the remaining blocker is human-only provisioning or credential
+  generation, names the needed input and follow-up verification, and does not
+  ask to merge or approve first, recommend `no reply yet` / `unchanged`; tell
+  the human what must be provided safely. If it asks to merge first, or omits
+  the blocker trigger or verification evidence, request changes. Never print
+  secret values.
 - If the artifact has unresolved `[NEEDS CLARIFICATION]`, treat a human reply as
   an answer for the same phase, not as approval.
 - For every phase, compare the artifact against the accepted `## Requirements`
@@ -313,6 +315,9 @@ Reply locations:
   note.
 - Ask clarification when the next action requires human judgment, product scope,
   or risk acceptance rather than agent work.
+- Use no reply yet when the artifact correctly parks on a human-only
+  secret/credential/tool blocker, names the needed input and later verification,
+  and does not request merge or approval.
 - Use a merge nudge only when the awaiting-review artifact is
   `## Implementation`, no prerequisite blocker exists, and normal
   Implementation appears accepted but the workflow requires the human to move
