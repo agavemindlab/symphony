@@ -222,14 +222,16 @@ Reply locations:
   actionable re-entry. Recommend `In Progress` only when the artifact's stated
   trigger condition is already satisfied or directly checkable now. If the
   trigger is still future/external, recommend `no reply yet` / `unchanged` only
-  when the artifact states what concrete action/event must happen, who/what
-  owns it, what observable signal proves it happened, and what the human should
-  do next with this issue when the signal appears. Abstract future events such
-  as "next real Human Review handoff", "future run", or "subsequent issue" are
-  not clear triggers unless they name the issue/source, triggering action, and
-  fallback if that event does not naturally occur. If any of these parts is
-  missing or a reviewer cannot tell what to do now, request changes to the
-  Deployment artifact instead of sending the issue into an `In Progress` loop.
+  when the artifact states how the condition will be created or awaited, who
+  owns that action, what observable signal proves it happened, and what the
+  human should do next with this issue when the signal appears. Missing real
+  users, participants, test data, or live interactions is not a clear trigger by
+  itself. Abstract future events such as "next real Human Review handoff",
+  "future run", or "subsequent issue" are not clear triggers unless they name
+  the issue/source, triggering action, and fallback if that event does not
+  naturally occur. If any of these parts is missing or a reviewer cannot tell
+  what to do now, request changes to the Deployment artifact instead of sending
+  the issue into an `In Progress` loop.
 - If `## Deployment` finds an agent-actionable defect that needs a new PR,
   require Cross-phase rework to the earliest responsible phase, usually
   `## Implementation`; do not accept a fix PR attached only to Deployment.
@@ -321,7 +323,10 @@ Reply locations:
   or risk acceptance rather than agent work.
 - Use no reply yet when the artifact correctly parks on a human-only
   secret/credential/tool blocker, names the needed input and later verification,
-  and does not request merge or approval.
+  and does not request merge or approval. For Deployment live-validation
+  blockers, require the concrete action/event, owner, observable signal, and
+  human next step above; missing real participants or interactions alone means
+  request changes.
 - Use a merge nudge only when the awaiting-review artifact is
   `## Implementation`, no prerequisite blocker exists, and normal
   Implementation appears accepted but the workflow requires the human to move
