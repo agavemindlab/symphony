@@ -248,8 +248,8 @@ comfort.
 
 ### Human action needed
 
-> 👉 **需要人工处理**：审查 PR；无异议请将 issue 移至 `Merging`，需要修改则移至
-> `Rework`。
+> 👉 **需要人工处理**：<正常审查：审查 PR；无异议请将 issue 移至 `Merging`，需要修改则移至 `Rework`。>
+> - 若 blocked：写成可执行 runbook，包含操作系统/账号/项目/workspace、要配置的 key/权限/变量及类型或 sensitive 标记、secret 值从哪里取得或生成但不贴值、配置后如何重跑验证、通过判据。
 
 ### 风险/注意（optional: non-merge caveats only）
 
@@ -294,8 +294,13 @@ genuinely refuses you) — never an assumption.
 
 Only after a real, captured failure with no in-session workaround, write a
 blocker description in the workpad `notes` covering: what is missing; the exact
-command + error proving it; why it blocks acceptance; exact human action to
-unblock.
+command + error proving it; why it blocks acceptance; and a runbook detailed
+enough that a human, or an authorized agent, can unblock it without redoing
+research. Before handoff, inspect the repo, PR, configured services, and public
+docs needed to identify where and how to perform the operation. For secrets,
+name the source or generation path, never the value. If the operation is still
+unclear after that research, ask `[NEEDS CLARIFICATION]` instead of writing a
+vague blocker.
 
 Reflect this in the artifact's `风险/注意` and include:
 ```

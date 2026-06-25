@@ -84,9 +84,14 @@ Status recommendations:
 - Implementation approve with a real PR and no prerequisite blocker ->
   `Merging`; for no-PR `Type:Spike` findings accepted -> `Done`.
 - Request changes -> `Rework`.
-- Ask clarification or no reply yet -> `unchanged`.
-- Human-only secret/credential/tool blocker already stated by the artifact,
-  with no merge/approval request -> `unchanged`.
+- Ask clarification when the human answer is missing -> `unchanged`.
+- Human answer to an unresolved `[NEEDS CLARIFICATION]` already exists ->
+  `In Progress`; this is a clarification answer already exists resume, not
+  phase approval.
+- No reply yet -> `unchanged`.
+- Human-only secret/credential/tool blocker -> `unchanged` only when the
+  artifact itself gives an executable runbook and does not ask for
+  merge/approval; otherwise `Rework`.
 - Implementation merge nudge with no prerequisite blocker -> `Merging`.
 - Deployment completion accepted -> `Done`; Deployment verification whose
   stated trigger is already observable now -> `In Progress`; Deployment waiting
@@ -222,14 +227,16 @@ Reply locations:
   actionable re-entry. Recommend `In Progress` only when the artifact's stated
   trigger condition is already satisfied or directly checkable now. If the
   trigger is still future/external, recommend `no reply yet` / `unchanged` only
-  when the artifact states what concrete action/event must happen, who/what
-  owns it, what observable signal proves it happened, and what the human should
-  do next with this issue when the signal appears. Abstract future events such
-  as "next real Human Review handoff", "future run", or "subsequent issue" are
-  not clear triggers unless they name the issue/source, triggering action, and
-  fallback if that event does not naturally occur. If any of these parts is
-  missing or a reviewer cannot tell what to do now, request changes to the
-  Deployment artifact instead of sending the issue into an `In Progress` loop.
+  when the artifact states how the condition will be created or awaited, who
+  owns that action, what observable signal proves it happened, and what the
+  human should do next with this issue when the signal appears. Missing real
+  users, participants, test data, or live interactions is not a clear trigger by
+  itself. Abstract future events such as "next real Human Review handoff",
+  "future run", or "subsequent issue" are not clear triggers unless they name
+  the issue/source, triggering action, and fallback if that event does not
+  naturally occur. If any of these parts is missing or a reviewer cannot tell
+  what to do now, request changes to the Deployment artifact instead of sending
+  the issue into an `In Progress` loop.
 - If `## Deployment` finds an agent-actionable defect that needs a new PR,
   require Cross-phase rework to the earliest responsible phase, usually
   `## Implementation`; do not accept a fix PR attached only to Deployment.
@@ -238,6 +245,23 @@ Reply locations:
   close test. A bounded recent window is acceptable only when evidence shows it
   is large enough for the stated question, or the delivered surface clearly
   scopes itself to recent-window/data-quality status; otherwise request changes or ask clarification.
+- When the issue's why or acceptance asks whether the product improved a real
+  outcome, do not treat observability-only delivery as the final proof if
+  material `partial`/`gap` signals still block that answer. Before recommending
+  `Done`, require a linked, routed follow-up with enough context to close those
+  proof gaps, or explicit human risk acceptance to stop tracking them; otherwise
+  request Deployment changes to create or link that follow-up. A scope-limiting
+  note or "no follow-up" claim in the artifact is not enough. Human approval
+  that the delivered surface labels gaps, avoids false outcome claims, or meets
+  limited scope is not acceptance to stop tracking those proof gaps.
+- For dashboard, analytics, reporting, or observability issues, treat any
+  `partial`/`gap` label on a signal named by the issue's why or acceptance as a
+  material proof gap. Labels that say "gap", "sample insufficient", or "not
+  configured" satisfy transparency, but they do not close the outcome-proof work.
+  Require a linked follow-up before `Done` for metrics such as cycle time,
+  manual intervention, automation rate, failure/rework quality, external review
+  or CI quality, cohort definition, or baseline/trend when those metrics are
+  part of the issue's stated purpose.
 - When acceptance criteria require the delivered surface to explain how humans
   should interpret, operate, compare, or trust it, verify that explanatory
   content directly. Tests, screenshots, panel names, or object existence are not
@@ -252,13 +276,19 @@ Reply locations:
 - For secret, credential, or runtime-env contract work, distinguish committed
   metadata from actual non-git provisioning. If the awaiting artifact already
   states the remaining blocker is human-only provisioning or credential
-  generation, names the needed input and follow-up verification, and does not
+  generation, and the artifact itself gives an executable runbook, and does not
   ask to merge or approve first, recommend `no reply yet` / `unchanged`; tell
-  the human what must be provided safely. If it asks to merge first, or omits
-  the blocker trigger or verification evidence, request changes. Never print
-  secret values.
+  the human what must be provided safely. The runbook must say where to act,
+  what to configure, where secret values come from without printing them, how to
+  rerun verification, and the pass predicate. Do not count steps you inferred
+  from the PR diff, CI logs, docs, or local metadata as part of the artifact's
+  runbook. If it asks to merge first, or omits the runbook, blocker trigger, or
+  verification evidence, request changes. Never print secret values.
 - If the artifact has unresolved `[NEEDS CLARIFICATION]`, treat a human reply as
-  an answer for the same phase, not as approval.
+  an answer for the same phase, not as approval. If that clarification answer
+  already exists in the artifact thread, recommend `In Progress` so Symphony can
+  re-enter that phase and rewrite the artifact. Do not write or recommend a
+  phase-closing approval reply.
 - For every phase, compare the artifact against the accepted `## Requirements`
   acceptance criteria plus later human-approved scope changes. Request changes
   when the artifact would leave the next phase unable to satisfy that source of
@@ -318,10 +348,15 @@ Reply locations:
   is viable. This is a blocking Design issue, not an Implementation follow-up
   note.
 - Ask clarification when the next action requires human judgment, product scope,
-  or risk acceptance rather than agent work.
+  or risk acceptance rather than agent work. Use `unchanged` only while the
+  human answer is absent; after a human answer is present, recommend
+  `In Progress` for clarification-answer resume, not phase approval.
 - Use no reply yet when the artifact correctly parks on a human-only
-  secret/credential/tool blocker, names the needed input and later verification,
-  and does not request merge or approval.
+  secret/credential/tool blocker, itself includes an executable runbook for the
+  human action and later verification, and does not request merge or approval. For
+  Deployment live-validation blockers, require the concrete action/event, owner,
+  observable signal, and human next step above; missing real participants or interactions alone means
+  request changes.
 - Use a merge nudge only when the awaiting-review artifact is
   `## Implementation`, no prerequisite blocker exists, and normal
   Implementation appears accepted but the workflow requires the human to move
@@ -331,8 +366,10 @@ Reply locations:
   `Done`, not `Merging`.
 - Use completion confirmation only when Deployment is waiting for proof that
   merge, deployment, or post-merge validation completed and that proof is
-  already checkable now. If the proof trigger has not happened yet, use
-  `no reply yet` only when the artifact gives a concrete trigger, owner,
-  observable signal, and human next step; otherwise request changes.
+  already checkable now, and no material outcome-proof gap above remains without
+  a linked follow-up or explicit human risk acceptance. If the proof trigger has
+  not happened yet, use `no reply yet` only when the artifact gives a concrete
+  trigger, owner, observable signal, and human next step; otherwise request
+  changes.
 - Say no reply yet when evidence is unavailable, the issue is not actually in
   `Human Review`, or no awaiting-review artifact can be identified.
