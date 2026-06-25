@@ -309,7 +309,8 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
     write_workflow_file!(Workflow.workflow_file_path(),
       tracker_kind: "memory",
       tracker_required_labels: ["symphony"],
-      workspace_root: workspace_root
+      workspace_root: workspace_root,
+      worker_ssh_hosts: ["worker-a"]
     )
 
     active_issue = %Issue{
@@ -339,10 +340,20 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
       labels: []
     }
 
+    incompatible_worker_issue = %Issue{
+      id: "issue-missing-worker",
+      identifier: "MT-MISSING-WORKER",
+      title: "Missing worker resumable",
+      state: "In Progress",
+      url: "https://example.org/issues/MT-MISSING-WORKER",
+      labels: ["symphony"]
+    }
+
     Application.put_env(:symphony_elixir, :memory_tracker_issues, [
       active_issue,
       terminal_issue,
-      unroutable_issue
+      unroutable_issue,
+      incompatible_worker_issue
     ])
 
     started_at = DateTime.utc_now()
@@ -351,7 +362,8 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
              SymphonyElixir.RunRegistry.replace_entries([
                registry_entry(active_issue, "thread-active", started_at),
                registry_entry(terminal_issue, "thread-done", started_at),
-               registry_entry(unroutable_issue, "thread-unroutable", started_at)
+               registry_entry(unroutable_issue, "thread-unroutable", started_at),
+               registry_entry(incompatible_worker_issue, "thread-missing-worker", started_at, "worker-z")
              ])
 
     assert :ok = SymphonyElixir.DispatchControl.pause("restart window")
@@ -2432,13 +2444,13 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
     |> elem(1)
   end
 
-  defp registry_entry(issue, thread_id, started_at) do
+  defp registry_entry(issue, thread_id, started_at, worker_host \\ nil) do
     %{
       issue_id: issue.id,
       identifier: issue.identifier,
       issue_url: issue.url,
       workspace_path: "/workspaces/#{issue.identifier}",
-      worker_host: nil,
+      worker_host: worker_host,
       thread_id: thread_id,
       session_id: nil,
       attempt: 0,

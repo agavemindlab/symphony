@@ -362,10 +362,22 @@ defmodule SymphonyElixir.Orchestrator do
 
   defp valid_registry_entry?(entry, issues_by_id, terminal_states) do
     case Map.get(issues_by_id, entry.issue_id) do
-      %Issue{} = issue -> retry_candidate_issue?(issue, terminal_states)
-      _ -> false
+      %Issue{} = issue ->
+        retry_candidate_issue?(issue, terminal_states) and
+          registry_worker_host_available?(Map.get(entry, :worker_host))
+
+      _ ->
+        false
     end
   end
+
+  defp registry_worker_host_available?(nil), do: true
+
+  defp registry_worker_host_available?(worker_host) when is_binary(worker_host) do
+    worker_host in Config.settings!().worker.ssh_hosts
+  end
+
+  defp registry_worker_host_available?(_worker_host), do: false
 
   defp resumable_registry_entry?(%{issue_id: issue_id, thread_id: thread_id})
        when is_binary(issue_id) and issue_id != "" and is_binary(thread_id) and thread_id != "",
