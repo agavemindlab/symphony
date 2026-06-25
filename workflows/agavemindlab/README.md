@@ -74,10 +74,10 @@ to the CLI, without resolving through symlinks.
 `hooks.after_create` clones `$GITHUB_FORK_OWNER/$SYMPHONY_REPO`, configures the
 `agavemindlab/$SYMPHONY_REPO` upstream remote, fetches
 `$SYMPHONY_BASE_BRANCH`, runs the project `setup.sh` if it exists, then
-installs shared skills from `$SYMPHONY_WORKFLOW_DIR/skills/` into the workspace
+symlinks shared skills from `$SYMPHONY_WORKFLOW_DIR/skills/` into the workspace
 `.agents/skills/` directory. If the target repository already contains
 `.agents/skills/<name>/`, the installer skips that skill and leaves the
-repository version in place. Only newly installed skills are added to
+repository version in place. Only newly linked skills are added to
 `.git/info/exclude`; the committed `.gitignore` is not modified.
 
 `hooks.before_remove` runs the project `teardown.sh` if it exists.

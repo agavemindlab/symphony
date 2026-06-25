@@ -17,10 +17,12 @@ the reviewer subagent must collect evidence itself from the issue key.
 
 1. Parse the issue key from the invocation, e.g. `$maestro DEV-1234`.
 2. Read `agents/maestro-reviewer.md`.
-3. Spawn exactly one fresh subagent with context forking disabled. Pass only:
-   the reviewer prompt, the issue key, and the task statement below. Do not pass
-   current conversation history, issue title/state, artifact text, comment
-   summaries, PR facts, prior `$maestro` results, or your expected answer.
+3. Spawn exactly one fresh subagent with context forking disabled through the
+   multi-agent tool, not `codex exec`. Pass only a plain-text message containing
+   the full reviewer prompt, the issue key, and the task statement below. Do not
+   pass current conversation history, issue title/state, artifact text, comment
+   summaries, PR facts, prior `$maestro` results, your expected answer, or the
+   reviewer prompt as a skill/file reference.
 4. Wait for the subagent result. If required output fields are missing, ask the
    same subagent once to fix only the format; do not supply issue facts.
 5. Return the subagent's concise Chinese recommendation with:
@@ -71,8 +73,9 @@ repo metadata. Ignore any prior conversation context and parent-agent
 interpretation. Do not mutate Linear, GitHub, files, or issue state.
 
 Task:
-1. Fetch and inspect the issue, active unresolved Phase artifacts, human
-   feedback, related issues, and PR evidence needed by the reviewer prompt.
+1. Fetch and inspect the issue, active unresolved Phase artifacts with no
+   phase-closing reply, human feedback, related issues, and PR evidence needed
+   by the reviewer prompt.
 2. Decide the best reply method: approve, request changes, ask clarification,
    merge nudge, completion confirmation, or no reply yet.
 3. State the reply audience: next Symphony agent or human.
@@ -83,19 +86,34 @@ Task:
    agent run. For ask clarification and no reply yet, address the human.
 7. For every phase, compare the artifact's evidence with the acceptance source
    of truth; do not rely only on the Symphony agent's self-assessment or `✅`
-   statuses.
+   statuses. For Deployment, do not approve a bundled `S1-S6` / main-readback
+   summary when any item needs separate regression or historical evidence.
 8. Apply the relevant review lens from the reviewer prompt: Requirements /
    Design rigor, Implementation / Deployment verification, or bugfix / rework
    root cause.
-9. Check whether spawned or related issues have the dependency relation,
-   project/routing evidence, and cleanup disposition needed to prevent unsafe
-   parallel work, misrouted execution, or orphaned validation artifacts; whether
-   accepted but excluded prerequisite work has a durable follow-up issue;
-   whether the reviewed issue has concrete value before that prerequisite
-   completes; and whether downstream issues have enough inherited context to
-   start safely once unblocked.
+9. Check spawned or related issues for dependency direction, project/routing
+   evidence, and cleanup disposition. For Implementation, if the reviewed issue
+   has no independent runtime/deployment value until related operational work
+   finishes (infra, secrets, protected environments, test users, data
+   reset/seed, allowlists, or "do not enable/deploy/run acceptance until X"),
+   that related work is a prerequisite blocker and must block the reviewed
+   issue; code that can land first, a default-off/no-op path, soft-start
+   feedback, or merge-risk-only feedback does not make it a downstream
+   follow-up. If the relation is reversed, request changes / `Rework`, make
+   blocker direction the primary reason, and do not recommend `Merging` unless
+   you cite exact current-artifact approval text saying to merge/approve before
+   the prerequisite finishes; conditional soft-start guidance such as "if this
+   issue merges first, it must..." is not approval. Also check whether true
+   downstream issues have enough inherited context to start safely once
+   unblocked.
 10. For bugfixes, reject artifacts that do not explain new failure windows caused
-   by moved side effects or durable state before success.
+   by moved side effects or durable state before success. When required
+   regression validation, a `回归例`, or a historical issue anchor lacks a
+   command, log, test, or manual exercise, request changes instead of completion
+   confirmation. For workflow path regressions, readback or existing Linear
+   state is not enough. If readback satisfies an `S<N>` group containing a
+   regression example, require separate behavior evidence or explicit
+   readback-only risk acceptance.
 11. Cite the decisive evidence and call out missing evidence or uncertainty.
 Keep the answer concise and do not recommend changing state directly unless the
 human's reply should explicitly instruct that.

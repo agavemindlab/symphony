@@ -374,6 +374,78 @@ defmodule SymphonyElixir.CoreTest do
     end
   end
 
+  test "maestro reviewer challenges undersized retention windows for trend claims" do
+    reviewer =
+      File.read!(Path.expand("../.codex/skills/maestro/agents/maestro-reviewer.md", File.cwd!()))
+
+    for contract <- [
+          "retention window",
+          "long-term",
+          "large enough",
+          "request changes or ask clarification"
+        ] do
+      assert reviewer =~ contract
+    end
+  end
+
+  test "maestro reviewer does not overstate readback as regression verification" do
+    reviewer =
+      File.read!(Path.expand("../.codex/skills/maestro/agents/maestro-reviewer.md", File.cwd!()))
+
+    for contract <- [
+          "merged-file readback",
+          "Linear relation checks",
+          "regression verification/evidence",
+          "command, log, test, or manual exercise"
+        ] do
+      assert reviewer =~ contract
+    end
+  end
+
+  test "maestro reviewer blocks Done when required regression validation is missing" do
+    reviewer =
+      File.read!(Path.expand("../.codex/skills/maestro/agents/maestro-reviewer.md", File.cwd!()))
+
+    for contract <- [
+          "required regression validation",
+          "回归例",
+          "historical issue",
+          "sole evidence",
+          "workflow path",
+          "existing Linear state",
+          "readback satisfies",
+          "readback-only risk",
+          "bundled `S1-S6`",
+          "separate evidence",
+          "close-test gap",
+          "request changes",
+          "not completion",
+          "Readback cannot satisfy it",
+          "manual exercise of the affected behavior"
+        ] do
+      assert reviewer =~ contract
+    end
+  end
+
+  test "maestro launcher task repeats required regression validation gate" do
+    skill = File.read!(Path.expand("../.codex/skills/maestro/SKILL.md", File.cwd!()))
+
+    for contract <- [
+          "required",
+          "regression validation",
+          "回归例",
+          "historical issue",
+          "workflow path",
+          "readback-only risk",
+          "bundled `S1-S6`",
+          "command, log, test, or manual exercise",
+          "request changes instead of completion",
+          "confirmation"
+        ] do
+      assert skill =~ contract
+    end
+  end
+
   test "linear api token resolves from LINEAR_API_KEY env var" do
     previous_linear_api_key = System.get_env("LINEAR_API_KEY")
     env_api_key = "test-linear-api-key"
@@ -1991,8 +2063,8 @@ defmodule SymphonyElixir.CoreTest do
     assert prompt =~ "This is an unattended Symphony orchestration session."
     assert prompt =~ "Stop early only for a true blocker"
     assert prompt =~ "Do not include generic \"next steps for user\""
-    assert prompt =~ "active (unresolved) Phase artifacts"
-    assert prompt =~ "most recent artifact with no closing reply"
+    assert prompt =~ "unresolved Phase artifacts"
+    assert prompt =~ "most recent unresolved artifact with no closing reply"
     assert prompt =~ "Open and follow `.agents/skills/symphony-linear/SKILL.md`"
     assert prompt =~ "When the target phase is a rework of its own artifact"
     assert prompt =~ "Requirements rework must also state"
@@ -2484,21 +2556,36 @@ defmodule SymphonyElixir.CoreTest do
       }
 
       pre_review_runner = fn refreshed_issue, opts ->
-        send(parent, {:maestro_pre_review, refreshed_issue.identifier, refreshed_issue.state, opts[:worker_host]})
+        send(parent, {:maestro_pre_review, self(), refreshed_issue.identifier, refreshed_issue.state, opts[:worker_host]})
+
+        receive do
+          :finish_maestro_pre_review -> :ok
+        after
+          5_000 -> :ok
+        end
+
         :ok
       end
 
-      assert :ok =
-               AgentRunner.run(
-                 issue,
-                 nil,
-                 issue_state_fetcher: fn [_issue_id] ->
-                   {:ok, [%{issue | state: "Human Review"}]}
-                 end,
-                 maestro_pre_review_runner: pre_review_runner
-               )
+      runner_task =
+        Task.async(fn ->
+          AgentRunner.run(
+            issue,
+            nil,
+            issue_state_fetcher: fn [_issue_id] ->
+              {:ok, [%{issue | state: "Human Review"}]}
+            end,
+            maestro_pre_review_runner: pre_review_runner
+          )
+        end)
 
-      assert_receive {:maestro_pre_review, "MT-5316", "Human Review", nil}
+      assert_receive {:maestro_pre_review, maestro_pid, "MT-5316", "Human Review", nil}, 5_000
+      runner_result = Task.yield(runner_task, 200)
+      maestro_ref = Process.monitor(maestro_pid)
+
+      send(maestro_pid, :finish_maestro_pre_review)
+      assert runner_result == {:ok, :ok}
+      assert_receive {:DOWN, ^maestro_ref, :process, ^maestro_pid, :normal}, 1_000
     after
       File.rm_rf(test_root)
     end

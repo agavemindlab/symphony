@@ -218,12 +218,14 @@ Before routing phase feedback, normalize both representations: inspect each
 artifact's `children` / thread replies, and exclude any `comments.nodes` item
 with `parent { id }` from standalone top-level comments.
 
-**Default contract**: this read returns *active* state only. Drop every node
-whose `resolvedAt` is non-null before using the result — resolved comments are
-historical rework versions and must not enter context. The GraphQL response
-includes them (the API has no `resolvedAt` filter argument), so apply the drop
-client-side. Callers receive only `resolvedAt: null` comments, which represent
-the current state of each phase.
+**Default contract**: drop every node whose `resolvedAt` is non-null before
+using the result — resolved comments are superseded rework versions or
+cross-phase rollback history. Keep unresolved top-level Phase artifacts even
+when their thread contains a phase-closing reply (`✅ 已批准...` or `⏩ 自动进入...`);
+the closing reply makes them closed for routing, not expired. Callers must
+distinguish the awaiting-review artifact (unresolved, no closing reply) from
+phase-closed artifacts that remain in the current chain and may receive
+cross-phase feedback.
 
 **Exception — explicit back-reference**: dropping resolved comments is a default,
 not a prohibition. When current human feedback refers back to an earlier round
@@ -281,8 +283,11 @@ mutation ReplyToComment($issueId: String!, $parentId: String!, $body: String!) {
 ### Resolve a comment
 
 Resolves the comment and collapses it (with its thread) in the Linear UI.
-Use this after replying with the rework-change summary, before posting a
-fresh Phase artifact.
+Use this only when an artifact is superseded by same-phase rework or rolled back
+by Cross-phase rework. A phase-closing reply alone is not a reason to resolve.
+During same-phase rework, resolve the old artifact before posting the fresh
+Phase artifact; the rework-change summary belongs on the new artifact after it
+is posted.
 
 ```graphql
 mutation ResolveComment($id: String!) {
