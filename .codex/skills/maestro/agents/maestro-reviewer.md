@@ -85,12 +85,15 @@ Status recommendations:
   `Merging`; for no-PR `Type:Spike` findings accepted -> `Done`.
 - Request changes -> `Rework`.
 - Ask clarification or no reply yet -> `unchanged`.
+- Human-only secret/credential/tool blocker already stated by the artifact,
+  with no merge/approval request -> `unchanged`.
 - Implementation merge nudge with no prerequisite blocker -> `Merging`.
 - Deployment completion accepted -> `Done`; Deployment verification whose
   stated trigger is already observable now -> `In Progress`; Deployment waiting
-  on a future/external trigger with clear trigger action and observable signal
-  -> `unchanged`; Deployment waiting items that do not say how to make the
-  trigger happen or how to observe it -> `Rework`; Deployment failed or needs
+  on a future/external trigger with clear trigger action, owner, observable
+  signal, and human next step -> `unchanged`; Deployment waiting items that do
+  not say how to make the trigger happen, who owns it, how to observe it, or
+  what the human should do next -> `Rework`; Deployment failed or needs
   correction -> `Rework`.
 
 Reply locations:
@@ -218,12 +221,15 @@ Reply locations:
 - For `## Deployment` waiting on `⚠️ 待观察` items, distinguish waiting from
   actionable re-entry. Recommend `In Progress` only when the artifact's stated
   trigger condition is already satisfied or directly checkable now. If the
-  trigger is still future/external and the artifact states what action or event
-  must happen, who/what owns it, and what observable signal proves it happened,
-  recommend `no reply yet` / `unchanged` so the issue stays parked outside
-  active execution. If a pending item lacks the trigger action/event or
-  observable signal, request changes to the Deployment artifact instead of
-  sending the issue into an `In Progress` loop.
+  trigger is still future/external, recommend `no reply yet` / `unchanged` only
+  when the artifact states what concrete action/event must happen, who/what
+  owns it, what observable signal proves it happened, and what the human should
+  do next with this issue when the signal appears. Abstract future events such
+  as "next real Human Review handoff", "future run", or "subsequent issue" are
+  not clear triggers unless they name the issue/source, triggering action, and
+  fallback if that event does not naturally occur. If any of these parts is
+  missing or a reviewer cannot tell what to do now, request changes to the
+  Deployment artifact instead of sending the issue into an `In Progress` loop.
 - If `## Deployment` finds an agent-actionable defect that needs a new PR,
   require Cross-phase rework to the earliest responsible phase, usually
   `## Implementation`; do not accept a fix PR attached only to Deployment.
@@ -243,14 +249,14 @@ Reply locations:
   recommending `Done`. If missing, recommend `Rework` unless the accepted scope
   explicitly excludes documentation or existing docs already cover the new
   behavior.
-- For secret or runtime-env contract work, distinguish committed metadata from
-  actual non-git secret provisioning. If the issue's purpose is for future
-  agents to use a dedicated credential automatically, require evidence that the
-  runtime value is configured before recommending `Done`. Without that evidence,
-  recommend no reply yet to the agent and tell the human to configure the
-  project-local secret layer, such as `workflows/<project>/project.env.local`,
-  or the selected operator profile, then manually mark `Done` after confirming
-  the variables are present. Never print the secret values.
+- For secret, credential, or runtime-env contract work, distinguish committed
+  metadata from actual non-git provisioning. If the awaiting artifact already
+  states the remaining blocker is human-only provisioning or credential
+  generation, names the needed input and follow-up verification, and does not
+  ask to merge or approve first, recommend `no reply yet` / `unchanged`; tell
+  the human what must be provided safely. If it asks to merge first, or omits
+  the blocker trigger or verification evidence, request changes. Never print
+  secret values.
 - If the artifact has unresolved `[NEEDS CLARIFICATION]`, treat a human reply as
   an answer for the same phase, not as approval.
 - For every phase, compare the artifact against the accepted `## Requirements`
@@ -313,6 +319,9 @@ Reply locations:
   note.
 - Ask clarification when the next action requires human judgment, product scope,
   or risk acceptance rather than agent work.
+- Use no reply yet when the artifact correctly parks on a human-only
+  secret/credential/tool blocker, names the needed input and later verification,
+  and does not request merge or approval.
 - Use a merge nudge only when the awaiting-review artifact is
   `## Implementation`, no prerequisite blocker exists, and normal
   Implementation appears accepted but the workflow requires the human to move
@@ -323,7 +332,7 @@ Reply locations:
 - Use completion confirmation only when Deployment is waiting for proof that
   merge, deployment, or post-merge validation completed and that proof is
   already checkable now. If the proof trigger has not happened yet, use
-  `no reply yet` unless the artifact omitted how to trigger/observe it, in
-  which case request changes.
+  `no reply yet` only when the artifact gives a concrete trigger, owner,
+  observable signal, and human next step; otherwise request changes.
 - Say no reply yet when evidence is unavailable, the issue is not actually in
   `Human Review`, or no awaiting-review artifact can be identified.
