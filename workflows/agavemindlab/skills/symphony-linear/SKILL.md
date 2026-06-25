@@ -284,8 +284,9 @@ mutation ReplyToComment($issueId: String!, $parentId: String!, $body: String!) {
 ### Resolve a comment
 
 Resolves the comment and collapses it (with its thread) in the Linear UI.
-Use this after replying with the rework-change summary, before posting a
-fresh Phase artifact.
+Use this after a closing reply. During same-phase rework, resolve the old
+artifact before posting the fresh Phase artifact; the rework-change summary
+belongs on the new artifact after it is posted.
 
 ```graphql
 mutation ResolveComment($id: String!) {

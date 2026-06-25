@@ -280,8 +280,9 @@ A phase artifact is **closed** (no longer awaiting review) once its thread carri
 Both are equivalent for routing: an artifact with **no** closing reply is the one still awaiting human review. The distinction is for humans — a `⏩` artifact was never human-gated, so the human is free to comment on it and set `Rework` to pull the chain back via cross-phase rework.
 
 After writing either closing reply, immediately resolve the top-level artifact
-with `commentResolve` so closed history folds out of the Linear UI. A closing
-reply without `resolvedAt` is stale cleanup, not a current review artifact.
+with `commentResolve` and confirm it returns non-null `resolvedAt` before
+continuing. A closing reply without `resolvedAt` is stale cleanup, not a current
+review artifact.
 
 ### Identifying the current artifact
 
