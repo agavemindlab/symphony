@@ -1,0 +1,29 @@
+{
+  "linear": {
+    "artifact_thread": "linear/artifact_thread.json",
+    "issue": "linear/issue.json"
+  },
+  "phase": "Design",
+  "repo": {
+    "base_sha": "__CURRENT_HEAD__",
+    "patch": "repo/workspace.patch",
+    "untracked_manifest": "repo/untracked_manifest.json"
+  },
+  "required_context": [
+    {
+      "captured": false,
+      "kind": "external_file",
+      "path": "/outside/repo/context.md"
+    }
+  ],
+  "schema_version": 1,
+  "source_url": "https://linear.app/grandline/issue/DEV-5387/fixture#comment-missing-context",
+  "symphony": {
+    "allowlist": [
+      "symphony/workpad.md"
+    ]
+  },
+  "workflow": {
+    "current_hashes": "workflow/hashes.json"
+  }
+}

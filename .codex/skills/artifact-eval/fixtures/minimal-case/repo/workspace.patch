@@ -1,0 +1,7 @@
+diff --git a/artifact-eval-fixture.txt b/artifact-eval-fixture.txt
+new file mode 100644
+index 0000000..e8fd7dd
+--- /dev/null
++++ b/artifact-eval-fixture.txt
+@@ -0,0 +1 @@
++fixture patch

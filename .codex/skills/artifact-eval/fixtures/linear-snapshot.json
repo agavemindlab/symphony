@@ -1,0 +1,16 @@
+{
+  "artifact_thread": {
+    "body": "## Design\n\nCaptured fixture artifact.",
+    "children": [],
+    "id": "comment-capture",
+    "parent": null
+  },
+  "issue": {
+    "identifier": "DEV-5387",
+    "state": {
+      "name": "Human Review"
+    },
+    "title": "fixture capture issue"
+  },
+  "required_context": []
+}
