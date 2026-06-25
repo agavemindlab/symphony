@@ -90,9 +90,10 @@ Status recommendations:
 - Implementation merge nudge with no prerequisite blocker -> `Merging`.
 - Deployment completion accepted -> `Done`; Deployment verification whose
   stated trigger is already observable now -> `In Progress`; Deployment waiting
-  on a future/external trigger with clear trigger action and observable signal
-  -> `unchanged`; Deployment waiting items that do not say how to make the
-  trigger happen or how to observe it -> `Rework`; Deployment failed or needs
+  on a future/external trigger with clear trigger action, owner, observable
+  signal, and human next step -> `unchanged`; Deployment waiting items that do
+  not say how to make the trigger happen, who owns it, how to observe it, or
+  what the human should do next -> `Rework`; Deployment failed or needs
   correction -> `Rework`.
 
 Reply locations:
@@ -220,12 +221,15 @@ Reply locations:
 - For `## Deployment` waiting on `⚠️ 待观察` items, distinguish waiting from
   actionable re-entry. Recommend `In Progress` only when the artifact's stated
   trigger condition is already satisfied or directly checkable now. If the
-  trigger is still future/external and the artifact states what action or event
-  must happen, who/what owns it, and what observable signal proves it happened,
-  recommend `no reply yet` / `unchanged` so the issue stays parked outside
-  active execution. If a pending item lacks the trigger action/event or
-  observable signal, request changes to the Deployment artifact instead of
-  sending the issue into an `In Progress` loop.
+  trigger is still future/external, recommend `no reply yet` / `unchanged` only
+  when the artifact states what concrete action/event must happen, who/what
+  owns it, what observable signal proves it happened, and what the human should
+  do next with this issue when the signal appears. Abstract future events such
+  as "next real Human Review handoff", "future run", or "subsequent issue" are
+  not clear triggers unless they name the issue/source, triggering action, and
+  fallback if that event does not naturally occur. If any of these parts is
+  missing or a reviewer cannot tell what to do now, request changes to the
+  Deployment artifact instead of sending the issue into an `In Progress` loop.
 - If `## Deployment` finds an agent-actionable defect that needs a new PR,
   require Cross-phase rework to the earliest responsible phase, usually
   `## Implementation`; do not accept a fix PR attached only to Deployment.
@@ -328,7 +332,7 @@ Reply locations:
 - Use completion confirmation only when Deployment is waiting for proof that
   merge, deployment, or post-merge validation completed and that proof is
   already checkable now. If the proof trigger has not happened yet, use
-  `no reply yet` unless the artifact omitted how to trigger/observe it, in
-  which case request changes.
+  `no reply yet` only when the artifact gives a concrete trigger, owner,
+  observable signal, and human next step; otherwise request changes.
 - Say no reply yet when evidence is unavailable, the issue is not actually in
   `Human Review`, or no awaiting-review artifact can be identified.
