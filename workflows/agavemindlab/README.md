@@ -78,7 +78,9 @@ symlinks shared skills from `$SYMPHONY_WORKFLOW_DIR/skills/` into the workspace
 `.agents/skills/` directory. If the target repository already contains
 `.agents/skills/<name>/`, the installer skips that skill and leaves the
 repository version in place. Only newly linked skills are added to
-`.git/info/exclude`; the committed `.gitignore` is not modified.
+`.git/info/exclude`; the committed `.gitignore` is not modified. The hook also
+creates `.issue-secrets/` with mode `700` and local-excludes it for
+human-provided, issue-scoped secret files.
 
 `hooks.before_remove` runs the project `teardown.sh` if it exists.
 

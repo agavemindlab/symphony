@@ -39,6 +39,12 @@ hooks:
 
     gh repo clone "$fork_repo" .
 
+    mkdir -p .issue-secrets
+    chmod 700 .issue-secrets
+    if [ -d .git/info ]; then
+      grep -Fxq ".issue-secrets/" .git/info/exclude 2>/dev/null || printf '%s\n' ".issue-secrets/" >> .git/info/exclude
+    fi
+
     if ! git remote get-url upstream >/dev/null 2>&1; then
       git remote add upstream "https://github.com/agavemindlab/$SYMPHONY_REPO.git"
     fi
@@ -171,6 +177,12 @@ The agent must be able to talk to Linear, either via a configured Linear MCP ser
 - Do not force-push except when the `symphony-pull`, `symphony-pr`, or `symphony-land` skill explicitly requires `--force-with-lease` for the current PR branch, after checking the remote branch did not advance with unrelated human work.
 - Do not commit generated, cache, build, pyc, or temporary artifacts.
 - Do not expose secrets in Linear comments, PR comments, commit messages, logs, screenshots, or workpad notes.
+- For human-provided, issue-scoped secrets, use a `chmod 600` file under the
+  assigned workspace's `.issue-secrets/` directory. This directory is created
+  and local-excluded by the workspace setup hook. In Linear, record only the
+  path, variable names, and safe usage instructions. Do not put secrets under
+  `.symphony/` because Symphony state attachments may archive `.symphony`
+  files.
 
 ## Phase Map
 

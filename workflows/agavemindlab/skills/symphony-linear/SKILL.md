@@ -577,10 +577,12 @@ frontmatter.
 
 Persist:
 
-1. Create a tarball containing agent state:
+1. Create a tarball containing only the agent-state files listed in the workpad
+   `cleanup` field, not the whole `.symphony/` directory. For the default
+   state files:
 
    ```sh
-   tar -czf /tmp/symphony-agent-state.tgz .symphony/
+   tar -czf /tmp/symphony-agent-state.tgz .symphony/workpad.md .symphony/design.md
    ```
 
 2. Upload it with `fileUpload` using filename
@@ -605,8 +607,10 @@ Restore:
    grep -qxF '.symphony/' .git/info/exclude || printf '\n.symphony/\n' >> .git/info/exclude
    ```
 
-Do not include secrets or credentials in state attachments. Keep the tarball
-limited to files listed in the workpad `cleanup` field.
+Do not include secrets or credentials in state attachments. Store
+human-provided issue-scoped secrets in `.issue-secrets/`, never under
+`.symphony/`, and keep the tarball limited to files listed in the workpad
+`cleanup` field.
 
 ## Usage rules
 
