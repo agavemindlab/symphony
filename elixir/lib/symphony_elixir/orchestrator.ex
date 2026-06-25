@@ -585,9 +585,13 @@ defmodule SymphonyElixir.Orchestrator do
   defp maybe_start_maestro_pre_review(_issue, _state), do: :ok
 
   defp start_maestro_pre_review(%Issue{} = issue, runner, worker_host) when is_function(runner, 2) do
-    Task.Supervisor.async_nolink(SymphonyElixir.TaskSupervisor, fn ->
-      run_maestro_pre_review_task(issue, runner, worker_host)
-    end)
+    if MaestroPreReview.claim_handoff(issue) do
+      Task.Supervisor.async_nolink(SymphonyElixir.TaskSupervisor, fn ->
+        run_maestro_pre_review_task(issue, runner, worker_host)
+      end)
+    else
+      Logger.info("Skipping duplicate Maestro pre-review for #{issue_context(issue)}")
+    end
 
     :ok
   rescue

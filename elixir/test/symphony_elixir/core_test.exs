@@ -656,6 +656,7 @@ defmodule SymphonyElixir.CoreTest do
 
   test "human review reconcile starts maestro pre-review before stopping active agent" do
     write_workflow_file!(Workflow.workflow_file_path(), tracker_required_labels: ["symphony"])
+    SymphonyElixir.MaestroPreReview.reset_handoff_claims_for_test()
 
     parent = self()
     issue_id = "issue-human-review-reconcile"
@@ -710,6 +711,26 @@ defmodule SymphonyElixir.CoreTest do
     refute Map.has_key?(updated_state.running, issue_id)
     refute MapSet.member?(updated_state.claimed, issue_id)
     refute Process.alive?(agent_pid)
+  end
+
+  test "maestro pre-review handoff claim is shared across launch paths" do
+    SymphonyElixir.MaestroPreReview.reset_handoff_claims_for_test()
+
+    handoff_at = DateTime.from_naive!(~N[2026-06-25 10:00:00], "Etc/UTC")
+
+    issue = %Issue{
+      id: "issue-shared-maestro-claim",
+      identifier: "MT-SHARED-MAESTRO",
+      state: "Human Review",
+      labels: ["symphony"],
+      updated_at: handoff_at
+    }
+
+    assert SymphonyElixir.MaestroPreReview.claim_handoff_for_test(issue)
+    refute SymphonyElixir.MaestroPreReview.claim_handoff_for_test(issue)
+
+    next_handoff = %{issue | updated_at: DateTime.add(handoff_at, 60)}
+    assert SymphonyElixir.MaestroPreReview.claim_handoff_for_test(next_handoff)
   end
 
   test "terminal issue state stops running agent and cleans workspace" do
