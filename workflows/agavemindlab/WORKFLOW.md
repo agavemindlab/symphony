@@ -190,7 +190,7 @@ Most issues ship code through all four phases. A `Type:Spike` (investigation / r
 
 Symphony only starts the agent when the issue is in an active state (`Todo`, `In Progress`, `Merging`, `Rework`). Other states never reach this flow.
 
-1. Open and follow `.agents/skills/symphony-linear/SKILL.md` to fetch the issue, its current Linear state, and its active (unresolved) Phase artifacts.
+1. Open and follow `.agents/skills/symphony-linear/SKILL.md` to fetch the issue, its current Linear state, and its active (unresolved and not phase-closed) Phase artifacts.
 
 2. Ensure the feature branch exists and restore agent state:
    - Read the issue's `branchName` field from Linear.
@@ -204,13 +204,13 @@ Symphony only starts the agent when the issue is in an active state (`Todo`, `In
 
 3. Route by Linear state:
    - `Todo` → move to `In Progress`, then continue as `In Progress`.
-   - `Merging` → the human approved the PR. Write an approval reply on `## Implementation`: `✅ 已批准，进入 Deployment（[timestamp]）`. Target phase = Deployment; go to step 6.
+   - `Merging` → the human approved the PR. Write an approval reply on `## Implementation`: `✅ 已批准，进入 Deployment（[timestamp]）`, then resolve that artifact. Target phase = Deployment; go to step 6.
    - `In Progress`, `Rework` → determine the target phase via steps 4–5.
 
 4. Gather the signals:
    - **Proposal-consent channel (run first, orthogonal to phase intent).** Scan unresolved `## 建议新建 issue` proposal comments for a new human reply in *their* thread, and fulfill via the `symphony-issue` skill's fulfill mode (consent → create the proposed issue + reply `已创建 ENG-123` + resolve the proposal comment; rejection → resolve as `已放弃`). This lives in a different comment thread than the phase artifacts, so it never collides with phase approval; fulfilling spawns here first keeps a single "approve phase + consent to a sub-issue" reply pair well-ordered. See the Spawning related issues section.
-   - Identify the phase awaiting review = the most recent artifact with no closing reply (neither `✅` human approval nor `⏩` auto-advance). The workpad `current_phase` should already name it; if the workpad is absent (brand-new branch), infer it as the most recent phase whose artifact exists. No artifacts at all → target phase is Requirements, go to step 6.
-   - Gather new human feedback from two places: (a) replies in each unresolved Phase artifact's thread (inspect each artifact's `children` / thread replies first), and (b) standalone top-level **human** comments on the issue that are not replies to any artifact. When reading Linear comments, retain each comment's `parent { id }`; Linear may also return replies in `comments.nodes`, so never treat a parented reply node as standalone top-level feedback. A reply's feedback keeps the phase intent of that artifact. Exclude agent-authored `## 建议新建 issue` proposal comments — those are the consent channel handled by the first bullet, not feedback. Scan **every** unresolved artifact, not just the awaiting-review one — humans request cross-phase rework by commenting on the artifact they want changed (e.g. feedback on `## Design` while `## Implementation` awaits review). "New" = newer than the agent's last closing reply on that artifact (or, for standalone comments, newer than the agent's last action). Attribute each standalone comment to the phase it discusses; if unclear, assume the awaiting-review phase. If a comment refers back to an earlier round ("上次"/"之前提到的"), pull the specific resolved comment it points to per the `symphony-linear` skill's back-reference exception.
+   - Identify the phase awaiting review = the most recent unresolved artifact with no closing reply (neither `✅` human approval nor `⏩` auto-advance). If an unresolved artifact already has a closing reply, resolve it as stale cleanup and do not treat it as awaiting review. The workpad `current_phase` should already name it; if the workpad is absent (brand-new branch), infer it as the most recent phase whose artifact exists. No artifacts at all → target phase is Requirements, go to step 6.
+   - Gather new human feedback from two places: (a) replies in each active Phase artifact's thread (unresolved and no closing reply; inspect each artifact's `children` / thread replies first), and (b) standalone top-level **human** comments on the issue that are not replies to any artifact. When reading Linear comments, retain each comment's `parent { id }`; Linear may also return replies in `comments.nodes`, so never treat a parented reply node as standalone top-level feedback. A reply's feedback keeps the phase intent of that artifact. Exclude agent-authored `## 建议新建 issue` proposal comments — those are the consent channel handled by the first bullet, not feedback. Scan **every** active artifact, not just the awaiting-review one — humans request cross-phase rework by commenting on the artifact they want changed (e.g. feedback on `## Design` while `## Implementation` awaits review). "New" = newer than the agent's last closing reply on that artifact (or, for standalone comments, newer than the agent's last action). Attribute each standalone comment to the phase it discusses; if unclear, assume the awaiting-review phase. If a comment refers back to an earlier round ("上次"/"之前提到的"), pull the specific resolved comment it points to per the `symphony-linear` skill's back-reference exception.
    - When the awaiting-review phase is Implementation, the **PR is also a feedback channel** — but only for **human** reviewers. Humans often leave change requests as GitHub PR review comments instead of repeating them on Linear; gather new human PR review comments / inline threads / review states and treat them as feedback targeting Implementation. Bot / automated reviews (e.g. the configured `AUTOMATED_REVIEWER`) are **not** human intent: a bot approval never counts as a human approval, and a bot's comments are addressed by the Implementation PR feedback sweep, not by this intent check. Identify the author of each PR review/comment and drop bot ones before judging intent.
    - Note the Linear state (`In Progress` vs `Rework`).
 
@@ -220,11 +220,11 @@ Symphony only starts the agent when the issue is in an active state (`Todo`, `In
 
    **If the human left new feedback**, read it to understand the intent — approval, question, or change request — using the Linear state as a hint (`In Progress` leans approval, `Rework` leans change request) to break ambiguity:
    - **Question / discussion** (asks for rationale or explores alternatives without requesting a concrete change) → answer in that artifact's thread. Do **not** write an approval reply, advance, resolve, or re-post the artifact. Return the issue to `Human Review` and stop — the human will approve, ask more, or request a change next.
-   - **Approval** (accepts the work, possibly with non-blocking remarks) → write an approval reply on the awaiting-review artifact: `✅ 已批准，进入 [Next Phase]（[timestamp]）`. Target phase = the next phase. Address any non-blocking remark in that next phase.
+   - **Approval** (accepts the work, possibly with non-blocking remarks) → write an approval reply on the awaiting-review artifact: `✅ 已批准，进入 [Next Phase]（[timestamp]）`, then resolve that artifact. Target phase = the next phase. Address any non-blocking remark in that next phase.
    - **Change request** → target phase = the **earliest** phase (in Phase Map order) carrying a change request. If that phase is earlier than the awaiting-review phase, follow Cross-phase rework; otherwise it is a same-phase rework. When a later phase also carried feedback, record it in the workpad `notes` so it is not lost when that phase is redone. (A comment that both asks and requests a change is a change request; answer the question inside the rework summary.)
 
    **If the human left no feedback** (on Linear artifacts or, for Implementation, the PR), decide by Linear state alone:
-   - **`In Progress`** → approval. Write an approval reply on the awaiting-review artifact and target the next phase.
+   - **`In Progress`** → approval. Write an approval reply on the awaiting-review artifact, resolve that artifact, and target the next phase.
    - **`Rework`** → a rework was requested but with no stated direction anywhere. Only after confirming there is no new PR feedback either, reply in the awaiting-review artifact's thread asking what to change (e.g. `🔧 已收到打回，但 Linear 与 PR 上都未看到具体修改要求，请说明需要调整的内容`); do not resolve or re-post the unchanged artifact. Return the issue to `Human Review` and stop. The human's next reply provides the direction, which the following session reads as a change request.
 
    **If the phase never reached review** (no awaiting-review artifact — e.g. an interrupted session resuming mid-phase) → target phase = the current phase, no approval reply.
@@ -237,7 +237,7 @@ Symphony only starts the agent when the issue is in an active state (`Todo`, `In
 
 6. Set the workpad `current_phase` to the target phase and open the matching phase skill (per the Phase Map). The skill does its phase work, publishes its artifact through the Phase Artifact Protocol, and on a **clean** exit hands back one of two outcomes — the skill alone decides which (see its "Exit"); only the Requirements and Design skills ever choose `advance`:
 
-   - **`advance`** → write the `⏩ 自动进入 [Next Phase]` reply on the just-posted artifact, set the workpad `current_phase` to the next phase, keep the issue in `In Progress`, persist the agent state, create `.symphony/stop-after-turn`, and stop this agent run. Do **not** open the next phase skill in this session; the next Symphony dispatch targets the saved phase.
+   - **`advance`** → write the `⏩ 自动进入 [Next Phase]` reply on the just-posted artifact, resolve that artifact, set the workpad `current_phase` to the next phase, keep the issue in `In Progress`, persist the agent state, create `.symphony/stop-after-turn`, and stop this agent run. Do **not** open the next phase skill in this session; the next Symphony dispatch targets the saved phase.
    - **`stop`** → move the issue to `Human Review` and stop.
 
    (A skill that stops **blocked** — unresolved `[NEEDS CLARIFICATION]` / escalated high-impact decision — moves the issue to `Human Review` itself; the session ends there.)
@@ -279,9 +279,13 @@ A phase artifact is **closed** (no longer awaiting review) once its thread carri
 
 Both are equivalent for routing: an artifact with **no** closing reply is the one still awaiting human review. The distinction is for humans — a `⏩` artifact was never human-gated, so the human is free to comment on it and set `Rework` to pull the chain back via cross-phase rework.
 
+After writing either closing reply, immediately resolve the top-level artifact
+with `commentResolve` so closed history folds out of the Linear UI. A closing
+reply without `resolvedAt` is stale cleanup, not a current review artifact.
+
 ### Identifying the current artifact
 
-Current artifact for a phase = the most recent comment of that type with no closing reply in its thread. Resolved artifacts (older rework versions) need not be read on session start.
+Current artifact for a phase = the most recent unresolved comment of that type with no closing reply in its thread. Resolved artifacts and stale unresolved artifacts that already have a closing reply need not be read on session start.
 
 ### Rework cycle (same phase)
 

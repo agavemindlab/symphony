@@ -220,10 +220,13 @@ with `parent { id }` from standalone top-level comments.
 
 **Default contract**: this read returns *active* state only. Drop every node
 whose `resolvedAt` is non-null before using the result — resolved comments are
-historical rework versions and must not enter context. The GraphQL response
-includes them (the API has no `resolvedAt` filter argument), so apply the drop
-client-side. Callers receive only `resolvedAt: null` comments, which represent
-the current state of each phase.
+historical rework versions and must not enter context. Also exclude any
+top-level Phase artifact whose thread already contains a phase-closing reply
+(`✅ 已批准...` or `⏩ 自动进入...`); if it is still `resolvedAt: null`, resolve it
+as stale cleanup before routing. The GraphQL response includes resolved and
+stale-closed comments, so apply the drop client-side. Callers receive only
+unresolved comments with no closing reply, which represent the current state of
+each phase.
 
 **Exception — explicit back-reference**: dropping resolved comments is a default,
 not a prohibition. When current human feedback refers back to an earlier round
