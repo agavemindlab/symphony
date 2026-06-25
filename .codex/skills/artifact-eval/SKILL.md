@@ -17,6 +17,7 @@ case for workflow or phase-skill prompt changes.
 - Write generated cases under `.symphony/artifact-eval/cases/` unless the user
   gives an explicit repo-local output path.
 - Do not capture secrets, `.env`, `.issue-secrets`, or the whole workspace.
+- Do not capture symlinks; they may point at repo-external secrets.
 - `replay` must not read current Linear/GitHub state. If a case needs
   uncaptured external context, report `MISSING_CONTEXT`.
 

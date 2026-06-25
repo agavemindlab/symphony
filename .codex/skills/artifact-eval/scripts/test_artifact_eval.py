@@ -154,6 +154,14 @@ index 0000000..b6fc4c6
         for token in forbidden:
             self.assertNotIn(token, source)
 
+    def test_capture_skips_untracked_symlinks(self) -> None:
+        target = self.tmp / "outside-secret.txt"
+        target.write_text("do not capture\n")
+        link = self.tmp / "untracked-link"
+        link.symlink_to(target)
+
+        self.assertFalse(artifact_eval.should_capture_untracked(link))
+
 
 if __name__ == "__main__":
     unittest.main()

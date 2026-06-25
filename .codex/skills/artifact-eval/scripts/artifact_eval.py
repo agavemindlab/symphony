@@ -317,6 +317,8 @@ def should_capture_untracked(path: Path) -> bool:
         return False
     if path.name == ".env" or path.name.endswith(".env.local"):
         return False
+    if path.is_symlink():
+        return False
     if not path.is_file():
         return False
     return path.stat().st_size <= MAX_UNTRACKED_BYTES
