@@ -160,7 +160,7 @@ index 0000000..b6fc4c6
         link = self.tmp / "untracked-link"
         link.symlink_to(target)
 
-        self.assertFalse(artifact_eval.should_capture_untracked(link))
+        self.assertFalse(artifact_eval.should_capture_untracked(link, Path("untracked-link")))
 
     def test_capture_skips_symphony_allowlist_symlinks(self) -> None:
         repo = self.tmp / "repo"
@@ -240,6 +240,42 @@ index 0000000..b6fc4c6
             "symphony/workpad.md",
             artifact_eval.read_json(case_dir / "case.json")["symphony"]["allowlist"],
         )
+
+    def test_capture_skips_nested_issue_secrets_files(self) -> None:
+        repo = self.tmp / "repo-issue-secrets"
+        repo.mkdir()
+        subprocess.check_call(["git", "init"], cwd=repo, stdout=subprocess.DEVNULL)
+        subprocess.check_call(["git", "config", "user.email", "agent@example.com"], cwd=repo)
+        subprocess.check_call(["git", "config", "user.name", "Agent"], cwd=repo)
+        (repo / "README.md").write_text("fixture\n")
+        subprocess.check_call(["git", "add", "README.md"], cwd=repo)
+        subprocess.check_call(["git", "commit", "-m", "init"], cwd=repo, stdout=subprocess.DEVNULL)
+
+        secrets_dir = repo / ".issue-secrets"
+        secrets_dir.mkdir()
+        (secrets_dir / "token.txt").write_text("secret\n")
+
+        linear_json = self.tmp / "linear-issue-secrets.json"
+        artifact_eval.write_json(
+            linear_json,
+            {
+                "issue": {"identifier": "DEV-5387"},
+                "artifact_thread": {"body": "## Implementation"},
+                "required_context": [],
+            },
+        )
+
+        case_dir = artifact_eval.capture_case(
+            "https://linear.app/grandline/issue/DEV-5387/fixture#comment-issue-secrets",
+            linear_json,
+            self.tmp / "case-issue-secrets",
+            repo,
+            "Implementation",
+        )
+        manifest = artifact_eval.read_json(case_dir / "repo" / "untracked_manifest.json")
+
+        self.assertNotIn(".issue-secrets/token.txt", [item["path"] for item in manifest["files"]])
+        self.assertFalse((case_dir / "repo" / "untracked" / ".issue-secrets" / "token.txt").exists())
 
 
 if __name__ == "__main__":

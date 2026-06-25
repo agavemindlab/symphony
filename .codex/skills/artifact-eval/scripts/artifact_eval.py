@@ -309,13 +309,13 @@ def replay_case(case_dir: Path, repo_root: Path, replay_root: Path | None = None
     )
 
 
-def should_capture_untracked(path: Path) -> bool:
-    parts = path.parts
+def should_capture_untracked(path: Path, relpath: Path) -> bool:
+    parts = relpath.parts
     if not parts:
         return False
     if parts[0] in {".git", ".symphony", ".issue-secrets"}:
         return False
-    if path.name == ".env" or path.name.endswith(".env.local"):
+    if relpath.name == ".env" or relpath.name.endswith(".env.local"):
         return False
     if path.is_symlink():
         return False
@@ -364,7 +364,7 @@ def capture_case(url: str, linear_json: Path, output_dir: Path, repo_root: Path,
             continue
         relpath = safe_relative(raw)
         source_path = repo_root / relpath
-        if not should_capture_untracked(source_path):
+        if not should_capture_untracked(source_path, relpath):
             continue
         target = output_dir / "repo" / "untracked" / relpath
         target.parent.mkdir(parents=True, exist_ok=True)
