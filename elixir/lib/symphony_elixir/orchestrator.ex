@@ -7,7 +7,17 @@ defmodule SymphonyElixir.Orchestrator do
   require Logger
   import Bitwise, only: [<<<: 2]
 
-  alias SymphonyElixir.{AgentRunner, Analytics, Config, IssueRunHook, StatusDashboard, Tracker, Workspace}
+  alias SymphonyElixir.{
+    AgentRunner,
+    Analytics,
+    Config,
+    IssueRunHook,
+    MaestroPreReview,
+    StatusDashboard,
+    Tracker,
+    Workspace
+  }
+
   alias SymphonyElixir.Linear.Issue
 
   @continuation_retry_delay_ms 1_000
@@ -446,6 +456,7 @@ defmodule SymphonyElixir.Orchestrator do
       true ->
         Logger.info("Issue moved to non-active state: #{issue_context(issue)} state=#{issue.state}; stopping active agent")
 
+        maybe_start_maestro_pre_review(issue, state)
         terminate_running_issue(state, issue.id, false, "non_active_state")
     end
   end
@@ -559,6 +570,50 @@ defmodule SymphonyElixir.Orchestrator do
       _ ->
         state
     end
+  end
+
+  defp maybe_start_maestro_pre_review(%Issue{} = issue, %State{} = state) do
+    if human_review_issue?(issue) and issue_routable?(issue) do
+      runner = Map.get(state, :maestro_pre_review_runner, &MaestroPreReview.run/2)
+      worker_host = get_in(state.running, [issue.id, :worker_host])
+      start_maestro_pre_review(issue, runner, worker_host)
+    end
+
+    :ok
+  end
+
+  defp maybe_start_maestro_pre_review(_issue, _state), do: :ok
+
+  defp start_maestro_pre_review(%Issue{} = issue, runner, worker_host) when is_function(runner, 2) do
+    Task.Supervisor.async_nolink(SymphonyElixir.TaskSupervisor, fn ->
+      run_maestro_pre_review_task(issue, runner, worker_host)
+    end)
+
+    :ok
+  rescue
+    exception ->
+      log_maestro_pre_review_failed(issue, Exception.message(exception))
+  catch
+    kind, reason ->
+      log_maestro_pre_review_failed(issue, {kind, reason})
+  end
+
+  defp run_maestro_pre_review_task(%Issue{} = issue, runner, worker_host) do
+    case runner.(issue, worker_host: worker_host) do
+      :ok -> :ok
+      {:error, reason} -> log_maestro_pre_review_failed(issue, reason)
+    end
+  rescue
+    exception ->
+      log_maestro_pre_review_failed(issue, Exception.message(exception))
+  catch
+    kind, reason ->
+      log_maestro_pre_review_failed(issue, {kind, reason})
+  end
+
+  defp log_maestro_pre_review_failed(%Issue{} = issue, reason) do
+    Logger.warning("Maestro pre-review failed for #{issue_context(issue)}: #{inspect(reason)}")
+    :ok
   end
 
   defp terminate_running_issue(%State{} = state, issue_id, cleanup_workspace, reason) do
@@ -974,6 +1029,12 @@ defmodule SymphonyElixir.Orchestrator do
   defp active_issue_state?(state_name, active_states) when is_binary(state_name) do
     MapSet.member?(active_states, normalize_issue_state(state_name))
   end
+
+  defp human_review_issue?(%Issue{state: state}) when is_binary(state) do
+    normalize_issue_state(state) == "human review"
+  end
+
+  defp human_review_issue?(_issue), do: false
 
   defp normalize_issue_state(state_name) when is_binary(state_name) do
     String.downcase(String.trim(state_name))
