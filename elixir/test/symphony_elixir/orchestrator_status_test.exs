@@ -202,6 +202,176 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
     assert is_integer(completed_state.codex_totals.seconds_running)
   end
 
+  test "paused dispatch makes active candidates ineligible without stopping reconciliation" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-dispatch-paused-#{System.unique_integer([:positive])}"
+      )
+
+    previous_control_file = Application.get_env(:symphony_elixir, :dispatch_control_file)
+
+    on_exit(fn ->
+      restore_app_env(:dispatch_control_file, previous_control_file)
+      File.rm_rf(test_root)
+    end)
+
+    Application.put_env(:symphony_elixir, :dispatch_control_file, Path.join(test_root, "paused.json"))
+    assert :ok = SymphonyElixir.DispatchControl.pause("restart window")
+
+    issue = %Issue{
+      id: "issue-paused",
+      identifier: "MT-PAUSED",
+      title: "Paused dispatch",
+      state: "In Progress",
+      labels: []
+    }
+
+    state = %Orchestrator.State{
+      running: %{},
+      claimed: MapSet.new(),
+      blocked: %{},
+      retry_attempts: %{},
+      max_concurrent_agents: 10
+    }
+
+    refute Orchestrator.should_dispatch_issue_for_test(issue, state)
+  end
+
+  test "paused dispatch reschedules active retry without launching a continuation" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-dispatch-paused-retry-#{System.unique_integer([:positive])}"
+      )
+
+    previous_control_file = Application.get_env(:symphony_elixir, :dispatch_control_file)
+
+    on_exit(fn ->
+      restore_app_env(:dispatch_control_file, previous_control_file)
+      File.rm_rf(test_root)
+    end)
+
+    Application.put_env(:symphony_elixir, :dispatch_control_file, Path.join(test_root, "paused.json"))
+    assert :ok = SymphonyElixir.DispatchControl.pause("restart window")
+
+    issue = %Issue{
+      id: "issue-paused-retry",
+      identifier: "MT-PAUSED-RETRY",
+      title: "Paused retry",
+      state: "In Progress",
+      labels: []
+    }
+
+    state = %Orchestrator.State{
+      running: %{},
+      claimed: MapSet.new([issue.id]),
+      blocked: %{},
+      retry_attempts: %{},
+      max_concurrent_agents: 10
+    }
+
+    updated_state =
+      Orchestrator.handle_retry_issue_lookup_for_test(issue, state, issue.id, 1, %{
+        identifier: issue.identifier,
+        issue_url: issue.url,
+        delay_type: :continuation
+      })
+
+    assert updated_state.running == %{}
+    assert %{attempt: 2, timer_ref: timer_ref} = updated_state.retry_attempts[issue.id]
+    Process.cancel_timer(timer_ref)
+  end
+
+  test "startup loads only active routable registry entries while dispatch is paused" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-startup-resumable-#{System.unique_integer([:positive])}"
+      )
+
+    previous_registry_file = Application.get_env(:symphony_elixir, :run_registry_file)
+    previous_control_file = Application.get_env(:symphony_elixir, :dispatch_control_file)
+
+    on_exit(fn ->
+      restore_app_env(:run_registry_file, previous_registry_file)
+      restore_app_env(:dispatch_control_file, previous_control_file)
+      File.rm_rf(test_root)
+    end)
+
+    registry_file = Path.join(test_root, "registry.json")
+    control_file = Path.join(test_root, "paused.json")
+    workspace_root = Path.join(test_root, "workspaces")
+
+    Application.put_env(:symphony_elixir, :run_registry_file, registry_file)
+    Application.put_env(:symphony_elixir, :dispatch_control_file, control_file)
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_kind: "memory",
+      tracker_required_labels: ["symphony"],
+      workspace_root: workspace_root
+    )
+
+    active_issue = %Issue{
+      id: "issue-active",
+      identifier: "MT-ACTIVE",
+      title: "Active resumable",
+      state: "In Progress",
+      url: "https://example.org/issues/MT-ACTIVE",
+      labels: ["symphony"]
+    }
+
+    terminal_issue = %Issue{
+      id: "issue-done",
+      identifier: "MT-DONE",
+      title: "Done resumable",
+      state: "Done",
+      url: "https://example.org/issues/MT-DONE",
+      labels: ["symphony"]
+    }
+
+    unroutable_issue = %Issue{
+      id: "issue-unroutable",
+      identifier: "MT-UNROUTABLE",
+      title: "Unroutable resumable",
+      state: "In Progress",
+      url: "https://example.org/issues/MT-UNROUTABLE",
+      labels: []
+    }
+
+    Application.put_env(:symphony_elixir, :memory_tracker_issues, [
+      active_issue,
+      terminal_issue,
+      unroutable_issue
+    ])
+
+    started_at = DateTime.utc_now()
+
+    assert :ok =
+             SymphonyElixir.RunRegistry.replace_entries([
+               registry_entry(active_issue, "thread-active", started_at),
+               registry_entry(terminal_issue, "thread-done", started_at),
+               registry_entry(unroutable_issue, "thread-unroutable", started_at)
+             ])
+
+    assert :ok = SymphonyElixir.DispatchControl.pause("restart window")
+
+    orchestrator_name = Module.concat(__MODULE__, :StartupResumableOrchestrator)
+    {:ok, pid} = Orchestrator.start_link(name: orchestrator_name)
+
+    on_exit(fn ->
+      if Process.alive?(pid) do
+        Process.exit(pid, :normal)
+      end
+    end)
+
+    state = :sys.get_state(pid)
+
+    assert Map.keys(state.resumable) == ["issue-active"]
+    assert %{thread_id: "thread-active", issue: ^active_issue} = state.resumable["issue-active"]
+    assert [%{issue_id: "issue-active", thread_id: "thread-active"}] = SymphonyElixir.RunRegistry.load()
+  end
+
   test "orchestrator records analytics events for usage, completion, and retry" do
     path = analytics_tmp_path("orchestrator-events.ndjson")
     previous_analytics_file = Application.get_env(:symphony_elixir, :analytics_file)
@@ -2261,4 +2431,22 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
     end)
     |> elem(1)
   end
+
+  defp registry_entry(issue, thread_id, started_at) do
+    %{
+      issue_id: issue.id,
+      identifier: issue.identifier,
+      issue_url: issue.url,
+      workspace_path: "/workspaces/#{issue.identifier}",
+      worker_host: nil,
+      thread_id: thread_id,
+      session_id: nil,
+      attempt: 0,
+      started_at: started_at,
+      project: issue.project
+    }
+  end
+
+  defp restore_app_env(key, nil), do: Application.delete_env(:symphony_elixir, key)
+  defp restore_app_env(key, value), do: Application.put_env(:symphony_elixir, key, value)
 end

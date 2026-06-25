@@ -358,7 +358,14 @@ defmodule SymphonyElixir.ExtensionsTest do
 
     assert Map.delete(state_payload, "analytics") == %{
              "generated_at" => state_payload["generated_at"],
-             "counts" => %{"running" => 1, "retrying" => 1, "blocked" => 1},
+             "counts" => %{"running" => 1, "retrying" => 1, "blocked" => 1, "resumable" => 1},
+             "dispatch" => %{
+               "paused" => true,
+               "reason" => "restart window",
+               "paused_at" => state_payload["dispatch"] |> Map.fetch!("paused_at"),
+               "path" => "/tmp/symphony-dispatch-paused.json",
+               "registry_path" => "/tmp/symphony-run-registry.json"
+             },
              "running" => [
                %{
                  "issue_id" => "issue-http",
@@ -367,6 +374,7 @@ defmodule SymphonyElixir.ExtensionsTest do
                  "state" => "In Progress",
                  "worker_host" => nil,
                  "workspace_path" => nil,
+                 "thread_id" => "thread-http",
                  "session_id" => "thread-http",
                  "turn_count" => 7,
                  "last_event" => "notification",
@@ -402,6 +410,19 @@ defmodule SymphonyElixir.ExtensionsTest do
                  "last_event" => "turn_input_required",
                  "last_message" => "turn blocked: waiting for user input",
                  "last_event_at" => state_payload["blocked"] |> List.first() |> Map.fetch!("last_event_at")
+               }
+             ],
+             "resumable" => [
+               %{
+                 "issue_id" => "issue-resume",
+                 "issue_identifier" => "MT-RESUME",
+                 "issue_url" => "https://example.org/issues/MT-RESUME",
+                 "thread_id" => "thread-resume",
+                 "session_id" => "thread-resume-turn-1",
+                 "worker_host" => "dm-dev2",
+                 "workspace_path" => "/workspaces/MT-RESUME",
+                 "started_at" => state_payload["resumable"] |> List.first() |> Map.fetch!("started_at"),
+                 "updated_at" => state_payload["resumable"] |> List.first() |> Map.fetch!("updated_at")
                }
              ],
              "codex_totals" => %{
@@ -658,6 +679,7 @@ defmodule SymphonyElixir.ExtensionsTest do
     assert html =~ "MT-HTTP"
     assert html =~ "MT-RETRY"
     assert html =~ "MT-BLOCKED"
+    assert html =~ "MT-RESUME"
     assert html =~ ~s(href="https://example.org/issues/MT-HTTP")
     assert html =~ ~s(href="https://example.org/issues/MT-RETRY")
     assert html =~ ~s(href="https://example.org/issues/MT-BLOCKED")
@@ -665,6 +687,9 @@ defmodule SymphonyElixir.ExtensionsTest do
     assert html =~ "rendered"
     assert html =~ "turn blocked: waiting for user input"
     assert html =~ "Runtime"
+    assert html =~ "Dispatch paused"
+    assert html =~ "Resumable"
+    assert html =~ "thread-resume"
     assert html =~ "Live"
     assert html =~ "Offline"
     assert html =~ "Copy ID"
@@ -830,7 +855,7 @@ defmodule SymphonyElixir.ExtensionsTest do
 
     response = Req.get!("http://127.0.0.1:#{port}/api/v1/state")
     assert response.status == 200
-    assert response.body["counts"] == %{"running" => 1, "retrying" => 1, "blocked" => 1}
+    assert response.body["counts"] == %{"running" => 1, "retrying" => 1, "blocked" => 1, "resumable" => 1}
 
     dashboard_css = Req.get!("http://127.0.0.1:#{port}/dashboard.css")
     assert dashboard_css.status == 200
@@ -893,6 +918,7 @@ defmodule SymphonyElixir.ExtensionsTest do
           issue_url: "https://example.org/issues/MT-HTTP",
           state: "In Progress",
           session_id: "thread-http",
+          thread_id: "thread-http",
           turn_count: 7,
           codex_app_server_pid: nil,
           last_codex_message: "rendered",
@@ -934,6 +960,26 @@ defmodule SymphonyElixir.ExtensionsTest do
           last_codex_timestamp: DateTime.utc_now()
         }
       ],
+      resumable: [
+        %{
+          issue_id: "issue-resume",
+          identifier: "MT-RESUME",
+          issue_url: "https://example.org/issues/MT-RESUME",
+          thread_id: "thread-resume",
+          session_id: "thread-resume-turn-1",
+          worker_host: "dm-dev2",
+          workspace_path: "/workspaces/MT-RESUME",
+          started_at: DateTime.utc_now(),
+          updated_at: DateTime.utc_now()
+        }
+      ],
+      dispatch: %{
+        paused: true,
+        reason: "restart window",
+        paused_at: DateTime.utc_now(),
+        path: "/tmp/symphony-dispatch-paused.json",
+        registry_path: "/tmp/symphony-run-registry.json"
+      },
       codex_totals: %{input_tokens: 4, output_tokens: 8, total_tokens: 12, seconds_running: 42.5},
       rate_limits: %{"primary" => %{"remaining" => 11}}
     }

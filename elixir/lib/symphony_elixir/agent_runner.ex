@@ -89,9 +89,17 @@ defmodule SymphonyElixir.AgentRunner do
   defp run_codex_turns(workspace, issue, codex_update_recipient, opts, worker_host) do
     max_turns = Keyword.get(opts, :max_turns, Config.settings!().agent.max_turns)
     issue_state_fetcher = Keyword.get(opts, :issue_state_fetcher, &Tracker.fetch_issue_states_by_ids/1)
+    resume_thread_id = Keyword.get(opts, :resume_thread_id)
     clear_stop_after_turn_marker(workspace, worker_host)
 
-    with {:ok, session} <- AppServer.start_session(workspace, worker_host: worker_host, issue: issue) do
+    with {:ok, session} <-
+           AppServer.start_session(workspace,
+             worker_host: worker_host,
+             issue: issue,
+             thread_id: resume_thread_id
+           ) do
+      send_thread_started(codex_update_recipient, issue, session.thread_id, workspace, worker_host)
+
       try do
         context = %{
           app_session: session,
@@ -254,7 +262,20 @@ defmodule SymphonyElixir.AgentRunner do
     "'" <> String.replace(value, "'", "'\"'\"'") <> "'"
   end
 
-  defp build_turn_prompt(issue, opts, 1, _max_turns), do: PromptBuilder.build_prompt(issue, opts)
+  defp send_thread_started(recipient, issue, thread_id, workspace, worker_host)
+       when is_binary(thread_id) do
+    send_codex_update(recipient, issue, %{
+      event: :thread_started,
+      thread_id: thread_id,
+      workspace_path: workspace,
+      worker_host: worker_host,
+      timestamp: DateTime.utc_now()
+    })
+  end
+
+  defp build_turn_prompt(issue, opts, 1, _max_turns) do
+    restart_resume_prompt(opts) || PromptBuilder.build_prompt(issue, opts)
+  end
 
   defp build_turn_prompt(_issue, _opts, turn_number, max_turns) do
     """
@@ -266,6 +287,22 @@ defmodule SymphonyElixir.AgentRunner do
     - The original task instructions and prior turn context are already present in this thread, so do not restate them before acting.
     - Focus on the remaining ticket work and do not end the turn while the issue stays active unless you are truly blocked.
     """
+  end
+
+  defp restart_resume_prompt(opts) do
+    case Keyword.get(opts, :resume_thread_id) do
+      thread_id when is_binary(thread_id) and thread_id != "" ->
+        """
+        Restart recovery guidance:
+
+        - This Symphony process resumed Codex thread #{thread_id} after an orchestrator restart.
+        - inspect the workspace, `.symphony/workpad.md`, PR state, and Linear issue state before proceeding.
+        - Continue the remaining ticket work from the recovered thread context instead of restarting from scratch.
+        """
+
+      _ ->
+        nil
+    end
   end
 
   defp continue_with_issue?(%Issue{id: issue_id} = issue, issue_state_fetcher) when is_binary(issue_id) do

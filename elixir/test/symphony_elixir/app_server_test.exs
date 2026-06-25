@@ -183,6 +183,96 @@ defmodule SymphonyElixir.AppServerTest do
     end
   end
 
+  test "app server resumes an existing thread id instead of starting a new thread" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-app-server-resume-#{System.unique_integer([:positive])}"
+      )
+
+    try do
+      workspace_root = Path.join(test_root, "workspaces")
+      workspace = Path.join(workspace_root, "MT-RESUME")
+      codex_binary = Path.join(test_root, "fake-codex")
+      trace_file = Path.join(test_root, "codex-resume.trace")
+      previous_trace = System.get_env("SYMP_TEST_CODEx_TRACE")
+
+      on_exit(fn ->
+        if is_binary(previous_trace) do
+          System.put_env("SYMP_TEST_CODEx_TRACE", previous_trace)
+        else
+          System.delete_env("SYMP_TEST_CODEx_TRACE")
+        end
+      end)
+
+      System.put_env("SYMP_TEST_CODEx_TRACE", trace_file)
+      File.mkdir_p!(workspace)
+
+      File.write!(codex_binary, """
+      #!/bin/sh
+      trace_file="${SYMP_TEST_CODEx_TRACE:-/tmp/codex-resume.trace}"
+
+      while IFS= read -r line; do
+        printf 'JSON:%s\\n' "$line" >> "$trace_file"
+
+        case "$line" in
+          *'"method":"initialize"'*)
+            printf '%s\\n' '{"id":1,"result":{}}'
+            ;;
+          *'"method":"thread/resume"'*)
+            printf '%s\\n' '{"id":2,"result":{"thread":{"id":"thread-existing"}}}'
+            ;;
+          *'"method":"turn/start"'*)
+            printf '%s\\n' '{"id":3,"result":{"turn":{"id":"turn-resumed"}}}'
+            printf '%s\\n' '{"method":"turn/completed"}'
+            exit 0
+            ;;
+        esac
+      done
+      """)
+
+      File.chmod!(codex_binary, 0o755)
+
+      write_workflow_file!(Workflow.workflow_file_path(),
+        workspace_root: workspace_root,
+        codex_command: "#{codex_binary} app-server"
+      )
+
+      issue = %Issue{
+        id: "issue-resume",
+        identifier: "MT-RESUME",
+        title: "Resume thread",
+        state: "In Progress",
+        url: "https://example.org/issues/MT-RESUME"
+      }
+
+      assert {:ok, %{thread_id: "thread-existing", turn_id: "turn-resumed"}} =
+               AppServer.run(workspace, "Resume existing work", issue, thread_id: "thread-existing")
+
+      requests =
+        trace_file
+        |> File.read!()
+        |> String.split("\n", trim: true)
+        |> Enum.filter(&String.starts_with?(&1, "JSON:"))
+        |> Enum.map(&String.trim_leading(&1, "JSON:"))
+        |> Enum.map(&Jason.decode!/1)
+
+      assert Enum.any?(requests, fn payload ->
+               payload["method"] == "thread/resume" &&
+                 get_in(payload, ["params", "threadId"]) == "thread-existing"
+             end)
+
+      refute Enum.any?(requests, &(&1["method"] == "thread/start"))
+
+      assert Enum.any?(requests, fn payload ->
+               payload["method"] == "turn/start" &&
+                 get_in(payload, ["params", "threadId"]) == "thread-existing"
+             end)
+    after
+      File.rm_rf(test_root)
+    end
+  end
+
   test "app server sources per-project env before launching local codex" do
     test_root =
       Path.join(
