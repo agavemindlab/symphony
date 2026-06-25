@@ -324,6 +324,15 @@ def should_capture_untracked(path: Path) -> bool:
     return path.stat().st_size <= MAX_UNTRACKED_BYTES
 
 
+def has_symlink_component(root: Path, relpath: Path) -> bool:
+    current = root
+    for part in relpath.parts:
+        current = current / part
+        if current.is_symlink():
+            return True
+    return False
+
+
 def capture_case(url: str, linear_json: Path, output_dir: Path, repo_root: Path, phase: str | None) -> Path:
     snapshot = read_json(linear_json)
     issue = snapshot.get("issue")
@@ -371,7 +380,7 @@ def capture_case(url: str, linear_json: Path, output_dir: Path, repo_root: Path,
     symphony_files = []
     for relpath in SYMPHONY_ALLOWLIST:
         source = repo_root / relpath
-        if source.is_symlink() or not source.is_file():
+        if has_symlink_component(repo_root, Path(relpath)) or not source.is_file():
             continue
         target_rel = Path("symphony") / Path(relpath).relative_to(".symphony")
         target = output_dir / target_rel
