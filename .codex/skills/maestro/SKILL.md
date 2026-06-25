@@ -119,7 +119,11 @@ Task:
    state is not enough. If readback satisfies an `S<N>` group containing a
    regression example, require separate behavior evidence or explicit
    readback-only risk acceptance.
-11. Cite the decisive evidence and call out missing evidence or uncertainty.
+11. If the issue's why or acceptance asks whether the product improved a real
+   outcome, do not recommend `Done` for observability-only delivery while
+   material `partial`/`gap` signals still block that answer unless a linked,
+   routed follow-up exists or the human explicitly accepts dropping those gaps.
+12. Cite the decisive evidence and call out missing evidence or uncertainty.
 Keep the answer concise and do not recommend changing state directly unless the
 human's reply should explicitly instruct that.
 ```

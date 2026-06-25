@@ -244,6 +244,13 @@ Reply locations:
   close test. A bounded recent window is acceptable only when evidence shows it
   is large enough for the stated question, or the delivered surface clearly
   scopes itself to recent-window/data-quality status; otherwise request changes or ask clarification.
+- When the issue's why or acceptance asks whether the product improved a real
+  outcome, do not treat observability-only delivery as the final proof if
+  material `partial`/`gap` signals still block that answer. Before recommending
+  `Done`, require a linked, routed follow-up with enough context to close those
+  proof gaps, or explicit human risk acceptance to stop tracking them; otherwise
+  request Deployment changes to create or link that follow-up. A v1 scope note
+  or "no follow-up" claim in the artifact is not enough.
 - When acceptance criteria require the delivered surface to explain how humans
   should interpret, operate, compare, or trust it, verify that explanatory
   content directly. Tests, screenshots, panel names, or object existence are not
