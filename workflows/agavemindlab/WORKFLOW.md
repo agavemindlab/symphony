@@ -55,10 +55,11 @@ hooks:
         [ -d "$skill" ] || continue
         name="${skill##*/}"
         target=".agents/skills/$name"
-        if [ -e "$target" ]; then
+        if [ -e "$target" ] || [ -L "$target" ]; then
           continue
         fi
-        cp -R "$skill" "$target"
+        skill_path="$(cd "$skill" && pwd -P)"
+        ln -s "$skill_path" "$target"
         if [ -d .git/info ]; then
           exclude_entry=".agents/skills/$name/"
           grep -Fxq "$exclude_entry" .git/info/exclude 2>/dev/null || printf '%s\n' "$exclude_entry" >> .git/info/exclude
