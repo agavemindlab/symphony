@@ -162,6 +162,46 @@ index 0000000..b6fc4c6
 
         self.assertFalse(artifact_eval.should_capture_untracked(link))
 
+    def test_capture_skips_symphony_allowlist_symlinks(self) -> None:
+        repo = self.tmp / "repo"
+        repo.mkdir()
+        subprocess.check_call(["git", "init"], cwd=repo, stdout=subprocess.DEVNULL)
+        subprocess.check_call(["git", "config", "user.email", "agent@example.com"], cwd=repo)
+        subprocess.check_call(["git", "config", "user.name", "Agent"], cwd=repo)
+        (repo / "README.md").write_text("fixture\n")
+        subprocess.check_call(["git", "add", "README.md"], cwd=repo)
+        subprocess.check_call(["git", "commit", "-m", "init"], cwd=repo, stdout=subprocess.DEVNULL)
+
+        symphony_dir = repo / ".symphony"
+        symphony_dir.mkdir()
+        outside = self.tmp / "outside-workpad.md"
+        outside.write_text("repo-external state\n")
+        (symphony_dir / "workpad.md").symlink_to(outside)
+
+        linear_json = self.tmp / "linear.json"
+        artifact_eval.write_json(
+            linear_json,
+            {
+                "issue": {"identifier": "DEV-5387"},
+                "artifact_thread": {"body": "## Implementation"},
+                "required_context": [],
+            },
+        )
+
+        case_dir = artifact_eval.capture_case(
+            "https://linear.app/grandline/issue/DEV-5387/fixture#comment-symlink",
+            linear_json,
+            self.tmp / "case",
+            repo,
+            "Implementation",
+        )
+
+        self.assertFalse((case_dir / "symphony" / "workpad.md").exists())
+        self.assertNotIn(
+            "symphony/workpad.md",
+            artifact_eval.read_json(case_dir / "case.json")["symphony"]["allowlist"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -371,7 +371,7 @@ def capture_case(url: str, linear_json: Path, output_dir: Path, repo_root: Path,
     symphony_files = []
     for relpath in SYMPHONY_ALLOWLIST:
         source = repo_root / relpath
-        if not source.is_file():
+        if source.is_symlink() or not source.is_file():
             continue
         target_rel = Path("symphony") / Path(relpath).relative_to(".symphony")
         target = output_dir / target_rel
