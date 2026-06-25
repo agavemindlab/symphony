@@ -123,6 +123,10 @@ Task:
    outcome, do not recommend `Done` for observability-only delivery while
    material `partial`/`gap` signals still block that answer unless a linked,
    routed follow-up exists or the human explicitly accepts dropping those gaps.
+   Human approval that gap labels are shown or false outcome claims are avoided
+   is not that acceptance. For dashboard/analytics/reporting issues, any `partial`/`gap`
+   label on a metric named by the issue's purpose is a material proof gap, not
+   just transparency.
 12. Cite the decisive evidence and call out missing evidence or uncertainty.
 Keep the answer concise and do not recommend changing state directly unless the
 human's reply should explicitly instruct that.

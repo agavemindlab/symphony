@@ -249,8 +249,18 @@ Reply locations:
   material `partial`/`gap` signals still block that answer. Before recommending
   `Done`, require a linked, routed follow-up with enough context to close those
   proof gaps, or explicit human risk acceptance to stop tracking them; otherwise
-  request Deployment changes to create or link that follow-up. A v1 scope note
-  or "no follow-up" claim in the artifact is not enough.
+  request Deployment changes to create or link that follow-up. A scope-limiting
+  note or "no follow-up" claim in the artifact is not enough. Human approval
+  that the delivered surface labels gaps, avoids false outcome claims, or meets
+  limited scope is not acceptance to stop tracking those proof gaps.
+- For dashboard, analytics, reporting, or observability issues, treat any
+  `partial`/`gap` label on a signal named by the issue's why or acceptance as a
+  material proof gap. Labels that say "gap", "sample insufficient", or "not
+  configured" satisfy transparency, but they do not close the outcome-proof work.
+  Require a linked follow-up before `Done` for metrics such as cycle time,
+  manual intervention, automation rate, failure/rework quality, external review
+  or CI quality, cohort definition, or baseline/trend when those metrics are
+  part of the issue's stated purpose.
 - When acceptance criteria require the delivered surface to explain how humans
   should interpret, operate, compare, or trust it, verify that explanatory
   content directly. Tests, screenshots, panel names, or object existence are not
@@ -352,8 +362,10 @@ Reply locations:
   `Done`, not `Merging`.
 - Use completion confirmation only when Deployment is waiting for proof that
   merge, deployment, or post-merge validation completed and that proof is
-  already checkable now. If the proof trigger has not happened yet, use
-  `no reply yet` only when the artifact gives a concrete trigger, owner,
-  observable signal, and human next step; otherwise request changes.
+  already checkable now, and no material outcome-proof gap above remains without
+  a linked follow-up or explicit human risk acceptance. If the proof trigger has
+  not happened yet, use `no reply yet` only when the artifact gives a concrete
+  trigger, owner, observable signal, and human next step; otherwise request
+  changes.
 - Say no reply yet when evidence is unavailable, the issue is not actually in
   `Human Review`, or no awaiting-review artifact can be identified.
