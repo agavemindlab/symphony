@@ -89,8 +89,9 @@ Status recommendations:
   `In Progress`; this is a clarification answer already exists resume, not
   phase approval.
 - No reply yet -> `unchanged`.
-- Human-only secret/credential/tool blocker already stated by the artifact,
-  with no merge/approval request -> `unchanged`.
+- Human-only secret/credential/tool blocker -> `unchanged` only when the
+  artifact itself gives an executable runbook and does not ask for
+  merge/approval; otherwise `Rework`.
 - Implementation merge nudge with no prerequisite blocker -> `Merging`.
 - Deployment completion accepted -> `Done`; Deployment verification whose
   stated trigger is already observable now -> `In Progress`; Deployment waiting
@@ -275,11 +276,14 @@ Reply locations:
 - For secret, credential, or runtime-env contract work, distinguish committed
   metadata from actual non-git provisioning. If the awaiting artifact already
   states the remaining blocker is human-only provisioning or credential
-  generation, names the needed input and follow-up verification, and does not
+  generation, and the artifact itself gives an executable runbook, and does not
   ask to merge or approve first, recommend `no reply yet` / `unchanged`; tell
-  the human what must be provided safely. If it asks to merge first, or omits
-  the blocker trigger or verification evidence, request changes. Never print
-  secret values.
+  the human what must be provided safely. The runbook must say where to act,
+  what to configure, where secret values come from without printing them, how to
+  rerun verification, and the pass predicate. Do not count steps you inferred
+  from the PR diff, CI logs, docs, or local metadata as part of the artifact's
+  runbook. If it asks to merge first, or omits the runbook, blocker trigger, or
+  verification evidence, request changes. Never print secret values.
 - If the artifact has unresolved `[NEEDS CLARIFICATION]`, treat a human reply as
   an answer for the same phase, not as approval. If that clarification answer
   already exists in the artifact thread, recommend `In Progress` so Symphony can
@@ -348,10 +352,10 @@ Reply locations:
   human answer is absent; after a human answer is present, recommend
   `In Progress` for clarification-answer resume, not phase approval.
 - Use no reply yet when the artifact correctly parks on a human-only
-  secret/credential/tool blocker, names the needed input and later verification,
-  and does not request merge or approval. For Deployment live-validation
-  blockers, require the concrete action/event, owner, observable signal, and
-  human next step above; missing real participants or interactions alone means
+  secret/credential/tool blocker, itself includes an executable runbook for the
+  human action and later verification, and does not request merge or approval. For
+  Deployment live-validation blockers, require the concrete action/event, owner,
+  observable signal, and human next step above; missing real participants or interactions alone means
   request changes.
 - Use a merge nudge only when the awaiting-review artifact is
   `## Implementation`, no prerequisite blocker exists, and normal
