@@ -109,13 +109,16 @@ When a post-merge acceptance check requires logged-in user state:
    health, error-rate baseline), and any `延迟验收` whose window has already
    elapsed (run its recorded `待验证项` query against the production log and
    judge it against the predicate — never weaken the predicate to pass it).
-2. **Leave genuinely-pending items `⚠️ 待观察`** with a concrete reason:
+2. **Leave genuinely-pending items `⚠️ 待观察`** with a concrete reason and a
+   concrete way to make the condition happen:
    - `延迟验收` whose window is still open — on **merge entry** the deploy
      **starts** the window: carry the runnable spec forward from
      `## Implementation` 的 `Merge 后验证`, stamp the **window-end date**
      (deploy date + window length), and record it in `待验证项`. On a re-entry,
      if the window still has not elapsed, note `窗口未满，剩余 <N> 天`.
    - any other check not yet runnable (an external signal not yet readable).
+     State the trigger action/event, owner, and observable signal; if no one can
+     cause it and no signal can be watched, this is not a useful pending item.
 3. **Hand off `需人工判定` `S<N>`** (only a human can confirm). Note it in
    后续事项; spin off genuine follow-up work as a separate ticket via the
    `symphony-issue` skill (autonomous `follow-up`) and cite its identifier
@@ -144,13 +147,13 @@ rework below; use `⚠️ 待观察` only for checks that are not runnable yet.
   - 证据: 见待验证项
 
 ### 待验证项（omit when none pending; one per still-`⚠️ 待观察` S<N>）
-- S<N>: **查询** `<runnable query>` · **通过判据** `<predicate>` · **何时可验** `窗口末 <YYYY-MM-DD>` / `<其它前置条件>`
+- S<N>: **等待条件** `<condition>` · **触发动作/责任方** `<who/what causes it>` · **可观测信号** `<log/comment/run/metadata>` · **查询** `<runnable query once signal exists>` · **通过判据** `<predicate>` · **何时可验** `<only after signal exists>` / `窗口末 <YYYY-MM-DD>`
 
 ### 后续事项（optional）
 - <follow-up issues, rollback path; omit if none>
 
 > 👉 **需要人工处理**：确认部署结果符合预期。
-> - 若仍有「待验证项」：把 issue 留在 `Human Review`（或任何 Symphony 不处理的状态）直到「何时可验」满足，然后将其移回 `In Progress` —— Deployment 会重入、把剩余验收跑完并回报；全部 `✅` 后由你置 `Done`。
+> - 若仍有「待验证项」：把 issue 留在 `Human Review`（或任何 Symphony 不处理的状态）直到「可观测信号」已经出现且「何时可验」满足，然后将其移回 `In Progress` —— Deployment 会重入、把剩余验收跑完并回报；全部 `✅` 后由你置 `Done`。
 > - 若验收已全部完成：直接将 issue 置为 `Done`；如有问题置为 `Rework`。
 
 >>> 🛠️ 本次激活的 skills
@@ -187,5 +190,5 @@ If Cross-phase rework opened an earlier phase, follow that phase's Exit instead
 of this Deployment Exit.
 
 The posted `> 👉` callout tells the human how to proceed: close on all-resolved,
-move back to `In Progress` to re-enter verification while items remain
-`⚠️ 待观察`, or `Rework` on failure.
+move back to `In Progress` only after a pending item's observable signal exists,
+or `Rework` on failure.

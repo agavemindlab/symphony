@@ -86,9 +86,12 @@ Status recommendations:
 - Request changes -> `Rework`.
 - Ask clarification or no reply yet -> `unchanged`.
 - Implementation merge nudge with no prerequisite blocker -> `Merging`.
-- Deployment completion accepted -> `Done`; Deployment still waiting for
-  verification -> `In Progress`; Deployment failed or needs correction ->
-  `Rework`.
+- Deployment completion accepted -> `Done`; Deployment verification whose
+  stated trigger is already observable now -> `In Progress`; Deployment waiting
+  on a future/external trigger with clear trigger action and observable signal
+  -> `unchanged`; Deployment waiting items that do not say how to make the
+  trigger happen or how to observe it -> `Rework`; Deployment failed or needs
+  correction -> `Rework`.
 
 Reply locations:
 
@@ -212,6 +215,15 @@ Reply locations:
   group is a regression example, request changes unless that item has separate
   behavior exercise evidence. A generic human request to reread main does not
   waive this; require explicit readback-only risk acceptance for that item.
+- For `## Deployment` waiting on `⚠️ 待观察` items, distinguish waiting from
+  actionable re-entry. Recommend `In Progress` only when the artifact's stated
+  trigger condition is already satisfied or directly checkable now. If the
+  trigger is still future/external and the artifact states what action or event
+  must happen, who/what owns it, and what observable signal proves it happened,
+  recommend `no reply yet` / `unchanged` so the issue stays parked outside
+  active execution. If a pending item lacks the trigger action/event or
+  observable signal, request changes to the Deployment artifact instead of
+  sending the issue into an `In Progress` loop.
 - If `## Deployment` finds an agent-actionable defect that needs a new PR,
   require Cross-phase rework to the earliest responsible phase, usually
   `## Implementation`; do not accept a fix PR attached only to Deployment.
@@ -308,7 +320,10 @@ Reply locations:
 - For a no-PR `Type:Spike` whose `## Implementation` findings are accepted,
   the draft reply must explicitly say the human can move the issue straight to
   `Done`, not `Merging`.
-- Use completion confirmation only when Deployment is still waiting for proof
-  that merge, deployment, or post-merge validation completed.
+- Use completion confirmation only when Deployment is waiting for proof that
+  merge, deployment, or post-merge validation completed and that proof is
+  already checkable now. If the proof trigger has not happened yet, use
+  `no reply yet` unless the artifact omitted how to trigger/observe it, in
+  which case request changes.
 - Say no reply yet when evidence is unavailable, the issue is not actually in
   `Human Review`, or no awaiting-review artifact can be identified.
