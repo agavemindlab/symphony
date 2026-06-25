@@ -2556,21 +2556,36 @@ defmodule SymphonyElixir.CoreTest do
       }
 
       pre_review_runner = fn refreshed_issue, opts ->
-        send(parent, {:maestro_pre_review, refreshed_issue.identifier, refreshed_issue.state, opts[:worker_host]})
+        send(parent, {:maestro_pre_review, self(), refreshed_issue.identifier, refreshed_issue.state, opts[:worker_host]})
+
+        receive do
+          :finish_maestro_pre_review -> :ok
+        after
+          5_000 -> :ok
+        end
+
         :ok
       end
 
-      assert :ok =
-               AgentRunner.run(
-                 issue,
-                 nil,
-                 issue_state_fetcher: fn [_issue_id] ->
-                   {:ok, [%{issue | state: "Human Review"}]}
-                 end,
-                 maestro_pre_review_runner: pre_review_runner
-               )
+      runner_task =
+        Task.async(fn ->
+          AgentRunner.run(
+            issue,
+            nil,
+            issue_state_fetcher: fn [_issue_id] ->
+              {:ok, [%{issue | state: "Human Review"}]}
+            end,
+            maestro_pre_review_runner: pre_review_runner
+          )
+        end)
 
-      assert_receive {:maestro_pre_review, "MT-5316", "Human Review", nil}
+      assert_receive {:maestro_pre_review, maestro_pid, "MT-5316", "Human Review", nil}, 5_000
+      runner_result = Task.yield(runner_task, 200)
+      maestro_ref = Process.monitor(maestro_pid)
+
+      send(maestro_pid, :finish_maestro_pre_review)
+      assert runner_result == {:ok, :ok}
+      assert_receive {:DOWN, ^maestro_ref, :process, ^maestro_pid, :normal}, 1_000
     after
       File.rm_rf(test_root)
     end
