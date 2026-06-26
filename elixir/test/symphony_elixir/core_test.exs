@@ -388,6 +388,18 @@ defmodule SymphonyElixir.CoreTest do
     end
   end
 
+  test "maestro resumes human answers to clarification markers through active state" do
+    launcher = File.read!(Path.expand("../.codex/skills/maestro/SKILL.md", File.cwd!()))
+
+    reviewer =
+      File.read!(Path.expand("../.codex/skills/maestro/agents/maestro-reviewer.md", File.cwd!()))
+
+    assert launcher =~ "clarification-answer resume"
+    assert launcher =~ "set the issue to `In Progress`"
+    assert reviewer =~ "clarification answer already exists"
+    assert reviewer =~ "not phase approval"
+  end
+
   test "maestro reviewer does not overstate readback as regression verification" do
     reviewer =
       File.read!(Path.expand("../.codex/skills/maestro/agents/maestro-reviewer.md", File.cwd!()))
