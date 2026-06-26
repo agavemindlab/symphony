@@ -96,9 +96,10 @@ Task:
 8. Apply the relevant review lens from the reviewer prompt: Requirements /
    Design rigor, Implementation / Deployment verification, or bugfix / rework
    root cause.
-9. Check spawned or related issues for dependency direction, project/routing
-   evidence, and cleanup disposition. For Implementation, if the reviewed issue
-   has no independent runtime/deployment value until related operational work
+9. Check spawned or related issues for creation rationale, title/description,
+   project/routing, assignee, dependency direction, `symphony` label, `To Do`
+   state, and cleanup disposition. For Implementation, if the reviewed issue has
+   no independent runtime/deployment value until related operational work
    finishes (infra, secrets, protected environments, test users, data
    reset/seed, allowlists, or "do not enable/deploy/run acceptance until X"),
    that related work is a prerequisite blocker and must block the reviewed
@@ -110,7 +111,8 @@ Task:
    the prerequisite finishes; conditional soft-start guidance such as "if this
    issue merges first, it must..." is not approval. Also check whether true
    downstream issues have enough inherited context to start safely once
-   unblocked.
+   unblocked and are scheduled with `symphony` + `To Do` when they are otherwise
+   ready.
 10. For bugfixes, reject artifacts that do not explain new failure windows caused
    by moved side effects or durable state before success. When required
    regression validation, a `回归例`, or a historical issue anchor lacks a
@@ -122,7 +124,8 @@ Task:
 11. If the issue's why or acceptance asks whether the product improved a real
    outcome, do not recommend `Done` for observability-only delivery while
    material `partial`/`gap` signals still block that answer unless a linked,
-   routed follow-up exists or the human explicitly accepts dropping those gaps.
+   routed, scheduled follow-up exists or the human explicitly accepts dropping
+   those gaps.
    Human approval that gap labels are shown or false outcome claims are avoided
    is not that acceptance. For dashboard/analytics/reporting issues, any `partial`/`gap`
    label on a metric named by the issue's purpose is a material proof gap, not

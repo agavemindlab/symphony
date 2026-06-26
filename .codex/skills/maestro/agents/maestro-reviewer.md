@@ -171,11 +171,14 @@ Reply locations:
   artifact closes the actual rework request without invalidating the accepted
   source of truth.
 - Inspect spawned or related issues mentioned by current artifacts and Linear
-  relations. Include relation type, state, assignee, project/routing evidence,
-  blocker direction, whether downstream issues or accepted out-of-scope
-  prerequisites can start safely after the reviewed issue is closed, and whether
-  validation/disposable issues have a durable relation plus terminal cleanup
-  state.
+  relations. For any issue the Symphony agent created and relies on as a
+  follow-up, prerequisite, validation proof, or cleanup item, verify the
+  artifact explains why it was created and that the reason is valid; verify the
+  new issue's title, description, project, assignee, relations, blocker
+  direction, and whether validation/disposable issues have a durable relation
+  plus terminal cleanup state. If any field is wrong or missing, request
+  changes. If all fields are correct but the issue lacks the `symphony` label or
+  `To Do` state, request changes to set both so automatic scheduling can start.
 - For spawned or related issues, classify by useful value before relation
   direction. Operational work needed before write-capable acceptance or real use
   -- infra, secrets, protected environments, test users, data reset/seed, or
@@ -248,20 +251,21 @@ Reply locations:
 - When the issue's why or acceptance asks whether the product improved a real
   outcome, do not treat observability-only delivery as the final proof if
   material `partial`/`gap` signals still block that answer. Before recommending
-  `Done`, require a linked, routed follow-up with enough context to close those
-  proof gaps, or explicit human risk acceptance to stop tracking them; otherwise
-  request Deployment changes to create or link that follow-up. A scope-limiting
-  note or "no follow-up" claim in the artifact is not enough. Human approval
-  that the delivered surface labels gaps, avoids false outcome claims, or meets
-  limited scope is not acceptance to stop tracking those proof gaps.
+  `Done`, require a linked, routed, scheduled follow-up with enough context to
+  close those proof gaps, or explicit human risk acceptance to stop tracking
+  them; otherwise request Deployment changes to create or link that follow-up.
+  A scope-limiting note or "no follow-up" claim in the artifact is not enough.
+  Human approval that the delivered surface labels gaps, avoids false outcome
+  claims, or meets limited scope is not acceptance to stop tracking those proof
+  gaps.
 - For dashboard, analytics, reporting, or observability issues, treat any
   `partial`/`gap` label on a signal named by the issue's why or acceptance as a
   material proof gap. Labels that say "gap", "sample insufficient", or "not
   configured" satisfy transparency, but they do not close the outcome-proof work.
-  Require a linked follow-up before `Done` for metrics such as cycle time,
-  manual intervention, automation rate, failure/rework quality, external review
-  or CI quality, cohort definition, or baseline/trend when those metrics are
-  part of the issue's stated purpose.
+  Require a linked, routed, scheduled follow-up before `Done` for metrics such
+  as cycle time, manual intervention, automation rate, failure/rework quality,
+  external review or CI quality, cohort definition, or baseline/trend when those
+  metrics are part of the issue's stated purpose.
 - When acceptance criteria require the delivered surface to explain how humans
   should interpret, operate, compare, or trust it, verify that explanatory
   content directly. Tests, screenshots, panel names, or object existence are not
