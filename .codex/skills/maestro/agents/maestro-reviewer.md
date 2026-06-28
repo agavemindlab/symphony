@@ -138,6 +138,11 @@ Reply locations:
 - Use feedback from every active artifact thread (unresolved and no closing
   reply) and standalone top-level human comments. Attribute unclear standalone
   comments to the awaiting-review phase.
+- Human feedback may request content changes, but it does not override Symphony
+  phase routing. If feedback or an artifact asks Implementation to wait for or
+  run the current PR's deploy/verification before `Merging`, recommend rework to
+  hand off through `Merging` / Deployment unless it identifies a separate
+  human-only provisioning action.
 - Treat human feedback as accepting a prerequisite-blocked soft-start only when
   it explicitly says to move the issue to `Merging`, merge, or approve before
   the prerequisite finishes despite a default-off or no-op runtime path. A
@@ -277,17 +282,19 @@ Reply locations:
   recommending `Done`. If missing, recommend `Rework` unless the accepted scope
   explicitly excludes documentation or existing docs already cover the new
   behavior.
-- For secret, credential, or runtime-env contract work, distinguish committed
-  metadata from actual non-git provisioning. If the awaiting artifact already
-  states the remaining blocker is human-only provisioning or credential
-  generation, and the artifact itself gives an executable runbook, and does not
-  ask to merge or approve first, recommend `no reply yet` / `unchanged`; tell
-  the human what must be provided safely. The runbook must say where to act,
-  what to configure, where secret values come from without printing them, how to
-  rerun verification, and the pass predicate. Do not count steps you inferred
-  from the PR diff, CI logs, docs, or local metadata as part of the artifact's
-  runbook. If it asks to merge first, or omits the runbook, blocker trigger, or
-  verification evidence, request changes. Never print secret values.
+- For secret, credential, or runtime-env contract work, distinguish current-PR
+  deployment from separate human-only provisioning. Applying the current PR's
+  committed encrypted secret/vault/env changes and running runtime smoke is
+  Deployment work after `Merging`; an Implementation artifact that parks there
+  needs rework. If the blocker is separate human-only provisioning or credential
+  generation, recommend `no reply yet` / `unchanged` only when the artifact
+  itself gives an executable runbook and does not ask to merge or approve first.
+  The runbook must say where to act, what to configure, where secret values come
+  from without printing them, how to rerun verification, and the pass predicate.
+  Do not count steps you inferred from the PR diff, CI logs, docs, or local
+  metadata as part of the artifact's runbook. If it asks to merge first, or
+  omits the runbook, blocker trigger, or verification evidence, request changes.
+  Never print secret values.
 - If the artifact has unresolved `[NEEDS CLARIFICATION]`, treat a human reply as
   an answer for the same phase, not as approval. If that clarification answer
   already exists in the artifact thread, recommend `In Progress` so Symphony can
@@ -340,6 +347,12 @@ Reply locations:
   approve the current artifact before the prerequisite finishes, and you cite
   that exact current-artifact approval text in `依据`. Conditional text such as
   "if this issue merges first, it must soft-start" is not approval.
+- For `## Implementation`, request changes when the artifact treats the current
+  PR's own post-merge deploy/verification as a human-only blocker, for example
+  by parking on manual deploy/write authorization instead of handing off to
+  `Merging` / Deployment. Carry post-merge checks as `Merge 后验证`. Use
+  `no reply yet` only for a separate human-only provisioning action that
+  Deployment cannot perform.
 - Request changes when fresh PR metadata contradicts the artifact's claimed
   mergeability, check, or review state and the artifact uses that state as
   acceptance evidence. Approve only if the contradiction is clearly irrelevant
@@ -357,10 +370,11 @@ Reply locations:
   `In Progress` for clarification-answer resume, not phase approval.
 - Use no reply yet when the artifact correctly parks on a human-only
   secret/credential/tool blocker, itself includes an executable runbook for the
-  human action and later verification, and does not request merge or approval. For
-  Deployment live-validation blockers, require the concrete action/event, owner,
-  observable signal, and human next step above; missing real participants or interactions alone means
-  request changes.
+  human action and later verification, and does not request merge or approval.
+  Do not use this for the current PR's own post-merge deploy/verification. For
+  Deployment live-validation blockers, require the concrete action/event,
+  owner, observable signal, and human next step above; missing real
+  participants or interactions alone means request changes.
 - Use a merge nudge only when the awaiting-review artifact is
   `## Implementation`, no prerequisite blocker exists, and normal
   Implementation appears accepted but the workflow requires the human to move

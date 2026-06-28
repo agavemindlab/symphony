@@ -105,7 +105,12 @@ Task:
    that related work is a prerequisite blocker and must block the reviewed
    issue; code that can land first, a default-off/no-op path, soft-start
    feedback, or merge-risk-only feedback does not make it a downstream
-   follow-up. If the relation is reversed, request changes / `Rework`, make
+   follow-up. Do not classify the current PR's own post-merge
+   deploy/verification as such a prerequisite; if an Implementation artifact
+   parks on manual deploy/write authorization instead of handing off to
+   `Merging` / Deployment, request rework unless it identifies a separate
+   human-only provisioning action. If the relation is reversed, request
+   changes / `Rework`, make
    blocker direction the primary reason, and do not recommend `Merging` unless
    you cite exact current-artifact approval text saying to merge/approve before
    the prerequisite finishes; conditional soft-start guidance such as "if this
