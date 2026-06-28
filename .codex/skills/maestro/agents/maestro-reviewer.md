@@ -89,9 +89,9 @@ Status recommendations:
   `In Progress`; this is a clarification answer already exists resume, not
   phase approval.
 - No reply yet -> `unchanged`.
-- Human-only secret/credential/tool blocker -> `unchanged` only when the
-  artifact itself gives an executable runbook and does not ask for
-  merge/approval; otherwise `Rework`.
+- Human-only operation blocker -> `unchanged` only when the artifact itself
+  proves the action is outside agent capability, gives an executable runbook,
+  and does not ask for merge/approval; otherwise `Rework`.
 - Implementation merge nudge with no prerequisite blocker -> `Merging`.
 - Deployment completion accepted -> `Done`; Deployment verification whose
   stated trigger is already observable now -> `In Progress`; Deployment waiting
@@ -242,9 +242,14 @@ Reply locations:
   itself. Abstract future events such as "next real Human Review handoff",
   "future run", or "subsequent issue" are not clear triggers unless they name
   the issue/source, triggering action, and fallback if that event does not
-  naturally occur. If any of these parts is missing or a reviewer cannot tell
-  what to do now, request changes to the Deployment artifact instead of sending
-  the issue into an `In Progress` loop.
+  naturally occur. If the artifact asks a human to run repo, Linear, GitHub,
+  service-control, readback, or verification work the Symphony agent could do
+  with normal tools, request changes unless the artifact names the access or
+  permission boundary that makes it human-only. Do not infer the missing runbook
+  from PRs, logs, local metadata, or your own investigation. If any of these
+  parts is missing or a reviewer cannot tell what to do now, request changes to
+  the Deployment artifact instead of sending the issue into an `In Progress`
+  loop.
 - If `## Deployment` finds an agent-actionable defect that needs a new PR,
   require Cross-phase rework to the earliest responsible phase, usually
   `## Implementation`; do not accept a fix PR attached only to Deployment.
@@ -368,13 +373,15 @@ Reply locations:
   or risk acceptance rather than agent work. Use `unchanged` only while the
   human answer is absent; after a human answer is present, recommend
   `In Progress` for clarification-answer resume, not phase approval.
-- Use no reply yet when the artifact correctly parks on a human-only
-  secret/credential/tool blocker, itself includes an executable runbook for the
-  human action and later verification, and does not request merge or approval.
-  Do not use this for the current PR's own post-merge deploy/verification. For
-  Deployment live-validation blockers, require the concrete action/event,
-  owner, observable signal, and human next step above; missing real
-  participants or interactions alone means request changes.
+- Use no reply yet when the artifact correctly parks on a human-only operation
+  blocker, itself proves the action is outside agent capability, includes an
+  executable runbook for the human action and later verification, and does not
+  request merge or approval. Do not use this for the current PR's own post-merge
+  deploy/verification, or for work the agent could perform with normal repo,
+  Linear, GitHub, service-control, or verification tools. For Deployment
+  live-validation blockers, require the concrete action/event, owner, observable
+  signal, and human next step above; missing real participants or interactions
+  alone means request changes.
 - Use a merge nudge only when the awaiting-review artifact is
   `## Implementation`, no prerequisite blocker exists, and normal
   Implementation appears accepted but the workflow requires the human to move
