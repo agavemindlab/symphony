@@ -249,6 +249,22 @@ Maestro.
 5. Never write `✅ 已批准...`, `⏩ 自动进入...`, `Merging`, `Done`, or any
    Deployment action from Bot Review. Human Review remains the human gate.
 
+### Bot Review runtime contract
+
+`Bot Review` is a required Linear team workflow state, not just prompt text.
+It must be created by a Linear workspace/team admin or workflow operator in the
+issue's target Linear team before any clean phase stop can depend on it.
+
+Before moving an issue to `Bot Review`, verify the team workflow state named `Bot Review`
+exists and is a non-terminal state. Use the same
+`IssueTeamStates` Linear query from `symphony-linear` and record the state id,
+name, and type as evidence in the phase artifact or rework summary. If `Bot Review` is missing,
+do not move the issue to `Bot Review`, do not request `Merging`, and do not
+treat the PR as independently mergeable. Keep the issue in `Human Review`,
+reply on the current artifact with an executable runbook for creating the state
+in that Linear team, and cite an existing prerequisite blocker or propose a
+`blocking` issue through `symphony-issue`.
+
 4. Gather the signals:
    - **Proposal-consent channel (run first, orthogonal to phase intent).** Scan unresolved `## 建议新建 issue` proposal comments for a new human reply in *their* thread, and fulfill via the `symphony-issue` skill's fulfill mode (consent → create the proposed issue + reply `已创建 ENG-123` + resolve the proposal comment; rejection → resolve as `已放弃`). This lives in a different comment thread than the phase artifacts, so it never collides with phase approval; fulfilling spawns here first keeps a single "approve phase + consent to a sub-issue" reply pair well-ordered. See the Spawning related issues section.
    - Identify the phase awaiting review = the most recent unresolved artifact with no closing reply (neither `✅` human approval nor `⏩` auto-advance). A closing reply closes the artifact for routing but does not by itself make it expired; do not resolve it unless the rework protocols below say to. The workpad `current_phase` should already name the awaiting phase; if the workpad is absent (brand-new branch), infer it as the most recent unresolved phase artifact without a closing reply. No artifacts at all → target phase is Requirements, go to step 6.
@@ -280,9 +296,11 @@ Maestro.
 6. Set the workpad `current_phase` to the target phase and open the matching phase skill (per the Phase Map). The skill does its phase work, publishes its artifact through the Phase Artifact Protocol, and on a **clean** exit hands back one of two outcomes — the skill alone decides which (see its "Exit"); only the Requirements and Design skills ever choose `advance`:
 
    - **`advance`** → write the `⏩ 自动进入 [Next Phase]` reply on the just-posted artifact, set the workpad `current_phase` to the next phase, keep the issue in `In Progress`, persist the agent state, create `.symphony/stop-after-turn`, and stop this agent run. Do **not** open the next phase skill in this session; the next Symphony dispatch targets the saved phase.
-   - **`stop`** → move the issue to `Bot Review` and stop. The next fresh
-     Bot Review session runs Maestro and then moves the issue to `Human Review`
-     or `Rework`.
+   - **`stop`** → apply the Bot Review runtime contract above; if the state
+     exists, move the issue to `Bot Review` and stop. The next fresh Bot Review
+     session runs Maestro and then moves the issue to `Human Review` or
+     `Rework`. If the state is missing, keep the issue in `Human Review` with
+     the runbook/blocker reply described above and stop.
 
    (A skill that stops **blocked** — unresolved `[NEEDS CLARIFICATION]` / escalated high-impact decision — moves the issue to `Human Review` itself; the session ends there.)
 
@@ -461,4 +479,7 @@ the state index.
 - **Agent never moves to `Done`**: only humans close the issue. After Deployment concludes, the agent posts a completion summary in the `## Deployment` artifact thread and returns the issue to `Bot Review`.
 - **No phase advances without its artifact**: each phase must publish its artifact before moving to `Bot Review` or `Human Review`.
 - **`Human Review` is not an agent state**: Symphony does not start the agent there. `Bot Review` is the machine-review agent state; do not design any phase skill to act while the issue is in `Human Review`.
+- **`Bot Review` must exist in Linear**: if the target team lacks a `Bot Review`
+  workflow state, stop in `Human Review` with the runtime-contract runbook or
+  blocker proposal instead of pretending machine review can run.
 - **Out-of-scope improvements**: do not expand the current issue — spin off a separate ticket via the `symphony-issue` skill (see Spawning related issues). Every spawned issue lands in the team intake state, is assigned to the current issue's `creator` (never Symphony), and is never auto-worked. Flow-changing kinds (`blocking`, `sub-issue`) are only proposed and wait for human consent.

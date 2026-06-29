@@ -468,7 +468,10 @@ writes the `⏩` reply, sets `current_phase: Implementation`, persists state,
 and stops this agent run. The next Symphony dispatch opens
 `phase-implementation`.
 
-Otherwise choose **`stop`** — Main Flow moves the issue to `Bot Review`.
+Otherwise choose **`stop`** — Main Flow moves the issue to `Bot Review` only
+after the workflow's Bot Review runtime contract confirms that Linear state
+exists; if it is missing, Main Flow keeps the issue in `Human Review` with the
+runbook/blocker reply.
 This is the right outcome for a rework, for a human already in the thread,
 for the `Rework` state, and for the **complete-but-not-confident** case:
 there is a real architectural fork a reasonable reviewer might decide

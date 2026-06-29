@@ -331,7 +331,9 @@ phase, and open the target phase skill.
 - PR pushed; PR checks green; PR linked on the issue.
 - PR feedback sweep complete: every substantive comment has a reply.
 - `## Implementation` artifact posted.
-- Issue moved to `Bot Review`.
+- Issue moved to `Bot Review`, or kept in `Human Review` with a runtime-contract
+  runbook/blocker reply when the target Linear team lacks the `Bot Review`
+  workflow state.
 
 The human approves by moving the issue to `Merging`. On the next session,
 Main Flow writes the approval reply on this artifact and runs Deployment.

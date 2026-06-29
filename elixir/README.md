@@ -37,17 +37,20 @@ Linear issue can become a dispatch candidate again after restart.
    [Harness engineering](https://openai.com/index/harness-engineering/).
 2. Get a new personal token in Linear via Settings → Security & access → Personal API keys, and
    set it as the `LINEAR_API_KEY` environment variable.
-3. To enable `Bot Review` pre-review, set `MAESTRO_LINEAR_API_KEY` to a dedicated
+3. To enable `Bot Review` pre-review, create a `Bot Review` workflow state in
+   the target Linear team and include it in the workflow's `tracker.active_states`.
+   Verify it with the `IssueTeamStates` query before relying on clean phase stops.
+4. Set `MAESTRO_LINEAR_API_KEY` to a dedicated
    Maestro Linear OAuth app token. Do not reuse `LINEAR_API_KEY`; missing or invalid
    Maestro auth makes Bot Review `linear_graphql` calls fail closed instead of falling back.
-4. Use a project workflow under [`../workflows/`](../workflows/). The shared
+5. Use a project workflow under [`../workflows/`](../workflows/). The shared
    `workflows/agavemindlab/WORKFLOW.md` and `skills/` entries are inherited by
    project directories through symlinks; replace a symlink with a real file or
    directory only when that project needs an override.
-5. Start Symphony with the repository launcher for the selected project. See
+6. Start Symphony with the repository launcher for the selected project. See
    [`../bin/README.md`](../bin/README.md) for the layered env-file composition
    the launcher performs.
-6. Follow the instructions below to install the required runtime dependencies and start the service.
+7. Follow the instructions below to install the required runtime dependencies and start the service.
 
 ## Prerequisites
 
@@ -187,6 +190,9 @@ Notes:
 - If a hook needs `mise exec` inside a freshly cloned workspace, trust the repo config and fetch
   the project dependencies in `hooks.after_create` before invoking `mise` later from other hooks.
 - `tracker.api_key` reads from `LINEAR_API_KEY` when unset or when value is `$LINEAR_API_KEY`.
+- `Bot Review` requires a same-named Linear workflow state in the target team;
+  missing state configuration keeps handoff in `Human Review` until an operator
+  creates and verifies it.
 - `MAESTRO_LINEAR_API_KEY` is separate from `tracker.api_key`; `Bot Review` sessions use it for
   `linear_graphql` and never fall back to `LINEAR_API_KEY`.
 - `tracker.project_slug` can read from an environment variable such as
