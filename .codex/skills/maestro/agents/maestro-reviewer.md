@@ -190,10 +190,13 @@ Reply locations:
   follow-up, prerequisite, validation proof, or cleanup item, verify the
   artifact explains why it was created and that the reason is valid; verify the
   new issue's title, description, project, assignee, relations, blocker
-  direction, and whether validation/disposable issues have a durable relation
-  plus terminal cleanup state. If any field is wrong or missing, request
-  changes. If all fields are correct but the issue lacks the `symphony` label or
-  `To Do` state, request changes to set both so automatic scheduling can start.
+  direction, priority, and whether validation/disposable issues have a durable
+  relation plus terminal cleanup state. If any field is wrong or missing,
+  request changes. For true prerequisite blockers, require the blocker priority
+  to be at least the highest priority of the issue it blocks unless current
+  human feedback explicitly accepts lower priority. If all fields are correct
+  but the issue lacks the `symphony` label or `To Do` state, request changes to
+  set both so automatic scheduling can start.
   If that issue already blocks the reviewed issue, keep the reviewed issue
   unchanged/blocked and tell the human to schedule the blocker instead.
 - For spawned or related issues, classify by useful value before relation
