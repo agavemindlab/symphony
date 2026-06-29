@@ -157,6 +157,12 @@ Reply locations:
   `依据`, assume there is no waiver.
 - Drop resolved artifacts unless a current comment explicitly refers back to
   that prior round.
+- When `## Requirements` is awaiting review, compare it directly to the issue
+  description and human comments. Do not approve Requirements that silently
+  turn a broad delivery issue into a Spike, research, or docs-only task just
+  because the description says to "first" / "首先" do one part; require the
+  artifact to define the parent/subissue boundary or cite explicit human scope
+  approval for the narrower issue.
 - When `## Deployment` is awaiting review, derive the close test from the
   approved `## Requirements` acceptance criteria plus later human-approved
   scope or verification changes.
