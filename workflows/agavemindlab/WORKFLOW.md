@@ -22,6 +22,7 @@ polling:
 workspace:
   root: $SYMPHONY_WORKSPACE_ROOT
 hooks:
+  timeout_ms: 180000
   after_create: |
     set -e
     : "${SYMPHONY_WORKFLOW_DIR:?SYMPHONY_WORKFLOW_DIR is not set}"

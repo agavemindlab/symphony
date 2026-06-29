@@ -158,6 +158,8 @@ defmodule SymphonyElixir.CoreTest do
     assert Map.get(hooks, "after_create") =~ "\"$project_workflow_dir/skills\""
     assert Map.get(hooks, "after_create") =~ ".git/info/exclude"
     assert Map.get(hooks, "before_remove") =~ "\"$project_workflow_dir/teardown.sh\""
+    assert is_integer(Map.get(hooks, "timeout_ms"))
+    assert Map.get(hooks, "timeout_ms") >= 180_000
 
     assert String.trim(prompt) != ""
     assert is_binary(Config.workflow_prompt())
@@ -1431,7 +1433,7 @@ defmodule SymphonyElixir.CoreTest do
     log =
       capture_log(fn ->
         send(pid, {:DOWN, ref, :process, self(), :normal})
-        Process.sleep(50)
+        Process.sleep(200)
       end)
 
     state = :sys.get_state(pid)

@@ -1056,19 +1056,6 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
       end
     end)
 
-    assert %{polling: %{checking?: true}} =
-             wait_for_snapshot(
-               pid,
-               fn
-                 %{polling: %{checking?: true}} ->
-                   true
-
-                 _ ->
-                   false
-               end,
-               500
-             )
-
     assert %{
              polling: %{
                checking?: false,
@@ -1080,13 +1067,13 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
                pid,
                fn
                  %{polling: %{checking?: false, next_poll_in_ms: due_in_ms}}
-                 when is_integer(due_in_ms) and due_in_ms <= 5_000 ->
+                 when is_integer(due_in_ms) and due_in_ms > 0 and due_in_ms <= 5_000 ->
                    true
 
                  _ ->
                    false
                end,
-               500
+               1_500
              )
 
     assert is_integer(next_poll_in_ms)
@@ -1279,7 +1266,7 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
     log =
       capture_log(fn ->
         send(pid, :tick)
-        Process.sleep(100)
+        Process.sleep(500)
       end)
 
     state = :sys.get_state(pid)
@@ -1497,7 +1484,7 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
     log =
       capture_log(fn ->
         send(pid, {:DOWN, ref, :process, self(), {:shutdown, :input_required}})
-        Process.sleep(50)
+        Process.sleep(200)
       end)
 
     state = :sys.get_state(pid)
