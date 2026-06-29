@@ -4,10 +4,13 @@ defmodule SymphonyElixir.AgentRunner do
   """
 
   require Logger
-  alias SymphonyElixir.Codex.AppServer
-  alias SymphonyElixir.{Config, Linear.Issue, MaestroPreReview, PromptBuilder, SSH, Tracker, Workspace}
+  alias SymphonyElixir.Codex.{AppServer, DynamicTool}
+  alias SymphonyElixir.{Config, Linear.Issue, PromptBuilder, SSH, Tracker, Workspace}
+  alias SymphonyElixir.Linear.Client
 
   @stop_after_turn_marker Path.join([".symphony", "stop-after-turn"])
+  @bot_review_workspace_suffix "-bot-review"
+  @maestro_linear_api_key_env "MAESTRO_LINEAR_API_KEY"
 
   @type worker_host :: String.t() | nil
 
@@ -38,17 +41,20 @@ defmodule SymphonyElixir.AgentRunner do
 
   defp run_on_worker_host(issue, codex_update_recipient, opts, worker_host) do
     Logger.info("Starting worker attempt for #{issue_context(issue)} worker_host=#{worker_host_for_log(worker_host)}")
+    workspace_issue = workspace_issue_for_run(issue)
 
-    case Workspace.create_for_issue(issue, worker_host) do
+    case Workspace.create_for_issue(workspace_issue, worker_host) do
       {:ok, workspace} ->
         send_worker_runtime_info(codex_update_recipient, issue, worker_host, workspace)
 
         try do
-          with :ok <- Workspace.run_before_run_hook(workspace, issue, worker_host) do
+          with :ok <- Workspace.run_before_run_hook(workspace, issue, worker_host),
+               :ok <- maybe_prepare_bot_review_workspace(workspace, issue, worker_host) do
             run_codex_turns(workspace, issue, codex_update_recipient, opts, worker_host)
           end
         after
           Workspace.run_after_run_hook(workspace, issue, worker_host)
+          maybe_remove_bot_review_workspace(workspace, issue, worker_host, workspace_issue)
         end
 
       {:error, reason} ->
@@ -122,12 +128,7 @@ defmodule SymphonyElixir.AgentRunner do
     prompt = build_turn_prompt(issue, opts, turn_number, max_turns)
 
     with {:ok, turn_session} <-
-           AppServer.run_turn(
-             app_session,
-             prompt,
-             issue,
-             on_message: codex_message_handler(codex_update_recipient, issue)
-           ) do
+           AppServer.run_turn(app_session, prompt, issue, run_turn_opts(issue, codex_update_recipient, opts)) do
       Logger.info("Completed agent run for #{issue_context(issue)} session_id=#{turn_session[:session_id]} workspace=#{workspace} turn=#{turn_number}/#{max_turns}")
 
       continue_after_turn(context, issue, turn_number, turn_session)
@@ -163,8 +164,8 @@ defmodule SymphonyElixir.AgentRunner do
 
         :ok
 
-      {:done, refreshed_issue} ->
-        maybe_run_maestro_pre_review(refreshed_issue, context.codex_update_recipient, context.opts, context.worker_host)
+      {:done, _refreshed_issue} ->
+        :ok
 
       {:error, reason} ->
         {:error, reason}
@@ -300,67 +301,96 @@ defmodule SymphonyElixir.AgentRunner do
     Issue.routable?(issue, Config.settings!().tracker.required_labels)
   end
 
-  defp maybe_run_maestro_pre_review(%Issue{} = issue, codex_update_recipient, opts, worker_host) do
-    if human_review_issue?(issue) and issue_routable?(issue) do
-      runner = Keyword.get(opts, :maestro_pre_review_runner, &MaestroPreReview.run/2)
+  defp run_turn_opts(%Issue{} = issue, codex_update_recipient, opts) do
+    base_opts = [on_message: codex_message_handler(codex_update_recipient, issue)]
 
-      runner_opts = [
-        worker_host: worker_host,
-        on_message: codex_message_handler(codex_update_recipient, issue)
+    if bot_review_issue?(issue) do
+      Keyword.put(base_opts, :tool_executor, bot_review_tool_executor(opts))
+    else
+      base_opts
+    end
+  end
+
+  defp workspace_issue_for_run(%Issue{} = issue) do
+    if bot_review_issue?(issue) do
+      %{issue | identifier: bot_review_workspace_identifier(issue)}
+    else
+      issue
+    end
+  end
+
+  defp bot_review_workspace_identifier(%Issue{identifier: identifier}) when is_binary(identifier) and identifier != "" do
+    identifier <> @bot_review_workspace_suffix
+  end
+
+  defp bot_review_workspace_identifier(%Issue{id: id}) when is_binary(id) and id != "" do
+    id <> @bot_review_workspace_suffix
+  end
+
+  defp bot_review_workspace_identifier(_issue), do: "issue" <> @bot_review_workspace_suffix
+
+  defp maybe_prepare_bot_review_workspace(workspace, %Issue{} = issue, worker_host) do
+    if bot_review_issue?(issue), do: prepare_main_branch(workspace, worker_host), else: :ok
+  end
+
+  defp maybe_remove_bot_review_workspace(workspace, %Issue{} = issue, worker_host, workspace_issue) do
+    if bot_review_issue?(issue), do: Workspace.remove(workspace, worker_host, workspace_issue), else: :ok
+  end
+
+  defp prepare_main_branch(workspace, nil) do
+    case System.cmd("sh", ["-lc", prepare_main_branch_command()],
+           cd: workspace,
+           stderr_to_stdout: true
+         ) do
+      {_output, 0} -> :ok
+      {output, status} -> {:error, {:bot_review_main_branch_prepare_failed, status, output}}
+    end
+  end
+
+  defp prepare_main_branch(workspace, worker_host) when is_binary(worker_host) do
+    script =
+      [
+        "cd #{shell_escape(workspace)}",
+        prepare_main_branch_command()
       ]
+      |> Enum.join("\n")
 
-      start_maestro_pre_review(issue, runner, runner_opts)
+    case SSH.run(worker_host, script, stderr_to_stdout: true) do
+      {:ok, {_output, 0}} -> :ok
+      {:ok, {output, status}} -> {:error, {:bot_review_main_branch_prepare_failed, status, output}}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp prepare_main_branch_command do
+    """
+    set -e
+    base_branch="${SYMPHONY_BASE_BRANCH:-main}"
+    git rev-parse --is-inside-work-tree >/dev/null
+    if git remote get-url upstream >/dev/null 2>&1; then
+      git fetch upstream "$base_branch" --prune
+      git checkout -B "$base_branch" "upstream/$base_branch"
     else
-      :ok
+      git checkout "$base_branch"
+      git pull --ff-only origin "$base_branch"
+    fi
+    """
+  end
+
+  defp bot_review_tool_executor(opts) do
+    api_key = System.get_env(@maestro_linear_api_key_env)
+    linear_client = Keyword.get(opts, :linear_client, &Client.graphql/3)
+
+    fn tool, arguments ->
+      DynamicTool.execute(tool, arguments, api_key: api_key, linear_client: linear_client)
     end
   end
 
-  defp maybe_run_maestro_pre_review(_issue, _codex_update_recipient, _opts, _worker_host), do: :ok
-
-  defp start_maestro_pre_review(%Issue{} = issue, runner, runner_opts) when is_function(runner, 2) do
-    if MaestroPreReview.claim_handoff(issue) do
-      Task.Supervisor.async_nolink(SymphonyElixir.TaskSupervisor, fn ->
-        run_maestro_pre_review_task(issue, runner, runner_opts)
-      end)
-    else
-      Logger.info("Skipping duplicate Maestro pre-review for #{issue_context(issue)}")
-    end
-
-    :ok
-  rescue
-    exception ->
-      log_maestro_pre_review_failed(issue, Exception.message(exception))
-  catch
-    kind, reason ->
-      log_maestro_pre_review_failed(issue, {kind, reason})
+  defp bot_review_issue?(%Issue{state: state}) when is_binary(state) do
+    normalize_issue_state(state) == "bot review"
   end
 
-  defp run_maestro_pre_review_task(%Issue{} = issue, runner, runner_opts) do
-    case runner.(issue, runner_opts) do
-      :ok ->
-        :ok
-
-      {:error, reason} ->
-        log_maestro_pre_review_failed(issue, reason)
-    end
-  rescue
-    exception ->
-      log_maestro_pre_review_failed(issue, Exception.message(exception))
-  catch
-    kind, reason ->
-      log_maestro_pre_review_failed(issue, {kind, reason})
-  end
-
-  defp log_maestro_pre_review_failed(%Issue{} = issue, reason) do
-    Logger.warning("Maestro pre-review failed for #{issue_context(issue)}: #{inspect(reason)}")
-    :ok
-  end
-
-  defp human_review_issue?(%Issue{state: state}) when is_binary(state) do
-    normalize_issue_state(state) == "human review"
-  end
-
-  defp human_review_issue?(_issue), do: false
+  defp bot_review_issue?(_issue), do: false
 
   defp selected_worker_host(nil, []), do: nil
 

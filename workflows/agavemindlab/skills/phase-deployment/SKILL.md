@@ -196,7 +196,7 @@ not create a fix PR while `current_phase` remains Deployment.
 
 After posting or updating the `## Deployment` artifact:
 
-1. Move the issue back to `Human Review`.
+1. Move the issue back to `Bot Review`.
 2. Stop. Do **not** move the issue to `Done`.
 
 If Cross-phase rework opened an earlier phase, follow that phase's Exit instead

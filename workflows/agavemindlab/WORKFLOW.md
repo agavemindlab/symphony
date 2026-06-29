@@ -9,6 +9,7 @@ tracker:
   active_states:
     - Todo
     - In Progress
+    - Bot Review
     - Merging
     - Rework
   terminal_states:
@@ -195,19 +196,20 @@ The workflow progresses through four sequential phases. Each phase has a dedicat
 | Implementation | `phase-implementation` | Design approved |
 | Deployment | `phase-deployment` | Human approves merge (`Merging` state) |
 
-When the agent finishes **Requirements** or **Design** on a fresh run and is confident a human would very likely approve the artifact as-is, it **auto-advances** by closing the artifact, saving the next phase, leaving the issue `In Progress`, and ending this agent run; the next Symphony dispatch continues from that saved phase. If the artifact is complete but the agent is not confident, it stops for human review. See Main Flow step 6. **Implementation** always stops at `Human Review` (the PR is up), and **Deployment** is reachable only via `Merging`.
+When the agent finishes **Requirements** or **Design** on a fresh run and is confident a human would very likely approve the artifact as-is, it **auto-advances** by closing the artifact, saving the next phase, leaving the issue `In Progress`, and ending this agent run; the next Symphony dispatch continues from that saved phase. If the artifact is complete but the agent is not confident, it stops for bot pre-review before human review. See Main Flow step 6. **Implementation** always stops at `Bot Review` (the PR is up); Bot Review then sends the issue to `Human Review` or `Rework`. **Deployment** is reachable only via `Merging`.
 
-Most issues ship code through all four phases. A `Type:Spike` (investigation / research) issue is the exception: its deliverable is a documented decision, so it rides the same phases (Design becomes an investigation plan, Implementation produces a findings artifact) but normally terminates at `Human Review` after Implementation — the human moves it to `Done` without `Merging` / Deployment. See the phase skills' `Type:Spike` notes. A sub-issue inherits its parent's scope and acceptance criteria rather than re-deriving them (see `phase-requirements`).
+Most issues ship code through all four phases. A `Type:Spike` (investigation / research) issue is the exception: its deliverable is a documented decision, so it rides the same phases (Design becomes an investigation plan, Implementation produces a findings artifact) but normally reaches `Bot Review` after Implementation, then `Human Review` after pre-review — the human moves it to `Done` without `Merging` / Deployment. See the phase skills' `Type:Spike` notes. A sub-issue inherits its parent's scope and acceptance criteria rather than re-deriving them (see `phase-requirements`).
 
 ## Main Flow
 
-Symphony only starts the agent when the issue is in an active state (`Todo`, `In Progress`, `Merging`, `Rework`). Other states never reach this flow.
+Symphony only starts the agent when the issue is in an active state (`Todo`, `In Progress`, `Bot Review`, `Merging`, `Rework`). Other states never reach this flow.
 
 1. Open and follow `.agents/skills/symphony-linear/SKILL.md` to fetch the issue, its current Linear state, and its unresolved Phase artifacts.
 
 2. Ensure the feature branch exists and restore agent state:
    - Read the issue's `branchName` field from Linear.
-   - If already on that branch, continue. Otherwise check it out — preferring an existing branch on `origin`, then a local branch, then creating a new one from `upstream/${SYMPHONY_BASE_BRANCH:-main}`.
+   - If the issue is in `Bot Review`, keep the workspace on `upstream/${SYMPHONY_BASE_BRANCH:-main}` and do **not** check out the issue feature branch; this is the independent Maestro pre-review workspace.
+   - Otherwise, if already on the issue branch, continue. Otherwise check it out — preferring an existing branch on `origin`, then a local branch, then creating a new one from `upstream/${SYMPHONY_BASE_BRANCH:-main}`.
    - Restore the latest `Symphony agent state` Linear issue attachment into
      `.symphony/` when present. If no attachment exists, continue with a new
      workpad. Never require `.symphony/` to be tracked on the PR branch.
@@ -217,8 +219,51 @@ Symphony only starts the agent when the issue is in an active state (`Todo`, `In
 
 3. Route by Linear state:
    - `Todo` → move to `In Progress`, then continue as `In Progress`.
+   - `Bot Review` → run Bot Review protocol below, then stop.
    - `Merging` → the human approved the PR. Write an approval reply on `## Implementation`: `✅ 已批准，进入 Deployment（[timestamp]）`. Target phase = Deployment; go to step 6.
    - `In Progress`, `Rework` → determine the target phase via steps 4–5.
+
+### Bot Review protocol
+
+This state is the machine pre-review gate. It runs in a fresh Codex session on
+the project main branch and is the only place the workflow proactively invokes
+Maestro.
+
+1. Confirm the current state is still `Bot Review`; if it changed, stop without
+   commenting or changing state.
+2. Invoke `$maestro {{ issue.identifier }}` exactly once in this session. Do not
+   open phase skills, edit repository files, merge, deploy, or write phase-closing
+   replies.
+3. Re-read the current awaiting-review phase artifact. If that artifact thread
+   already has a `🤖 Maestro 预审核:` reply for the same current artifact/head,
+   move the issue to `Human Review` and stop.
+4. Apply the Maestro recommendation:
+   - `request changes` / `rework` → reply in the target artifact thread with
+     `🤖 Maestro 预审核:` plus the review, then move the issue to `Rework`.
+   - `approve` → reply in the awaiting artifact thread with
+     `🤖 Maestro 预审核:` plus the review, a `0-10` confidence score, and a short
+     Chinese confidence label; then move the issue to `Human Review`.
+   - ask clarification / no reply yet / merge nudge / completion confirmation /
+     unknown → reply with a short `🤖 Maestro 预审核:` no-action reason when there
+     is a safe target artifact thread, then move the issue to `Human Review`.
+5. Never write `✅ 已批准...`, `⏩ 自动进入...`, `Merging`, `Done`, or any
+   Deployment action from Bot Review. Human Review remains the human gate.
+
+### Bot Review runtime contract
+
+`Bot Review` is a required Linear team workflow state, not just prompt text.
+It must be created by a Linear workspace/team admin or workflow operator in the
+issue's target Linear team before any clean phase stop can depend on it.
+
+Before moving an issue to `Bot Review`, verify the team workflow state named `Bot Review`
+exists and is a non-terminal state. Use the same
+`IssueTeamStates` Linear query from `symphony-linear` and record the state id,
+name, and type as evidence in the phase artifact or rework summary. If `Bot Review` is missing,
+do not move the issue to `Bot Review`, do not request `Merging`, and do not
+treat the PR as independently mergeable. Keep the issue in `Human Review`,
+reply on the current artifact with an executable runbook for creating the state
+in that Linear team, and cite an existing prerequisite blocker or propose a
+`blocking` issue through `symphony-issue`.
 
 4. Gather the signals:
    - **Proposal-consent channel (run first, orthogonal to phase intent).** Scan unresolved `## 建议新建 issue` proposal comments for a new human reply in *their* thread, and fulfill via the `symphony-issue` skill's fulfill mode (consent → create the proposed issue + reply `已创建 ENG-123` + resolve the proposal comment; rejection → resolve as `已放弃`). This lives in a different comment thread than the phase artifacts, so it never collides with phase approval; fulfilling spawns here first keeps a single "approve phase + consent to a sub-issue" reply pair well-ordered. See the Spawning related issues section.
@@ -251,11 +296,15 @@ Symphony only starts the agent when the issue is in an active state (`Todo`, `In
 6. Set the workpad `current_phase` to the target phase and open the matching phase skill (per the Phase Map). The skill does its phase work, publishes its artifact through the Phase Artifact Protocol, and on a **clean** exit hands back one of two outcomes — the skill alone decides which (see its "Exit"); only the Requirements and Design skills ever choose `advance`:
 
    - **`advance`** → write the `⏩ 自动进入 [Next Phase]` reply on the just-posted artifact, set the workpad `current_phase` to the next phase, keep the issue in `In Progress`, persist the agent state, create `.symphony/stop-after-turn`, and stop this agent run. Do **not** open the next phase skill in this session; the next Symphony dispatch targets the saved phase.
-   - **`stop`** → move the issue to `Human Review` and stop.
+   - **`stop`** → apply the Bot Review runtime contract above; if the state
+     exists, move the issue to `Bot Review` and stop. The next fresh Bot Review
+     session runs Maestro and then moves the issue to `Human Review` or
+     `Rework`. If the state is missing, keep the issue in `Human Review` with
+     the runbook/blocker reply described above and stop.
 
    (A skill that stops **blocked** — unresolved `[NEEDS CLARIFICATION]` / escalated high-impact decision — moves the issue to `Human Review` itself; the session ends there.)
 
-   This is the only auto-advance mechanism, and Main Flow does not second-guess the skill's choice. A confident issue may progress Requirements → Design → Implementation across successive active dispatches, but the Implementation skill always returns `stop` (the PR awaits the human's merge decision), so the chain still ends at `Human Review`; Deployment is reached only via `Merging` (step 3).
+   This is the only auto-advance mechanism, and Main Flow does not second-guess the skill's choice. A confident issue may progress Requirements → Design → Implementation across successive active dispatches, but the Implementation skill always returns `stop` (the PR awaits the human's merge decision), so the chain reaches `Bot Review` and then `Human Review`; Deployment is reached only via `Merging` (step 3).
 
 ## Skill Interaction Protocol
 
@@ -415,7 +464,7 @@ work so a recreated workspace can recover it. Create a tarball of the cleanup
 paths, upload it with Linear `fileUpload`, and attach/link it to the issue with
 title `Symphony agent state (<branch>, <timestamp>)`. On resume, download the
 latest such attachment and unpack it into the workspace. Keep cleanup paths out
-of the PR branch index; before returning Implementation to `Human Review`,
+of the PR branch index; before returning Implementation to `Bot Review`,
 verify the PR diff contains none of them. If rework changes the workpad, upload
 a new Linear state attachment and refresh the PR branch separately. Do not
 create or update a Linear comment for state pointers; attachments metadata is
@@ -424,10 +473,13 @@ the state index.
 ## Guardrails
 
 - **Phase gating**: phase advancement is driven by human signals (Linear state + human words), with one exception — the agent may **auto-advance** a fresh, clean Requirements or Design phase (Main Flow step 6). A bot / automated PR review (e.g. `AUTOMATED_REVIEWER`) is never an approval or a phase-routing signal; its feedback is handled inside the Implementation PR feedback sweep.
-- **Auto-advance is upstream-only and confidence-gated**: only Requirements and Design may be auto-advanced, and only on a fresh, blocker-free run the agent judges a human would very likely approve as-is. Confidence — not formal completeness — is the gate; when in doubt, stop for review. A reworked phase, or one whose artifact already carries a human reply, always stops at `Human Review`. Implementation never auto-advances.
+- **Auto-advance is upstream-only and confidence-gated**: only Requirements and Design may be auto-advanced, and only on a fresh, blocker-free run the agent judges a human would very likely approve as-is. Confidence — not formal completeness — is the gate; when in doubt, stop for review. A reworked phase, or one whose artifact already carries a human reply, always stops at `Bot Review` unless it is blocked on a human clarification. Implementation never auto-advances.
 - **Deployment only via `Merging`**: the merge/deploy is irreversible and must be gated by the explicit `Merging` state. An approval of Implementation detected in any other state (e.g. `In Progress`) never triggers merge or opens `phase-deployment`.
 - **Deployment verification re-entry (no re-merge, no new state)**: acceptance criteria not confirmable at deploy time stay `⚠️ 待观察`; each pending item must say what event/action makes it checkable and what observable signal proves that happened. The human moves the issue back to `In Progress` only after that signal exists, so `phase-deployment` can finish them (step 5). Re-entry never re-merges, and introduces no extra Linear state.
-- **Agent never moves to `Done`**: only humans close the issue. After Deployment concludes, the agent posts a completion summary in the `## Deployment` artifact thread and returns the issue to `Human Review`.
-- **No phase advances without its artifact**: each phase must publish its artifact before moving to `Human Review`.
-- **`Human Review` is not an agent state**: Symphony does not start the agent there. Do not design any phase skill to act while the issue is in `Human Review`.
+- **Agent never moves to `Done`**: only humans close the issue. After Deployment concludes, the agent posts a completion summary in the `## Deployment` artifact thread and returns the issue to `Bot Review`.
+- **No phase advances without its artifact**: each phase must publish its artifact before moving to `Bot Review` or `Human Review`.
+- **`Human Review` is not an agent state**: Symphony does not start the agent there. `Bot Review` is the machine-review agent state; do not design any phase skill to act while the issue is in `Human Review`.
+- **`Bot Review` must exist in Linear**: if the target team lacks a `Bot Review`
+  workflow state, stop in `Human Review` with the runtime-contract runbook or
+  blocker proposal instead of pretending machine review can run.
 - **Out-of-scope improvements**: do not expand the current issue — spin off a separate ticket via the `symphony-issue` skill (see Spawning related issues). Every spawned issue lands in the team intake state, is assigned to the current issue's `creator` (never Symphony), and is never auto-worked. Flow-changing kinds (`blocking`, `sub-issue`) are only proposed and wait for human consent.

@@ -409,7 +409,10 @@ On `advance`, record `confidence: advance` in the workpad notes; Main Flow
 writes the `⏩` reply, sets `current_phase: Design`, persists state, and stops
 this agent run. The next Symphony dispatch opens `phase-design`.
 
-Otherwise choose **`stop`** — Main Flow moves the issue to `Human Review`.
+Otherwise choose **`stop`** — Main Flow moves the issue to `Bot Review` only
+after the workflow's Bot Review runtime contract confirms that Linear state
+exists; if it is missing, Main Flow keeps the issue in `Human Review` with the
+runbook/blocker reply.
 This is the right outcome for a rework, for a human already in the thread,
 for the `Rework` state, and for the **complete-but-not-confident** case: a
 key interpretation could reasonably go another way, or you resolved a
