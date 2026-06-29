@@ -83,7 +83,11 @@ Status recommendations:
 - Requirements / Design approve -> `In Progress`.
 - Implementation approve with a real PR and no prerequisite blocker ->
   `Merging`; for no-PR `Type:Spike` findings accepted -> `Done`.
-- Request changes -> `Rework`.
+- Request changes -> `Rework`, except when the reviewed issue is already
+  blocked by a prerequisite and the only actionable fix is on that blocker
+  issue or its scheduling metadata. In that case recommend `no reply yet` /
+  `unchanged`, set `回复对象` to `human`, `回复位置` to `none`, and draft the
+  human next step for making the blocker schedulable.
 - Ask clarification when the human answer is missing -> `unchanged`.
 - Human answer to an unresolved `[NEEDS CLARIFICATION]` already exists ->
   `In Progress`; this is a clarification answer already exists resume, not
@@ -184,6 +188,8 @@ Reply locations:
   plus terminal cleanup state. If any field is wrong or missing, request
   changes. If all fields are correct but the issue lacks the `symphony` label or
   `To Do` state, request changes to set both so automatic scheduling can start.
+  If that issue already blocks the reviewed issue, keep the reviewed issue
+  unchanged/blocked and tell the human to schedule the blocker instead.
 - For spawned or related issues, classify by useful value before relation
   direction. Operational work needed before write-capable acceptance or real use
   -- infra, secrets, protected environments, test users, data reset/seed, or
