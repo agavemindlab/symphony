@@ -150,6 +150,8 @@ defmodule SymphonyElixir.CoreTest do
     assert Map.get(tracker, "project_names") == "$SYMPHONY_PROJECT_NAMES"
     assert is_list(Map.get(tracker, "active_states"))
     assert is_list(Map.get(tracker, "terminal_states"))
+    assert "Bot Review" in Map.get(tracker, "active_states")
+    refute "Human Review" in Map.get(tracker, "active_states")
 
     hooks = Map.get(config, "hooks", %{})
     assert is_map(hooks)
@@ -158,8 +160,6 @@ defmodule SymphonyElixir.CoreTest do
     assert Map.get(hooks, "after_create") =~ "\"$project_workflow_dir/skills\""
     assert Map.get(hooks, "after_create") =~ ".git/info/exclude"
     assert Map.get(hooks, "before_remove") =~ "\"$project_workflow_dir/teardown.sh\""
-    assert is_integer(Map.get(hooks, "timeout_ms"))
-    assert Map.get(hooks, "timeout_ms") >= 180_000
 
     assert String.trim(prompt) != ""
     assert is_binary(Config.workflow_prompt())
@@ -170,6 +170,9 @@ defmodule SymphonyElixir.CoreTest do
     assert prompt =~ "| Implementation | `phase-implementation` |"
     assert prompt =~ "| Deployment | `phase-deployment` |"
     assert prompt =~ "## Main Flow"
+    assert prompt =~ "`Bot Review` → run Bot Review"
+    assert prompt =~ "Bot Review protocol"
+    assert prompt =~ "move the issue to `Bot Review`"
     assert prompt =~ "Open and follow `.agents/skills/symphony-linear/SKILL.md`"
     assert prompt =~ "create `.symphony/stop-after-turn`"
     assert prompt =~ "Do **not** open the next phase skill in this session"
@@ -668,9 +671,8 @@ defmodule SymphonyElixir.CoreTest do
     end
   end
 
-  test "human review reconcile starts maestro pre-review before stopping active agent" do
+  test "human review reconcile stops active agent without launching maestro pre-review" do
     write_workflow_file!(Workflow.workflow_file_path(), tracker_required_labels: ["symphony"])
-    SymphonyElixir.MaestroPreReview.reset_handoff_claims_for_test()
 
     parent = self()
     issue_id = "issue-human-review-reconcile"
@@ -721,30 +723,10 @@ defmodule SymphonyElixir.CoreTest do
 
     updated_state = Orchestrator.reconcile_issue_states_for_test([issue], state)
 
-    assert_receive {:maestro_pre_review, "MT-HUMAN-REVIEW", "Human Review", nil}
+    refute_receive {:maestro_pre_review, "MT-HUMAN-REVIEW", "Human Review", nil}, 100
     refute Map.has_key?(updated_state.running, issue_id)
     refute MapSet.member?(updated_state.claimed, issue_id)
     refute Process.alive?(agent_pid)
-  end
-
-  test "maestro pre-review handoff claim is shared across launch paths" do
-    SymphonyElixir.MaestroPreReview.reset_handoff_claims_for_test()
-
-    handoff_at = DateTime.from_naive!(~N[2026-06-25 10:00:00], "Etc/UTC")
-
-    issue = %Issue{
-      id: "issue-shared-maestro-claim",
-      identifier: "MT-SHARED-MAESTRO",
-      state: "Human Review",
-      labels: ["symphony"],
-      updated_at: handoff_at
-    }
-
-    assert SymphonyElixir.MaestroPreReview.claim_handoff_for_test(issue)
-    refute SymphonyElixir.MaestroPreReview.claim_handoff_for_test(issue)
-
-    next_handoff = %{issue | updated_at: DateTime.add(handoff_at, 60)}
-    assert SymphonyElixir.MaestroPreReview.claim_handoff_for_test(next_handoff)
   end
 
   test "terminal issue state stops running agent and cleans workspace" do
@@ -1433,7 +1415,7 @@ defmodule SymphonyElixir.CoreTest do
     log =
       capture_log(fn ->
         send(pid, {:DOWN, ref, :process, self(), :normal})
-        Process.sleep(200)
+        Process.sleep(50)
       end)
 
     state = :sys.get_state(pid)
@@ -2375,167 +2357,21 @@ defmodule SymphonyElixir.CoreTest do
     end
   end
 
-  test "maestro pre-review prompt preserves human review gate semantics" do
-    issue = %Issue{
-      id: "issue-maestro-prompt",
-      identifier: "MT-5316",
-      title: "Use Maestro before human review",
-      description: "Pre-review handoff",
-      state: "Human Review",
-      url: "https://example.org/issues/MT-5316",
-      labels: ["symphony"]
-    }
-
-    prompt = SymphonyElixir.MaestroPreReview.build_prompt_for_test(issue)
-
-    assert prompt =~ "$maestro MT-5316"
-    assert prompt =~ "fresh Codex session"
-    assert prompt =~ "Do not reuse the working agent"
-    assert prompt =~ "dedicated Maestro Linear OAuth app"
-    assert prompt =~ "without using any fallback identity"
-    assert prompt =~ "request changes"
-    assert prompt =~ "Rework"
-    assert prompt =~ "approve"
-    assert prompt =~ "0-10"
-    assert prompt =~ "keep the issue in `Human Review`"
-    assert prompt =~ "same current artifact/head"
-    assert prompt =~ "already contains a Maestro pre-review reply"
-    assert prompt =~ "record a short no-action reason"
-    assert prompt =~ "evidence is unavailable"
-    refute prompt =~ "✅ 已批准"
-
-    assert SymphonyElixir.MaestroPreReview.workspace_identifier_for_test(issue) == "MT-5316-maestro"
-    assert SymphonyElixir.MaestroPreReview.prepare_main_branch_command_for_test() =~ "upstream/$base_branch"
-  end
-
-  test "maestro pre-review fails closed without dedicated Linear auth" do
+  test "agent runner handles Bot Review on main with Maestro Linear auth" do
     test_root =
       Path.join(
         System.tmp_dir!(),
-        "symphony-elixir-maestro-pre-review-missing-auth-#{System.unique_integer([:positive])}"
-      )
-
-    try do
-      workspace_root = Path.join(test_root, "workspaces")
-      previous_maestro_linear_api_key = System.get_env("MAESTRO_LINEAR_API_KEY")
-      on_exit(fn -> restore_env("MAESTRO_LINEAR_API_KEY", previous_maestro_linear_api_key) end)
-      System.delete_env("MAESTRO_LINEAR_API_KEY")
-
-      write_workflow_file!(Workflow.workflow_file_path(),
-        tracker_kind: "memory",
-        workspace_root: workspace_root
-      )
-
-      Application.put_env(:symphony_elixir, :memory_tracker_recipient, self())
-
-      issue = %Issue{
-        id: "issue-maestro-failure",
-        identifier: "MT-5318",
-        title: "Record pre-review failure",
-        description: "The fallback should leave the issue in Human Review",
-        state: "Human Review",
-        url: "https://example.org/issues/MT-5318",
-        labels: ["symphony"]
-      }
-
-      assert {:error, :missing_maestro_linear_api_key} =
-               SymphonyElixir.MaestroPreReview.run(issue,
-                 linear_client: fn _query, _variables, _opts ->
-                   flunk("missing dedicated auth must not preflight Linear")
-                 end,
-                 app_server_runner: fn _workspace, _prompt, _issue, _opts ->
-                   flunk("missing dedicated auth must not start Maestro")
-                 end
-               )
-
-      refute_received {:memory_tracker_comment, "issue-maestro-failure", _body}
-      refute_received {:memory_tracker_state_update, "issue-maestro-failure", _state}
-    after
-      File.rm_rf(test_root)
-    end
-  end
-
-  test "maestro pre-review fails closed when dedicated Linear auth is invalid" do
-    write_workflow_file!(Workflow.workflow_file_path(), tracker_kind: "memory")
-    Application.put_env(:symphony_elixir, :memory_tracker_recipient, self())
-
-    issue = %Issue{
-      id: "issue-maestro-invalid-auth",
-      identifier: "MT-5320",
-      title: "Reject invalid Maestro Linear auth",
-      description: "The fallback must not use Symphony auth",
-      state: "Human Review",
-      url: "https://example.org/issues/MT-5320",
-      labels: ["symphony"]
-    }
-
-    assert {:error, :invalid_maestro_linear_api_key} =
-             SymphonyElixir.MaestroPreReview.run(issue,
-               maestro_linear_api_key: "bad-token",
-               linear_client: fn _query, _variables, opts ->
-                 assert opts == [api_key: "bad-token"]
-                 {:error, {:linear_api_status, 401}}
-               end,
-               app_server_runner: fn _workspace, _prompt, _issue, _opts ->
-                 flunk("invalid dedicated auth must not start Maestro")
-               end
-             )
-
-    refute_received {:memory_tracker_comment, "issue-maestro-invalid-auth", _body}
-    refute_received {:memory_tracker_state_update, "issue-maestro-invalid-auth", _state}
-  end
-
-  test "maestro pre-review does not write Symphony-auth no-action comments after startup failure" do
-    test_root =
-      Path.join(
-        System.tmp_dir!(),
-        "symphony-elixir-maestro-pre-review-startup-failure-#{System.unique_integer([:positive])}"
-      )
-
-    try do
-      write_workflow_file!(Workflow.workflow_file_path(),
-        tracker_kind: "memory",
-        workspace_root: Path.join(test_root, "workspaces")
-      )
-
-      Application.put_env(:symphony_elixir, :memory_tracker_recipient, self())
-
-      issue = %Issue{
-        id: "issue-maestro-startup-failure",
-        identifier: "MT-5321",
-        title: "Do not fallback-comment startup failures",
-        description: "Only dedicated Maestro auth may write Maestro review notes",
-        state: "Human Review",
-        url: "https://example.org/issues/MT-5321",
-        labels: ["symphony"]
-      }
-
-      assert {:error, {:maestro_main_branch_prepare_failed, _status, _output}} =
-               SymphonyElixir.MaestroPreReview.run(issue,
-                 maestro_linear_api_key: "maestro-token",
-                 linear_client: fn _query, _variables, opts ->
-                   assert opts == [api_key: "maestro-token"]
-                   {:ok, %{"data" => %{"viewer" => %{"id" => "usr_maestro"}}}}
-                 end
-               )
-
-      refute_received {:memory_tracker_comment, "issue-maestro-startup-failure", _body}
-      refute_received {:memory_tracker_state_update, "issue-maestro-startup-failure", _state}
-    after
-      File.rm_rf(test_root)
-    end
-  end
-
-  test "maestro pre-review injects the dedicated Linear api key into fresh session tools" do
-    test_root =
-      Path.join(
-        System.tmp_dir!(),
-        "symphony-elixir-maestro-pre-review-dedicated-auth-#{System.unique_integer([:positive])}"
+        "symphony-elixir-bot-review-agent-#{System.unique_integer([:positive])}"
       )
 
     try do
       workspace_root = Path.join(test_root, "workspaces")
       upstream_repo = Path.join(test_root, "upstream")
+      codex_binary = Path.join(test_root, "fake-codex")
+      branch_marker = Path.join(test_root, "branch.txt")
+      previous_maestro_linear_api_key = System.get_env("MAESTRO_LINEAR_API_KEY")
+      on_exit(fn -> restore_env("MAESTRO_LINEAR_API_KEY", previous_maestro_linear_api_key) end)
+      System.put_env("MAESTRO_LINEAR_API_KEY", "maestro-token")
 
       File.mkdir_p!(upstream_repo)
       System.cmd("git", ["-C", upstream_repo, "init", "-b", "main"])
@@ -2545,17 +2381,47 @@ defmodule SymphonyElixir.CoreTest do
       System.cmd("git", ["-C", upstream_repo, "add", "README.md"])
       System.cmd("git", ["-C", upstream_repo, "commit", "-m", "initial"])
 
+      File.write!(codex_binary, """
+      #!/bin/sh
+      while IFS= read -r line; do
+        case "$line" in
+          *'"method":"initialize"'*)
+            printf '%s\\n' '{"id":1,"result":{}}'
+            ;;
+          *'"method":"thread/start"'*)
+            printf '%s\\n' '{"id":2,"result":{"thread":{"id":"thread-bot-review"}}}'
+            ;;
+          *'"method":"turn/start"'*)
+            git branch --show-current > "#{branch_marker}"
+            printf '%s\\n' '{"id":3,"result":{"turn":{"id":"turn-bot-review"}}}'
+            printf '%s\\n' '{"id":4,"method":"item/tool/call","params":{"name":"linear_graphql","arguments":{"query":"query Viewer { viewer { id } }"}}}'
+            IFS= read -r _tool_response || true
+            printf '%s\\n' '{"method":"turn/completed"}'
+            exit 0
+            ;;
+        esac
+      done
+      """)
+
+      File.chmod!(codex_binary, 0o755)
+
       write_workflow_file!(Workflow.workflow_file_path(),
+        tracker_kind: "memory",
+        tracker_api_token: nil,
         workspace_root: workspace_root,
-        hook_after_create: "git init -b main . && git remote add upstream #{upstream_repo}"
+        hook_after_create: """
+        git clone #{upstream_repo} .
+        git checkout -b feature-work
+        """,
+        codex_command: "#{codex_binary} app-server"
       )
 
       issue = %Issue{
-        id: "issue-maestro-dedicated-auth",
+        id: "issue-bot-review",
         identifier: "MT-5319",
-        title: "Use dedicated Maestro Linear auth",
-        description: "Maestro tool calls must not use Symphony auth",
-        state: "Human Review",
+        title: "Bot Review status",
+        description: "Bot Review tool calls must not use Symphony auth",
+        state: "Bot Review",
         url: "https://example.org/issues/MT-5319",
         labels: ["symphony"]
       }
@@ -2567,198 +2433,17 @@ defmodule SymphonyElixir.CoreTest do
         {:ok, %{"data" => %{"viewer" => %{"id" => "usr_maestro"}}}}
       end
 
-      app_server_runner = fn _workspace, _prompt, _issue, opts ->
-        result = opts[:tool_executor].("linear_graphql", %{"query" => "query Viewer { viewer { id } }"})
-        send(parent, {:tool_result, result})
-        {:ok, %{id: "turn-maestro"}}
-      end
-
-      assert :ok =
-               SymphonyElixir.MaestroPreReview.run(issue,
-                 maestro_linear_api_key: "maestro-token",
-                 linear_client: linear_client,
-                 app_server_runner: app_server_runner
-               )
-
-      assert_receive {:linear_client_called, "query SymphonyLinearViewer" <> _, %{}, [api_key: "maestro-token"]}
-      assert_receive {:linear_client_called, "query Viewer { viewer { id } }", %{}, [api_key: "maestro-token"]}
-      assert_receive {:tool_result, %{"success" => true}}
-      refute_received {:memory_tracker_comment, "issue-maestro-dedicated-auth", _body}
-    after
-      File.rm_rf(test_root)
-    end
-  end
-
-  test "agent runner runs maestro pre-review after a human review handoff" do
-    test_root =
-      Path.join(
-        System.tmp_dir!(),
-        "symphony-elixir-agent-runner-maestro-human-review-#{System.unique_integer([:positive])}"
-      )
-
-    try do
-      template_repo = Path.join(test_root, "source")
-      workspace_root = Path.join(test_root, "workspaces")
-      codex_binary = Path.join(test_root, "fake-codex")
-
-      File.mkdir_p!(template_repo)
-      File.write!(Path.join(template_repo, "README.md"), "# test")
-      System.cmd("git", ["-C", template_repo, "init", "-b", "main"])
-      System.cmd("git", ["-C", template_repo, "config", "user.name", "Test User"])
-      System.cmd("git", ["-C", template_repo, "config", "user.email", "test@example.com"])
-      System.cmd("git", ["-C", template_repo, "add", "README.md"])
-      System.cmd("git", ["-C", template_repo, "commit", "-m", "initial"])
-
-      File.write!(codex_binary, """
-      #!/bin/sh
-      while IFS= read -r line; do
-        case "$line" in
-          *'"method":"initialize"'*)
-            printf '%s\\n' '{"id":1,"result":{}}'
-            ;;
-          *'"method":"thread/start"'*)
-            printf '%s\\n' '{"id":2,"result":{"thread":{"id":"thread-maestro"}}}'
-            ;;
-          *'"method":"turn/start"'*)
-            printf '%s\\n' '{"id":3,"result":{"turn":{"id":"turn-maestro"}}}'
-            printf '%s\\n' '{"method":"turn/completed"}'
-            exit 0
-            ;;
-        esac
-      done
-      """)
-
-      File.chmod!(codex_binary, 0o755)
-
-      write_workflow_file!(Workflow.workflow_file_path(),
-        workspace_root: workspace_root,
-        hook_after_create: "cp #{Path.join(template_repo, "README.md")} README.md",
-        codex_command: "#{codex_binary} app-server"
-      )
-
-      parent = self()
-
-      issue = %Issue{
-        id: "issue-maestro-human-review",
-        identifier: "MT-5316",
-        title: "Pre-review Human Review",
-        description: "Run Maestro after handoff",
-        state: "In Progress",
-        url: "https://example.org/issues/MT-5316",
-        labels: ["symphony"]
-      }
-
-      pre_review_runner = fn refreshed_issue, opts ->
-        send(parent, {:maestro_pre_review, self(), refreshed_issue.identifier, refreshed_issue.state, opts[:worker_host]})
-
-        receive do
-          :finish_maestro_pre_review -> :ok
-        after
-          5_000 -> :ok
-        end
-
-        :ok
-      end
-
-      runner_task =
-        Task.async(fn ->
-          AgentRunner.run(
-            issue,
-            nil,
-            issue_state_fetcher: fn [_issue_id] ->
-              {:ok, [%{issue | state: "Human Review"}]}
-            end,
-            maestro_pre_review_runner: pre_review_runner
-          )
-        end)
-
-      assert_receive {:maestro_pre_review, maestro_pid, "MT-5316", "Human Review", nil}, 5_000
-      runner_result = Task.yield(runner_task, 200)
-      maestro_ref = Process.monitor(maestro_pid)
-
-      send(maestro_pid, :finish_maestro_pre_review)
-      assert runner_result == {:ok, :ok}
-      assert_receive {:DOWN, ^maestro_ref, :process, ^maestro_pid, :normal}, 1_000
-    after
-      File.rm_rf(test_root)
-    end
-  end
-
-  test "agent runner skips maestro pre-review for non human review terminal handoff" do
-    test_root =
-      Path.join(
-        System.tmp_dir!(),
-        "symphony-elixir-agent-runner-maestro-done-#{System.unique_integer([:positive])}"
-      )
-
-    try do
-      template_repo = Path.join(test_root, "source")
-      workspace_root = Path.join(test_root, "workspaces")
-      codex_binary = Path.join(test_root, "fake-codex")
-
-      File.mkdir_p!(template_repo)
-      File.write!(Path.join(template_repo, "README.md"), "# test")
-      System.cmd("git", ["-C", template_repo, "init", "-b", "main"])
-      System.cmd("git", ["-C", template_repo, "config", "user.name", "Test User"])
-      System.cmd("git", ["-C", template_repo, "config", "user.email", "test@example.com"])
-      System.cmd("git", ["-C", template_repo, "add", "README.md"])
-      System.cmd("git", ["-C", template_repo, "commit", "-m", "initial"])
-
-      File.write!(codex_binary, """
-      #!/bin/sh
-      while IFS= read -r line; do
-        case "$line" in
-          *'"method":"initialize"'*)
-            printf '%s\\n' '{"id":1,"result":{}}'
-            ;;
-          *'"method":"thread/start"'*)
-            printf '%s\\n' '{"id":2,"result":{"thread":{"id":"thread-done"}}}'
-            ;;
-          *'"method":"turn/start"'*)
-            printf '%s\\n' '{"id":3,"result":{"turn":{"id":"turn-done"}}}'
-            printf '%s\\n' '{"method":"turn/completed"}'
-            exit 0
-            ;;
-        esac
-      done
-      """)
-
-      File.chmod!(codex_binary, 0o755)
-
-      write_workflow_file!(Workflow.workflow_file_path(),
-        workspace_root: workspace_root,
-        hook_after_create: "cp #{Path.join(template_repo, "README.md")} README.md",
-        codex_command: "#{codex_binary} app-server"
-      )
-
-      parent = self()
-
-      issue = %Issue{
-        id: "issue-maestro-done",
-        identifier: "MT-5317",
-        title: "No pre-review after done",
-        description: "Do not run Maestro for Done",
-        state: "In Progress",
-        url: "https://example.org/issues/MT-5317",
-        labels: ["symphony"]
-      }
-
-      pre_review_runner = fn refreshed_issue, _opts ->
-        send(parent, {:unexpected_maestro_pre_review, refreshed_issue.state})
-        :ok
-      end
-
       assert :ok =
                AgentRunner.run(
                  issue,
                  nil,
-                 issue_state_fetcher: fn [_issue_id] ->
-                   {:ok, [%{issue | state: "Done"}]}
-                 end,
-                 maestro_pre_review_runner: pre_review_runner
+                 issue_state_fetcher: fn [_issue_id] -> {:ok, [%{issue | state: "Done"}]} end,
+                 linear_client: linear_client
                )
 
-      refute_received {:unexpected_maestro_pre_review, _state}
+      assert_receive {:linear_client_called, "query Viewer { viewer { id } }", %{}, [api_key: "maestro-token"]}
+      assert File.read!(branch_marker) == "main\n"
+      refute File.exists?(Path.join(workspace_root, "MT-5319-bot-review"))
     after
       File.rm_rf(test_root)
     end

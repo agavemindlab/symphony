@@ -40,8 +40,9 @@ govern** and the doc is reconciled toward them. If the design doc itself reveals
 the approved design is actually wrong, that is a **cross-phase rework** (see
 below), never a silent deviation.
 
-Implementation never auto-advances: it always ends at `Human Review` with
-the PR up, and Deployment is reachable only via the `Merging` state.
+Implementation never auto-advances: it always ends at `Bot Review` with the
+PR up; Bot Review moves the issue to `Human Review` or `Rework`, and Deployment
+is reachable only via the `Merging` state.
 
 ## Type:Spike — findings, not a PR
 
@@ -53,8 +54,8 @@ recommended decision. TDD and local runtime acceptance apply only to throwaway
 code you write to learn (a prototype, a benchmark) — keep it on a scratch
 branch and do not treat it as production work. The PR/CI line is optional: cite
 a prototype branch or an ADR/docs PR if one exists, else omit it. Exit to
-`Human Review` as usual; for a no-PR spike the human moves the issue straight
-to `Done`. The rest of this skill (PR feedback sweep, Merge-gated Deployment)
+`Bot Review` as usual; for a no-PR spike Bot Review moves it to `Human Review`
+and the human moves the issue straight to `Done`. The rest of this skill (PR feedback sweep, Merge-gated Deployment)
 applies only when the spike actually produced a PR worth landing.
 
 If the workpad (`.symphony/workpad.md`) does not exist, create it with the
@@ -158,7 +159,7 @@ Markdown sections:
    push, and repeat until clean or explicitly recorded in `风险/注意`.
 10. **PR feedback sweep** — see protocol below.
 11. **Post artifact** — write the `## Implementation` artifact and move to
-   `Human Review`.
+   `Bot Review`.
 
 ## PR feedback sweep protocol
 
@@ -330,7 +331,7 @@ phase, and open the target phase skill.
 - PR pushed; PR checks green; PR linked on the issue.
 - PR feedback sweep complete: every substantive comment has a reply.
 - `## Implementation` artifact posted.
-- Issue moved to `Human Review`.
+- Issue moved to `Bot Review`.
 
 The human approves by moving the issue to `Merging`. On the next session,
 Main Flow writes the approval reply on this artifact and runs Deployment.

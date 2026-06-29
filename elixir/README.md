@@ -37,9 +37,9 @@ Linear issue can become a dispatch candidate again after restart.
    [Harness engineering](https://openai.com/index/harness-engineering/).
 2. Get a new personal token in Linear via Settings → Security & access → Personal API keys, and
    set it as the `LINEAR_API_KEY` environment variable.
-3. To enable Maestro pre-review after `Human Review` handoff, set `MAESTRO_LINEAR_API_KEY`
-   to a dedicated Maestro Linear OAuth app token. Do not reuse `LINEAR_API_KEY`; missing or invalid
-   Maestro auth safely skips the pre-review.
+3. To enable `Bot Review` pre-review, set `MAESTRO_LINEAR_API_KEY` to a dedicated
+   Maestro Linear OAuth app token. Do not reuse `LINEAR_API_KEY`; missing or invalid
+   Maestro auth makes Bot Review `linear_graphql` calls fail closed instead of falling back.
 4. Use a project workflow under [`../workflows/`](../workflows/). The shared
    `workflows/agavemindlab/WORKFLOW.md` and `skills/` entries are inherited by
    project directories through symlinks; replace a symlink with a real file or
@@ -187,8 +187,8 @@ Notes:
 - If a hook needs `mise exec` inside a freshly cloned workspace, trust the repo config and fetch
   the project dependencies in `hooks.after_create` before invoking `mise` later from other hooks.
 - `tracker.api_key` reads from `LINEAR_API_KEY` when unset or when value is `$LINEAR_API_KEY`.
-- `MAESTRO_LINEAR_API_KEY` is separate from `tracker.api_key`; Maestro pre-review uses it for
-  `linear_graphql` and never falls back to `LINEAR_API_KEY`.
+- `MAESTRO_LINEAR_API_KEY` is separate from `tracker.api_key`; `Bot Review` sessions use it for
+  `linear_graphql` and never fall back to `LINEAR_API_KEY`.
 - `tracker.project_slug` can read from an environment variable such as
   `$SYMPHONY_PROJECT_SLUG`.
 - `tracker.project_slugs` can read from a YAML list or from a comma-separated
