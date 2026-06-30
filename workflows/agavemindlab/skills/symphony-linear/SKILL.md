@@ -548,6 +548,23 @@ mutation FileUpload(
 }
 ```
 
+### Read Linear upload attachments
+
+Raw Linear upload URLs in issue descriptions or comments may return `401` even
+when this session is authenticated for Linear API calls. When the issue itself
+points to an upload you need to read, use the authenticated Linear CLI and keep
+its downloads inside the repo workspace:
+
+```sh
+mkdir -p .symphony/linear-tmp
+TMPDIR="$PWD/.symphony/linear-tmp" linear issue view DEV-123 --no-pager
+```
+
+The rendered issue output links downloaded files under
+`.symphony/linear-tmp/linear-cli-images/` or
+`.symphony/linear-tmp/linear-cli-attachments/`. Read only the issue-scoped files
+needed for the task, and do not stage or persist this temporary directory.
+
 ### Persist and restore Symphony agent state
 
 Use Linear attachments for agent-only files that must survive session loss but
@@ -557,10 +574,12 @@ frontmatter.
 
 Persist:
 
-1. Create a tarball containing agent state:
+1. Create a tarball containing only the agent-state files listed in the workpad
+   `cleanup` field, not the whole `.symphony/` directory. For the default
+   state files:
 
    ```sh
-   tar -czf /tmp/symphony-agent-state.tgz .symphony/
+   tar -czf /tmp/symphony-agent-state.tgz .symphony/workpad.md .symphony/design.md
    ```
 
 2. Upload it with `fileUpload` using filename
@@ -585,8 +604,10 @@ Restore:
    grep -qxF '.symphony/' .git/info/exclude || printf '\n.symphony/\n' >> .git/info/exclude
    ```
 
-Do not include secrets or credentials in state attachments. Keep the tarball
-limited to files listed in the workpad `cleanup` field.
+Do not include secrets or credentials in state attachments. Store
+human-provided issue-scoped secrets in `.issue-secrets/`, never under
+`.symphony/`, and keep the tarball limited to files listed in the workpad
+`cleanup` field.
 
 ## Usage rules
 
