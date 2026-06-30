@@ -53,6 +53,18 @@ defmodule SymphonyElixir.SymphonyRunTest do
     assert capture["CALLS"] == "exec -- mix escript.build|exec -- ./bin/symphony --i-understand-that-this-will-be-running-without-the-usual-guardrails #{capture["WORKFLOW"]}"
   end
 
+  test "passes configured port to the Symphony CLI" do
+    capture =
+      run_launcher!("grandline",
+        project_env: """
+        SYMPHONY_PROJECT_SLUGS="project-a"
+        SYMPHONY_PORT="4321"
+        """
+      )
+
+    assert capture["ARGS"] =~ " --port 4321 "
+  end
+
   test "Agavemindlab Linear project slugs use Linear slugId values" do
     expected_slugs = %{
       "gl-infra" => "02773795419d",

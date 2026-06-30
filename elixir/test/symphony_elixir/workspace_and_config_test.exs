@@ -1717,10 +1717,10 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       assert File.read!(Path.join([workspace, ".agents", "skills", "linear", "SKILL.md"])) == "repo version\n"
 
       exclude = File.read!(Path.join([workspace, ".git", "info", "exclude"]))
-      assert exclude =~ ".agents/skills/phase-implementation/"
-      assert exclude =~ ".agents/skills/symphony-commit/"
-      assert exclude =~ ".agents/skills/symphony-linear/"
-      refute exclude =~ ".agents/skills/linear/"
+      assert exclude =~ ".agents/skills/phase-implementation"
+      assert exclude =~ ".agents/skills/symphony-commit"
+      assert exclude =~ ".agents/skills/symphony-linear"
+      refute exclude =~ ".agents/skills/linear"
 
       assert {"", 0} = System.cmd("git", ["-C", workspace, "status", "--short"])
 
