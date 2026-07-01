@@ -163,6 +163,7 @@ defmodule SymphonyElixir.SymphonyRunTest do
       {"SYMPHONY_REPO", nil},
       {"SYMPHONY_BASE_BRANCH", nil},
       {"SYMPHONY_PROJECT_DIR", nil},
+      {"SYMPHONY_PORT", nil},
       {"SYMPHONY_MAESTRO_WORKSPACE_ROOT", nil},
       {"AUTOMATED_REVIEWER", nil}
     ]

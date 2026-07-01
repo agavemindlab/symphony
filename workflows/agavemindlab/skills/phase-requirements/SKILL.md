@@ -297,6 +297,8 @@ and runs once checkable (re-entered via `In Progress` — see your workflow inst
 ```md
 ## Requirements
 
+<用人话先说明结论和影响，再列证据。>
+
 Primary: Type:<Bug|Feature|Refactor|Performance|Migration|Chore|Spike|Other>
 
 要解决的问题（what）:
