@@ -146,7 +146,7 @@ rework below; use `⚠️ 待观察` only for checks that are not runnable yet.
 ```md
 ## Deployment
 
-<第一句先说人话：这轮结论是什么、为什么重要、需要 reviewer 批什么；不要从模板字段或元数据开始。>
+<用人话先说明结论和影响，再列证据。>
 
 **PR**: [#NNNN](URL) · **Merge commit**: [`<sha>`](URL) · **Deploy**: [pipeline](URL)
 
