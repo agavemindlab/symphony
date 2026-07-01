@@ -236,7 +236,9 @@ defmodule SymphonyElixir.CoreTest do
     assert prompt =~ ~r/invoke the `\$maestro` launcher or spawn a\s+subagent/
     assert prompt =~ ~r/this workflow session is\s+already the isolated reviewer/
     assert prompt =~ "fresh Codex session"
+    assert prompt =~ "fork_context=false"
     assert prompt =~ "upstream/${SYMPHONY_BASE_BRANCH:-main}"
+    assert prompt =~ ~r/checkout fails.*no-action reason/s
     assert prompt =~ ~r/Linear \/ GitHub \/\s+repository/
     assert prompt =~ "evidence"
     assert prompt =~ "review lenses, evidence requirements, and output schema"

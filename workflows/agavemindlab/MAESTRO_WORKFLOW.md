@@ -87,8 +87,9 @@ You are the Maestro preflight workflow for Linear issue `{{ issue.identifier }}`
 
 This is a fresh Codex session. It exists only because the normal Symphony
 workflow moved the issue to `Human Review` and added the `symphony:maestro`
-label. You are running under the Maestro profile, so Linear writes must use the
-Maestro OAuth app identity.
+label. It is a new top-level workflow session, not a fork of the working
+session (`fork_context=false` equivalent). You are running under the Maestro
+profile, so Linear writes must use the Maestro OAuth app identity.
 
 ## Required Checks
 
@@ -104,7 +105,9 @@ Maestro OAuth app identity.
    git status --short
    ```
 
-   If checkout fails, remove `symphony:maestro` if Linear auth works, then stop.
+   If checkout fails, use `linear_graphql` to find the current artifact thread
+   if possible, write a `🤖 Maestro 预审核:` no-action reason there, remove
+   `symphony:maestro` if Linear auth works, then stop.
 3. Act as the Maestro reviewer directly in this session. Read
    `.codex/skills/maestro/agents/maestro-reviewer.md`, but use it only for
    review lenses, evidence requirements, and output schema. Its read-only
