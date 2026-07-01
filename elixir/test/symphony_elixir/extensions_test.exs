@@ -320,6 +320,19 @@ defmodule SymphonyElixir.ExtensionsTest do
   end
 
   test "phoenix observability api preserves state, issue, and refresh responses" do
+    analytics_path = analytics_tmp_path("preserve-state-analytics.ndjson")
+    previous_analytics_file = Application.get_env(:symphony_elixir, :analytics_file)
+
+    on_exit(fn ->
+      if is_nil(previous_analytics_file) do
+        Application.delete_env(:symphony_elixir, :analytics_file)
+      else
+        Application.put_env(:symphony_elixir, :analytics_file, previous_analytics_file)
+      end
+    end)
+
+    Application.put_env(:symphony_elixir, :analytics_file, analytics_path)
+
     snapshot = static_snapshot()
     orchestrator_name = Module.concat(__MODULE__, :ObservabilityApiOrchestrator)
 
@@ -340,7 +353,10 @@ defmodule SymphonyElixir.ExtensionsTest do
     conn = get(build_conn(), "/api/v1/state")
     state_payload = json_response(conn, 200)
 
-    assert state_payload == %{
+    assert %{"event_sample_count" => 0, "panels" => analytics_panels} = state_payload["analytics"]
+    assert length(analytics_panels) == 6
+
+    assert Map.delete(state_payload, "analytics") == %{
              "generated_at" => state_payload["generated_at"],
              "counts" => %{"running" => 1, "retrying" => 1, "blocked" => 1},
              "running" => [
@@ -456,6 +472,65 @@ defmodule SymphonyElixir.ExtensionsTest do
 
     assert %{"queued" => true, "coalesced" => false, "operations" => ["poll", "reconcile"]} =
              json_response(conn, 202)
+  end
+
+  test "phoenix observability api includes the v1 analytics payload" do
+    path = analytics_tmp_path("state-analytics.ndjson")
+    previous_analytics_file = Application.get_env(:symphony_elixir, :analytics_file)
+
+    on_exit(fn ->
+      if is_nil(previous_analytics_file) do
+        Application.delete_env(:symphony_elixir, :analytics_file)
+      else
+        Application.put_env(:symphony_elixir, :analytics_file, previous_analytics_file)
+      end
+    end)
+
+    Application.put_env(:symphony_elixir, :analytics_file, path)
+
+    :ok =
+      SymphonyElixir.Analytics.record_event(
+        %{event_type: :run_completed, issue_id: "issue-http", issue_identifier: "MT-HTTP", runtime_seconds: 9},
+        path: path,
+        recorded_at: ~U[2026-06-15 10:10:00Z]
+      )
+
+    orchestrator_name = Module.concat(__MODULE__, :AnalyticsPayloadOrchestrator)
+
+    {:ok, _pid} =
+      StaticOrchestrator.start_link(
+        name: orchestrator_name,
+        snapshot: static_snapshot(),
+        refresh: %{
+          queued: true,
+          coalesced: false,
+          requested_at: DateTime.utc_now(),
+          operations: ["poll", "reconcile"]
+        }
+      )
+
+    start_test_endpoint(orchestrator: orchestrator_name, snapshot_timeout_ms: 50)
+
+    payload = json_response(get(build_conn(), "/api/v1/state"), 200)
+
+    assert %{
+             "event_sample_count" => 1,
+             "panels" => panels,
+             "data_quality" => %{"gaps" => gaps}
+           } = payload["analytics"]
+
+    assert length(panels) == 6
+
+    assert Enum.map(panels, & &1["id"]) == [
+             "delivery_cycle",
+             "autonomy_funnel",
+             "quality_rework",
+             "cost_per_accepted_issue",
+             "capacity_reliability",
+             "data_quality_exclusions"
+           ]
+
+    assert "GitHub review/CI data is not configured in v1" in gaps
   end
 
   test "phoenix observability api preserves 405, 404, and unavailable behavior" do
@@ -645,6 +720,71 @@ defmodule SymphonyElixir.ExtensionsTest do
     refute render(view) =~ "javascript:alert"
   end
 
+  test "dashboard liveview renders the v1 analytics panels" do
+    path = analytics_tmp_path("dashboard-analytics.ndjson")
+    previous_analytics_file = Application.get_env(:symphony_elixir, :analytics_file)
+
+    on_exit(fn ->
+      if is_nil(previous_analytics_file) do
+        Application.delete_env(:symphony_elixir, :analytics_file)
+      else
+        Application.put_env(:symphony_elixir, :analytics_file, previous_analytics_file)
+      end
+    end)
+
+    Application.put_env(:symphony_elixir, :analytics_file, path)
+
+    :ok =
+      SymphonyElixir.Analytics.record_event(
+        %{
+          event_type: :run_completed,
+          issue_id: "issue-http",
+          issue_identifier: "MT-HTTP",
+          runtime_seconds: 11,
+          tokens: %{input_tokens: 5, output_tokens: 3, total_tokens: 8}
+        },
+        path: path,
+        recorded_at: ~U[2026-06-15 10:20:00Z]
+      )
+
+    orchestrator_name = Module.concat(__MODULE__, :DashboardAnalyticsOrchestrator)
+
+    {:ok, _pid} =
+      StaticOrchestrator.start_link(
+        name: orchestrator_name,
+        snapshot: static_snapshot(),
+        refresh: %{
+          queued: true,
+          coalesced: false,
+          requested_at: DateTime.utc_now(),
+          operations: ["poll"]
+        }
+      )
+
+    start_test_endpoint(orchestrator: orchestrator_name, snapshot_timeout_ms: 50)
+
+    {:ok, _view, html} = live(build_conn(), "/")
+
+    assert html =~ "Efficiency Analytics"
+
+    for title <- [
+          "Delivery Cycle",
+          "Autonomy Funnel",
+          "Quality / Rework",
+          "Cost Per Accepted Issue",
+          "Capacity / Reliability",
+          "Data Quality / Exclusions"
+        ] do
+      assert html =~ title
+    end
+
+    assert html =~ "Can accepted issues move faster with the current persisted signals?"
+    assert html =~ "Direct (可直接展示)"
+    assert html =~ "Partial (可展示但样本不足)"
+    assert html =~ "Gap (仅展示数据质量/缺口)"
+    assert html =~ "GitHub review/CI data is not configured in v1"
+  end
+
   test "dashboard liveview renders an unavailable state without crashing" do
     start_test_endpoint(
       orchestrator: Module.concat(__MODULE__, :MissingDashboardOrchestrator),
@@ -730,6 +870,18 @@ defmodule SymphonyElixir.ExtensionsTest do
 
     Application.put_env(:symphony_elixir, SymphonyElixirWeb.Endpoint, endpoint_config)
     start_supervised!({SymphonyElixirWeb.Endpoint, []})
+  end
+
+  defp analytics_tmp_path(name) do
+    root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-extensions-analytics-#{System.unique_integer([:positive])}"
+      )
+
+    File.mkdir_p!(root)
+    on_exit(fn -> File.rm_rf(root) end)
+    Path.join(root, name)
   end
 
   defp static_snapshot do

@@ -756,8 +756,8 @@ An issue is dispatch-eligible only if all are true:
 - It is not already in `claimed`.
 - Global concurrency slots are available.
 - Per-state concurrency slots are available.
-- Blocker rule for `Todo` state passes:
-  - If the issue state is `Todo`, do not dispatch when any blocker is non-terminal.
+- Blocker rule passes:
+  - Do not dispatch an active issue when any blocker is non-terminal.
 
 Sorting order (stable intent):
 
@@ -1336,6 +1336,10 @@ SHOULD return:
   - `total_tokens`
   - `seconds_running` (aggregate runtime seconds as of snapshot time, including active sessions)
 - `rate_limits` (latest coding-agent rate limit payload, if available)
+- `analytics` (optional persisted-efficiency summary), when implemented:
+  - SHOULD identify direct, partial, and missing data sources
+  - SHOULD keep GitHub/Linear-derived metrics separate from runtime-derived metrics unless the data
+    source is actually collected
 
 RECOMMENDED snapshot error modes:
 
@@ -2030,8 +2034,8 @@ Unless otherwise noted, Sections 17.1 through 17.7 are `Core Conformance`. Bulle
 ### 17.4 Orchestrator Dispatch, Reconciliation, and Retry
 
 - Dispatch sort order is priority then oldest creation time
-- `Todo` issue with non-terminal blockers is not eligible
-- `Todo` issue with terminal blockers is eligible
+- Active issue with non-terminal blockers is not eligible
+- Active issue with terminal blockers is eligible
 - Active-state issue refresh updates running entry state
 - Non-active state stops running agent without workspace cleanup
 - Terminal state stops running agent and cleans workspace
@@ -2144,8 +2148,7 @@ Use the same validation profiles as Section 17:
 - `linear_graphql` client-side tool extension exposes raw Linear GraphQL access through the
   app-server session using configured Symphony auth or an explicit host-bound token.
 - TODO: Persist retry queue and session metadata across process restarts.
-- TODO: Make observability settings configurable in workflow front matter without prescribing UI
-  implementation details.
+- TODO: Define analytics retention and optional Linear/GitHub aggregation jobs beyond runtime events.
 - TODO: Add first-class tracker write APIs (comments/state transitions) in the orchestrator instead
   of only via agent tools.
 - TODO: Add pluggable issue tracker adapters beyond Linear.

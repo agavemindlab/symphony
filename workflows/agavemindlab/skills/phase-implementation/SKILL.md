@@ -49,13 +49,14 @@ For a `Type:Spike` issue the deliverable is the **findings / recommendation**,
 not shipped code. Carry out the investigation plan from `## Design`, then write
 a findings artifact in place of the normal `## Implementation` artifact:
 state each Requirements question's answer, the evidence backing it, and the
-recommended decision. TDD and local runtime acceptance apply only to throwaway
-code you write to learn (a prototype, a benchmark) — keep it on a scratch
-branch and do not treat it as production work. The PR/CI line is optional: cite
-a prototype branch or an ADR/docs PR if one exists, else omit it. Exit to
-`Human Review` as usual; for a no-PR spike the human moves the issue straight
-to `Done`. The rest of this skill (PR feedback sweep, Merge-gated Deployment)
-applies only when the spike actually produced a PR worth landing.
+recommended decision. Open with that answer in plain language; do not lead with
+PR metadata. TDD and local runtime acceptance apply only to throwaway code you
+write to learn (a prototype, a benchmark) — keep it on a scratch branch and do
+not treat it as production work. The PR/CI line is optional: cite a prototype
+branch or an ADR/docs PR if one exists, else omit it. Exit to `Human Review` as
+usual; for a no-PR spike the human moves the issue straight to `Done`. The rest
+of this skill (PR feedback sweep, Merge-gated Deployment) applies only when the
+spike actually produced a PR worth landing.
 
 If the workpad (`.symphony/workpad.md`) does not exist, create it with the
 template from your workflow instructions. If this run is a rework of `## Implementation`
@@ -84,6 +85,8 @@ same-phase Rework cycle in your workflow instructions when re-posting the artifa
   instead of expanding this issue.
 - `verification-before-completion` (superpowers) — gate before claiming work
   is done.
+- `review` (gstack) — pre-landing PR review; for ORM / migration changes,
+  include index / query-path minimality in the review.
 
 If a skill genuinely does not apply (e.g. no new behavior to test-drive),
 record `Skipped <skill>: <reason>` in workpad `notes`.
@@ -151,8 +154,11 @@ Markdown sections:
    is impossible, record the reason and closest safe alternative proof; surface
    the caveat in the artifact `风险/注意`.
 8. **Verify** — invoke `verification-before-completion`.
-9. **PR feedback sweep** — see protocol below.
-10. **Post artifact** — write the `## Implementation` artifact and move to
+9. **Pre-landing review** — invoke `review` (gstack) on the branch / PR diff.
+   Treat findings as Implementation feedback: fix, rerun validation, commit,
+   push, and repeat until clean or explicitly recorded in `风险/注意`.
+10. **PR feedback sweep** — see protocol below.
+11. **Post artifact** — write the `## Implementation` artifact and move to
    `Human Review`.
 
 ## PR feedback sweep protocol
@@ -191,6 +197,11 @@ comfort.
 
 <一句话说明本轮是否已准备好 review / rework / merge，点名 PR，并给出建议动作。>
 
+### Root cause / recommendation（根因/结论）
+
+<用中文说明 accepted root cause / chosen approach。讲清楚为什么这个改动能解决
+问题；Type:Spike 写 findings/recommendation。不要把 PR 状态、验证输出和根因混在同一段。>
+
 ### 本轮变化
 
 - `path/file`: <中文说明该文件改了什么和为什么>
@@ -199,6 +210,8 @@ comfort.
 ### Rework 已回应（omit if not rework）
 
 - Source comment: <Linear / GitHub feedback URL>
+- Current-main compatibility: <当前 head 是否已刷新到 current `main`，以及
+  mergeability / 冲突状态；完整 git hygiene 放在 `>>> 🔎 审计证据`>
 - <逐条说明旧证据、旧 head、旧假设或 reviewer feedback 如何被替换 / 回应>
 
 ### 验证结论
@@ -228,8 +241,8 @@ comfort.
 
 ### Human action needed
 
-> 👉 **需要人工处理**：审查 PR；无异议请将 issue 移至 `Merging`，需要修改则移至
-> `Rework`。
+> 👉 **需要人工处理**：<正常审查：审查 PR；无异议请将 issue 移至 `Merging`，需要修改则移至 `Rework`。>
+> - 若 blocked：写成可执行 runbook，包含操作系统/账号/项目/workspace、要配置的 key/权限/变量及类型或 sensitive 标记、secret 值从哪里取得或生成但不贴值、配置后如何重跑验证、通过判据。
 
 ### 风险/注意（optional: non-merge caveats only）
 
@@ -292,8 +305,13 @@ genuinely refuses you) — never an assumption.
 
 Only after a real, captured failure with no in-session workaround, write a
 blocker description in the workpad `notes` covering: what is missing; the exact
-command + error proving it; why it blocks acceptance; exact human action to
-unblock.
+command + error proving it; why it blocks acceptance; and a runbook detailed
+enough that a human, or an authorized agent, can unblock it without redoing
+research. Before handoff, inspect the repo, PR, configured services, and public
+docs needed to identify where and how to perform the operation. For secrets,
+name the source or generation path, never the value. If the operation is still
+unclear after that research, ask `[NEEDS CLARIFICATION]` instead of writing a
+vague blocker.
 
 Reflect this in the artifact's `风险/注意` and include:
 ```
