@@ -353,6 +353,55 @@ mutation MoveIssueToState($id: String!, $stateId: String!) {
 }
 ```
 
+### Add or remove an issue label
+
+Use this before the clean phase handoff to add `maestro-preflight`, and in
+`MAESTRO_WORKFLOW.md` cleanup to remove it. Read current issue labels and team
+labels first. If the team label does not exist, try creating it; if Linear
+returns a permission error, stop blocked with that captured error and do not
+move to `Human Review` without the label.
+
+```graphql
+query IssueAndTeamLabels($issueId: String!, $afterIssue: String, $afterTeam: String) {
+  issue(id: $issueId) {
+    team {
+      id
+      labels(first: 100, after: $afterTeam) {
+        nodes { id name }
+        pageInfo { hasNextPage endCursor }
+      }
+    }
+    labels(first: 100, after: $afterIssue) {
+      nodes { id name }
+      pageInfo { hasNextPage endCursor }
+    }
+  }
+}
+```
+
+```graphql
+mutation CreateIssueLabel($teamId: String!, $name: String!) {
+  issueLabelCreate(input: { teamId: $teamId, name: $name }) {
+    success
+    issueLabel { id name }
+  }
+}
+```
+
+```graphql
+mutation SetIssueLabels($issueId: String!, $labelIds: [String!]) {
+  issueUpdate(id: $issueId, input: { labelIds: $labelIds }) {
+    success
+    issue { id }
+  }
+}
+```
+
+For add: set `labelIds` to current ids plus the target label id, de-duped. For
+remove: set `labelIds` to current ids except the target label id. Add
+`maestro-preflight` before moving the issue to `Human Review`; remove it after
+the Maestro workflow writes or skips its preflight result.
+
 ### Attach a GitHub PR to an issue
 
 Use the GitHub-specific attachment mutation when linking a PR:

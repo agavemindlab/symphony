@@ -25,13 +25,19 @@ else
 fi
 
 workflow_dir="$repo_root/workflows/$project"
-workflow_file="$workflow_dir/WORKFLOW.md"
-if [ -L "$workflow_file" ]; then
-  link_target="$(readlink "$workflow_file")"
+workflow_name="${SYMPHONY_WORKFLOW_FILE:-WORKFLOW.md}"
+case "$workflow_name" in
+  ""|*/*) die "SYMPHONY_WORKFLOW_FILE must be a file name, got: $workflow_name" ;;
+esac
+
+default_workflow_file="$workflow_dir/WORKFLOW.md"
+if [ -L "$default_workflow_file" ]; then
+  link_target="$(readlink "$default_workflow_file")"
   namespace="$(basename "$(dirname "$link_target")")"
 else
   namespace="$project"
 fi
+workflow_file="$workflow_dir/$workflow_name"
 defaults_env="$repo_root/workflows/$namespace/project.env.defaults"
 project_env="$workflow_dir/project.env"
 local_env="$workflow_dir/project.env.local"
@@ -78,6 +84,7 @@ SYMPHONY_PROFILE="$selected_profile"
 
 export GH_PROMPT_DISABLED="${GH_PROMPT_DISABLED:-true}"
 export SYMPHONY_WORKSPACE_ROOT="${SYMPHONY_WORKSPACE_ROOT:-$HOME/symphony-workspaces}"
+export SYMPHONY_MAESTRO_WORKSPACE_ROOT="${SYMPHONY_MAESTRO_WORKSPACE_ROOT:-$SYMPHONY_WORKSPACE_ROOT-maestro}"
 export SYMPHONY_PROFILE
 
 printf 'symphony-run: starting project=%s profile=%s workflow=%s logs=%s\n' \
