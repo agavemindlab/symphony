@@ -112,23 +112,37 @@ defmodule SymphonyElixir.AnalyticsTest do
              "data_quality_exclusions"
            ]
 
+    assert Enum.all?(summary.panels, &(is_binary(&1.question) and &1.question != ""))
+
+    assert Enum.all?(summary.panels, fn panel ->
+             Enum.all?(panel.metrics, &(&1.status in ["direct", "partial", "gap"]))
+           end)
+
+    assert %{question: "Can accepted issues move faster with the current persisted signals?"} =
+             panel(summary, "delivery_cycle")
+
     assert %{status: "direct", metrics: cost_metrics} =
              panel(summary, "cost_per_accepted_issue")
 
-    assert %{label: "Runtime seconds", value: 42} in cost_metrics
-    assert %{label: "Total tokens", value: 14} in cost_metrics
+    assert %{label: "Runtime seconds", value: 42, status: "partial"} in cost_metrics
+    assert %{label: "Total tokens", value: 14, status: "partial"} in cost_metrics
 
     assert %{status: "partial", metrics: autonomy_metrics} =
              panel(summary, "autonomy_funnel")
 
-    assert %{label: "Phase events", value: 1} in autonomy_metrics
+    assert %{label: "Phase events", value: 1, status: "direct"} in autonomy_metrics
+
+    assert %{status: "gap", metrics: quality_metrics} =
+             panel(summary, "quality_rework")
+
+    assert %{label: "PR review quality", value: "GitHub review/CI data gap", status: "gap"} in quality_metrics
 
     assert %{status: "direct", metrics: capacity_metrics} =
              panel(summary, "capacity_reliability")
 
-    assert %{label: "Retry events", value: 1} in capacity_metrics
-    assert %{label: "Blocked events", value: 1} in capacity_metrics
-    assert %{label: "Effective capacity", value: 12} in capacity_metrics
+    assert %{label: "Retry events", value: 1, status: "partial"} in capacity_metrics
+    assert %{label: "Blocked events", value: 1, status: "partial"} in capacity_metrics
+    assert %{label: "Effective capacity", value: 12, status: "partial"} in capacity_metrics
 
     assert "GitHub review/CI data is not configured in v1" in summary.data_quality.gaps
   end
@@ -167,9 +181,9 @@ defmodule SymphonyElixir.AnalyticsTest do
       |> Analytics.summary()
       |> panel("cost_per_accepted_issue")
 
-    assert %{label: "Total tokens", value: 9} in cost_metrics
-    assert %{label: "Input tokens", value: 6} in cost_metrics
-    assert %{label: "Output tokens", value: 3} in cost_metrics
+    assert %{label: "Total tokens", value: 9, status: "partial"} in cost_metrics
+    assert %{label: "Input tokens", value: 6, status: "partial"} in cost_metrics
+    assert %{label: "Output tokens", value: 3, status: "partial"} in cost_metrics
   end
 
   test "handles best-effort write and timestamp edge cases" do
@@ -224,22 +238,6 @@ defmodule SymphonyElixir.AnalyticsTest do
                         path: Path.join(not_a_directory, "events.ndjson")
                       )
            end) =~ "Failed to create analytics directory"
-
-    write_only_path = tmp_path("write-only-events.ndjson")
-    File.write!(write_only_path, "")
-    File.chmod!(write_only_path, 0o200)
-
-    try do
-      assert capture_log(fn ->
-               assert :ok =
-                        Analytics.record_event(
-                          %{event_type: :run_started},
-                          path: write_only_path
-                        )
-             end) =~ "Failed to retain analytics event file"
-    after
-      File.chmod!(write_only_path, 0o600)
-    end
   end
 
   test "reads truncated windows and reports unreadable files" do
@@ -261,8 +259,8 @@ defmodule SymphonyElixir.AnalyticsTest do
              |> Analytics.summary()
              |> panel("cost_per_accepted_issue")
 
-    assert %{label: "Runtime seconds", value: 4} in cost_metrics
-    assert %{label: "Total tokens", value: 1} in cost_metrics
+    assert %{label: "Runtime seconds", value: 4, status: "partial"} in cost_metrics
+    assert %{label: "Total tokens", value: 1, status: "partial"} in cost_metrics
 
     unreadable_path = tmp_path("unreadable.ndjson")
     File.write!(unreadable_path, "{}\n")
@@ -278,7 +276,7 @@ defmodule SymphonyElixir.AnalyticsTest do
     end
   end
 
-  test "retains a bounded analytics event file on write" do
+  test "keeps analytics event files append-only and bounds reads" do
     path = tmp_path("retained-events.ndjson")
 
     1..505
@@ -291,14 +289,36 @@ defmodule SymphonyElixir.AnalyticsTest do
     end)
 
     lines = path |> File.read!() |> String.split("\n", trim: true)
-    assert length(lines) == 500
+    assert length(lines) == 505
 
     assert %{
              events: [%{"issue_id" => "issue-6"} | _] = events,
+             truncated?: true
+           } = Analytics.read_events(path: path)
+
+    assert List.last(events)["issue_id"] == "issue-505"
+
+    assert %{
+             events: [%{"issue_id" => "issue-1"} | all_events],
              truncated?: false
            } = Analytics.read_events(path: path, max_events: :all)
 
-    assert List.last(events)["issue_id"] == "issue-505"
+    assert length(all_events) == 504
+
+    assert "Analytics event file was truncated to the latest window" in Analytics.summary(path: path).data_quality.gaps
+  end
+
+  test "bounded reads do not scan old bytes outside the latest window" do
+    path = tmp_path("large-events.ndjson")
+    latest = Jason.encode!(%{event_type: :run_started, issue_id: "latest"})
+
+    File.write!(path, <<255>> <> String.duplicate("x", 70_000) <> "\n" <> latest <> "\n")
+
+    assert %{
+             events: [%{"event_type" => "run_started", "issue_id" => "latest"}],
+             warnings: [],
+             truncated?: true
+           } = Analytics.read_events(path: path, max_events: 1)
   end
 
   test "serializes analytics writes with a filesystem lock" do

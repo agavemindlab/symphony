@@ -7,7 +7,17 @@ defmodule SymphonyElixir.Orchestrator do
   require Logger
   import Bitwise, only: [<<<: 2]
 
-  alias SymphonyElixir.{AgentRunner, Analytics, Config, IssueRunHook, StatusDashboard, Tracker, Workspace}
+  alias SymphonyElixir.{
+    AgentRunner,
+    Analytics,
+    Config,
+    IssueRunHook,
+    MaestroPreReview,
+    StatusDashboard,
+    Tracker,
+    Workspace
+  }
+
   alias SymphonyElixir.Linear.Issue
 
   @continuation_retry_delay_ms 1_000
@@ -446,6 +456,7 @@ defmodule SymphonyElixir.Orchestrator do
       true ->
         Logger.info("Issue moved to non-active state: #{issue_context(issue)} state=#{issue.state}; stopping active agent")
 
+        maybe_start_maestro_pre_review(issue, state)
         terminate_running_issue(state, issue.id, false, "non_active_state")
     end
   end
@@ -559,6 +570,54 @@ defmodule SymphonyElixir.Orchestrator do
       _ ->
         state
     end
+  end
+
+  defp maybe_start_maestro_pre_review(%Issue{} = issue, %State{} = state) do
+    if human_review_issue?(issue) and issue_routable?(issue) do
+      runner = Map.get(state, :maestro_pre_review_runner, &MaestroPreReview.run/2)
+      worker_host = get_in(state.running, [issue.id, :worker_host])
+      start_maestro_pre_review(issue, runner, worker_host)
+    end
+
+    :ok
+  end
+
+  defp maybe_start_maestro_pre_review(_issue, _state), do: :ok
+
+  defp start_maestro_pre_review(%Issue{} = issue, runner, worker_host) when is_function(runner, 2) do
+    if MaestroPreReview.claim_handoff(issue) do
+      Task.Supervisor.async_nolink(SymphonyElixir.TaskSupervisor, fn ->
+        run_maestro_pre_review_task(issue, runner, worker_host)
+      end)
+    else
+      Logger.info("Skipping duplicate Maestro pre-review for #{issue_context(issue)}")
+    end
+
+    :ok
+  rescue
+    exception ->
+      log_maestro_pre_review_failed(issue, Exception.message(exception))
+  catch
+    kind, reason ->
+      log_maestro_pre_review_failed(issue, {kind, reason})
+  end
+
+  defp run_maestro_pre_review_task(%Issue{} = issue, runner, worker_host) do
+    case runner.(issue, worker_host: worker_host) do
+      :ok -> :ok
+      {:error, reason} -> log_maestro_pre_review_failed(issue, reason)
+    end
+  rescue
+    exception ->
+      log_maestro_pre_review_failed(issue, Exception.message(exception))
+  catch
+    kind, reason ->
+      log_maestro_pre_review_failed(issue, {kind, reason})
+  end
+
+  defp log_maestro_pre_review_failed(%Issue{} = issue, reason) do
+    Logger.warning("Maestro pre-review failed for #{issue_context(issue)}: #{inspect(reason)}")
+    :ok
   end
 
   defp terminate_running_issue(%State{} = state, issue_id, cleanup_workspace, reason) do
@@ -880,14 +939,22 @@ defmodule SymphonyElixir.Orchestrator do
          active_states,
          terminal_states
        ) do
-    candidate_issue?(issue, active_states, terminal_states) and
-      !todo_issue_blocked_by_non_terminal?(issue, terminal_states) and
-      !MapSet.member?(claimed, issue.id) and
-      !Map.has_key?(running, issue.id) and
-      !Map.has_key?(blocked, issue.id) and
-      available_slots(state) > 0 and
-      state_slots_available?(issue, state) and
-      worker_slots_available?(state)
+    cond do
+      !candidate_issue?(issue, active_states, terminal_states) ->
+        false
+
+      issue_blocked_by_non_terminal?(issue, terminal_states) ->
+        Logger.info("Skipping dispatch candidate blocked by Linear relation: #{issue_context(issue)} state=#{inspect(issue.state)} blocked_by=#{length(issue.blocked_by)}")
+        false
+
+      true ->
+        !MapSet.member?(claimed, issue.id) and
+          !Map.has_key?(running, issue.id) and
+          !Map.has_key?(blocked, issue.id) and
+          available_slots(state) > 0 and
+          state_slots_available?(issue, state) and
+          worker_slots_available?(state)
+    end
   end
 
   defp should_dispatch_issue?(_issue, _state, _active_states, _terminal_states), do: false
@@ -948,22 +1015,18 @@ defmodule SymphonyElixir.Orchestrator do
     Issue.routable?(issue, Config.settings!().tracker.required_labels)
   end
 
-  defp todo_issue_blocked_by_non_terminal?(
-         %Issue{state: issue_state, blocked_by: blockers},
-         terminal_states
-       )
-       when is_binary(issue_state) and is_list(blockers) do
-    normalize_issue_state(issue_state) == "todo" and
-      Enum.any?(blockers, fn
-        %{state: blocker_state} when is_binary(blocker_state) ->
-          !terminal_issue_state?(blocker_state, terminal_states)
+  defp issue_blocked_by_non_terminal?(%Issue{blocked_by: blockers}, terminal_states)
+       when is_list(blockers) do
+    Enum.any?(blockers, fn
+      %{state: blocker_state} when is_binary(blocker_state) ->
+        !terminal_issue_state?(blocker_state, terminal_states)
 
-        _ ->
-          true
-      end)
+      _ ->
+        true
+    end)
   end
 
-  defp todo_issue_blocked_by_non_terminal?(_issue, _terminal_states), do: false
+  defp issue_blocked_by_non_terminal?(_issue, _terminal_states), do: false
 
   defp terminal_issue_state?(state_name, terminal_states) when is_binary(state_name) do
     MapSet.member?(terminal_states, normalize_issue_state(state_name))
@@ -974,6 +1037,12 @@ defmodule SymphonyElixir.Orchestrator do
   defp active_issue_state?(state_name, active_states) when is_binary(state_name) do
     MapSet.member?(active_states, normalize_issue_state(state_name))
   end
+
+  defp human_review_issue?(%Issue{state: state}) when is_binary(state) do
+    normalize_issue_state(state) == "human review"
+  end
+
+  defp human_review_issue?(_issue), do: false
 
   defp normalize_issue_state(state_name) when is_binary(state_name) do
     String.downcase(String.trim(state_name))
@@ -2060,7 +2129,7 @@ defmodule SymphonyElixir.Orchestrator do
 
   defp retry_candidate_issue?(%Issue{} = issue, terminal_states) do
     candidate_issue?(issue, active_state_set(), terminal_states) and
-      !todo_issue_blocked_by_non_terminal?(issue, terminal_states)
+      !issue_blocked_by_non_terminal?(issue, terminal_states)
   end
 
   defp dispatch_slots_available?(%Issue{} = issue, %State{} = state) do

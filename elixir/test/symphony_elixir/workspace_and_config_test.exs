@@ -680,24 +680,35 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     refute Orchestrator.should_dispatch_issue_for_test(next_issue, state)
   end
 
-  test "todo issue with non-terminal blocker is not dispatch-eligible" do
-    state = %Orchestrator.State{
-      max_concurrent_agents: 3,
-      running: %{},
-      claimed: MapSet.new(),
-      codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
-      retry_attempts: %{}
-    }
+  for issue_state <- ["Todo", "In Progress", "Rework", "Merging"] do
+    test "#{issue_state} issue with non-terminal blocker is not dispatch-eligible" do
+      write_workflow_file!(Workflow.workflow_file_path(),
+        tracker_active_states: ["Todo", "In Progress", "Rework", "Merging"]
+      )
 
-    issue = %Issue{
-      id: "blocked-1",
-      identifier: "MT-1001",
-      title: "Blocked work",
-      state: "Todo",
-      blocked_by: [%{id: "blocker-1", identifier: "MT-1002", state: "In Progress"}]
-    }
+      state = %Orchestrator.State{
+        max_concurrent_agents: 3,
+        running: %{},
+        claimed: MapSet.new(),
+        codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
+        retry_attempts: %{}
+      }
 
-    refute Orchestrator.should_dispatch_issue_for_test(issue, state)
+      issue = %Issue{
+        id: "blocked-1",
+        identifier: "MT-1001",
+        title: "Blocked work",
+        state: unquote(issue_state),
+        blocked_by: [%{id: "blocker-1", identifier: "MT-1002", state: "In Progress"}]
+      }
+
+      log =
+        capture_log(fn ->
+          refute Orchestrator.should_dispatch_issue_for_test(issue, state)
+        end)
+
+      assert log =~ "blocked_by=1"
+    end
   end
 
   test "issue assigned to another worker is not dispatch-eligible" do
@@ -747,7 +758,11 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert Orchestrator.should_dispatch_issue_for_test(%{issue | labels: ["Symphony", "JavaScript"]}, state)
   end
 
-  test "todo issue with terminal blockers remains dispatch-eligible" do
+  test "active issue with terminal blockers remains dispatch-eligible" do
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_active_states: ["Todo", "In Progress", "Rework", "Merging"]
+    )
+
     state = %Orchestrator.State{
       max_concurrent_agents: 3,
       running: %{},
@@ -760,19 +775,47 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       id: "ready-1",
       identifier: "MT-1003",
       title: "Ready work",
-      state: "Todo",
+      state: "Merging",
       blocked_by: [%{id: "blocker-2", identifier: "MT-1004", state: "Closed"}]
     }
 
     assert Orchestrator.should_dispatch_issue_for_test(issue, state)
   end
 
-  test "dispatch revalidation skips stale todo issue once a non-terminal blocker appears" do
+  test "active issue without blockers remains dispatch-eligible" do
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_active_states: ["Todo", "In Progress", "Rework", "Merging"]
+    )
+
+    state = %Orchestrator.State{
+      max_concurrent_agents: 3,
+      running: %{},
+      claimed: MapSet.new(),
+      codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
+      retry_attempts: %{}
+    }
+
+    issue = %Issue{
+      id: "ready-2",
+      identifier: "MT-1010",
+      title: "Ready work",
+      state: "Rework",
+      blocked_by: []
+    }
+
+    assert Orchestrator.should_dispatch_issue_for_test(issue, state)
+  end
+
+  test "dispatch revalidation skips stale active issue once a non-terminal blocker appears" do
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_active_states: ["Todo", "In Progress", "Rework", "Merging"]
+    )
+
     stale_issue = %Issue{
       id: "blocked-2",
       identifier: "MT-1005",
       title: "Stale blocked work",
-      state: "Todo",
+      state: "In Progress",
       blocked_by: []
     }
 
@@ -780,7 +823,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       id: "blocked-2",
       identifier: "MT-1005",
       title: "Stale blocked work",
-      state: "Todo",
+      state: "In Progress",
       blocked_by: [%{id: "blocker-3", identifier: "MT-1006", state: "In Progress"}]
     }
 
@@ -1717,10 +1760,10 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       assert File.read!(Path.join([workspace, ".agents", "skills", "linear", "SKILL.md"])) == "repo version\n"
 
       exclude = File.read!(Path.join([workspace, ".git", "info", "exclude"]))
-      assert exclude =~ ".agents/skills/phase-implementation/"
-      assert exclude =~ ".agents/skills/symphony-commit/"
-      assert exclude =~ ".agents/skills/symphony-linear/"
-      refute exclude =~ ".agents/skills/linear/"
+      assert exclude =~ ".agents/skills/phase-implementation"
+      assert exclude =~ ".agents/skills/symphony-commit"
+      assert exclude =~ ".agents/skills/symphony-linear"
+      refute exclude =~ ".agents/skills/linear"
 
       assert {"", 0} = System.cmd("git", ["-C", workspace, "status", "--short"])
 

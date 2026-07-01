@@ -415,6 +415,90 @@ defmodule SymphonyElixir.CoreTest do
     end
   end
 
+  test "maestro reviewer challenges undersized retention windows for trend claims" do
+    reviewer =
+      File.read!(Path.expand("../.codex/skills/maestro/agents/maestro-reviewer.md", File.cwd!()))
+
+    for contract <- [
+          "retention window",
+          "long-term",
+          "large enough",
+          "request changes or ask clarification"
+        ] do
+      assert reviewer =~ contract
+    end
+  end
+
+  test "maestro resumes human answers to clarification markers through active state" do
+    launcher = File.read!(Path.expand("../.codex/skills/maestro/SKILL.md", File.cwd!()))
+
+    reviewer =
+      File.read!(Path.expand("../.codex/skills/maestro/agents/maestro-reviewer.md", File.cwd!()))
+
+    assert launcher =~ "clarification-answer resume"
+    assert launcher =~ "set the issue to `In Progress`"
+    assert reviewer =~ "clarification answer already exists"
+    assert reviewer =~ "not phase approval"
+  end
+
+  test "maestro reviewer does not overstate readback as regression verification" do
+    reviewer =
+      File.read!(Path.expand("../.codex/skills/maestro/agents/maestro-reviewer.md", File.cwd!()))
+
+    for contract <- [
+          "merged-file readback",
+          "Linear relation checks",
+          "regression verification/evidence",
+          "command, log, test, or manual exercise"
+        ] do
+      assert reviewer =~ contract
+    end
+  end
+
+  test "maestro reviewer blocks Done when required regression validation is missing" do
+    reviewer =
+      File.read!(Path.expand("../.codex/skills/maestro/agents/maestro-reviewer.md", File.cwd!()))
+
+    for contract <- [
+          "required regression validation",
+          "回归例",
+          "historical issue",
+          "sole evidence",
+          "workflow path",
+          "existing Linear state",
+          "readback satisfies",
+          "readback-only risk",
+          "bundled `S1-S6`",
+          "separate evidence",
+          "close-test gap",
+          "request changes",
+          "not completion",
+          "Readback cannot satisfy it",
+          "manual exercise of the affected behavior"
+        ] do
+      assert reviewer =~ contract
+    end
+  end
+
+  test "maestro launcher task repeats required regression validation gate" do
+    skill = File.read!(Path.expand("../.codex/skills/maestro/SKILL.md", File.cwd!()))
+
+    for contract <- [
+          "required",
+          "regression validation",
+          "回归例",
+          "historical issue",
+          "workflow path",
+          "readback-only risk",
+          "bundled `S1-S6`",
+          "command, log, test, or manual exercise",
+          "request changes instead of completion",
+          "confirmation"
+        ] do
+      assert skill =~ contract
+    end
+  end
+
   test "linear api token resolves from LINEAR_API_KEY env var" do
     previous_linear_api_key = System.get_env("LINEAR_API_KEY")
     env_api_key = "test-linear-api-key"
@@ -621,6 +705,85 @@ defmodule SymphonyElixir.CoreTest do
     after
       File.rm_rf(test_root)
     end
+  end
+
+  test "human review reconcile starts maestro pre-review before stopping active agent" do
+    write_workflow_file!(Workflow.workflow_file_path(), tracker_required_labels: ["symphony"])
+    SymphonyElixir.MaestroPreReview.reset_handoff_claims_for_test()
+
+    parent = self()
+    issue_id = "issue-human-review-reconcile"
+
+    agent_pid =
+      spawn(fn ->
+        receive do
+          :stop -> :ok
+        end
+      end)
+
+    pre_review_runner = fn issue, opts ->
+      send(parent, {:maestro_pre_review, issue.identifier, issue.state, opts[:worker_host]})
+      :ok
+    end
+
+    state =
+      %Orchestrator.State{
+        running: %{
+          issue_id => %{
+            pid: agent_pid,
+            ref: nil,
+            identifier: "MT-HUMAN-REVIEW",
+            issue: %Issue{
+              id: issue_id,
+              identifier: "MT-HUMAN-REVIEW",
+              state: "In Progress",
+              labels: ["symphony"]
+            },
+            worker_host: nil,
+            started_at: DateTime.utc_now()
+          }
+        },
+        claimed: MapSet.new([issue_id]),
+        codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
+        retry_attempts: %{}
+      }
+      |> Map.put(:maestro_pre_review_runner, pre_review_runner)
+
+    issue = %Issue{
+      id: issue_id,
+      identifier: "MT-HUMAN-REVIEW",
+      state: "Human Review",
+      title: "Ready for review",
+      description: "Stopped by reconciliation",
+      labels: ["symphony"]
+    }
+
+    updated_state = Orchestrator.reconcile_issue_states_for_test([issue], state)
+
+    assert_receive {:maestro_pre_review, "MT-HUMAN-REVIEW", "Human Review", nil}
+    refute Map.has_key?(updated_state.running, issue_id)
+    refute MapSet.member?(updated_state.claimed, issue_id)
+    refute Process.alive?(agent_pid)
+  end
+
+  test "maestro pre-review handoff claim is shared across launch paths" do
+    SymphonyElixir.MaestroPreReview.reset_handoff_claims_for_test()
+
+    handoff_at = DateTime.from_naive!(~N[2026-06-25 10:00:00], "Etc/UTC")
+
+    issue = %Issue{
+      id: "issue-shared-maestro-claim",
+      identifier: "MT-SHARED-MAESTRO",
+      state: "Human Review",
+      labels: ["symphony"],
+      updated_at: handoff_at
+    }
+
+    assert SymphonyElixir.MaestroPreReview.claim_handoff_for_test(issue)
+    refute SymphonyElixir.MaestroPreReview.claim_handoff_for_test(issue)
+
+    next_handoff = %{issue | updated_at: DateTime.add(handoff_at, 60)}
+    assert SymphonyElixir.MaestroPreReview.claim_handoff_for_test(next_handoff)
   end
 
   test "terminal issue state stops running agent and cleans workspace" do
@@ -1027,6 +1190,34 @@ defmodule SymphonyElixir.CoreTest do
       title: "Retry opted out",
       state: "In Progress",
       labels: []
+    }
+
+    updated_state =
+      Orchestrator.handle_retry_issue_lookup_for_test(issue, state, issue_id, 1, %{
+        identifier: issue.identifier,
+        error: "agent exited"
+      })
+
+    refute MapSet.member?(updated_state.claimed, issue_id)
+    refute Map.has_key?(updated_state.retry_attempts, issue_id)
+  end
+
+  test "retry releases its claim when issue has a non-terminal blocker" do
+    issue_id = "retry-blocked"
+
+    state = %Orchestrator.State{
+      max_concurrent_agents: 0,
+      running: %{},
+      claimed: MapSet.new([issue_id]),
+      retry_attempts: %{}
+    }
+
+    issue = %Issue{
+      id: issue_id,
+      identifier: "MT-566",
+      title: "Retry blocked by dependency",
+      state: "In Progress",
+      blocked_by: [%{id: "blocker-4", identifier: "MT-567", state: "In Progress"}]
     }
 
     updated_state =
@@ -2032,8 +2223,8 @@ defmodule SymphonyElixir.CoreTest do
     assert prompt =~ "This is an unattended Symphony orchestration session."
     assert prompt =~ "Stop early only for a true blocker"
     assert prompt =~ "Do not include generic \"next steps for user\""
-    assert prompt =~ "active (unresolved) Phase artifacts"
-    assert prompt =~ "most recent artifact with no closing reply"
+    assert prompt =~ "unresolved Phase artifacts"
+    assert prompt =~ "most recent unresolved artifact with no closing reply"
     assert prompt =~ "Open and follow `.agents/skills/symphony-linear/SKILL.md`"
     assert prompt =~ "When the target phase is a rework of its own artifact"
     assert prompt =~ "Requirements rework must also state"
@@ -2525,21 +2716,36 @@ defmodule SymphonyElixir.CoreTest do
       }
 
       pre_review_runner = fn refreshed_issue, opts ->
-        send(parent, {:maestro_pre_review, refreshed_issue.identifier, refreshed_issue.state, opts[:worker_host]})
+        send(parent, {:maestro_pre_review, self(), refreshed_issue.identifier, refreshed_issue.state, opts[:worker_host]})
+
+        receive do
+          :finish_maestro_pre_review -> :ok
+        after
+          5_000 -> :ok
+        end
+
         :ok
       end
 
-      assert :ok =
-               AgentRunner.run(
-                 issue,
-                 nil,
-                 issue_state_fetcher: fn [_issue_id] ->
-                   {:ok, [%{issue | state: "Human Review"}]}
-                 end,
-                 maestro_pre_review_runner: pre_review_runner
-               )
+      runner_task =
+        Task.async(fn ->
+          AgentRunner.run(
+            issue,
+            nil,
+            issue_state_fetcher: fn [_issue_id] ->
+              {:ok, [%{issue | state: "Human Review"}]}
+            end,
+            maestro_pre_review_runner: pre_review_runner
+          )
+        end)
 
-      assert_receive {:maestro_pre_review, "MT-5316", "Human Review", nil}
+      assert_receive {:maestro_pre_review, maestro_pid, "MT-5316", "Human Review", nil}, 5_000
+      runner_result = Task.yield(runner_task, 200)
+      maestro_ref = Process.monitor(maestro_pid)
+
+      send(maestro_pid, :finish_maestro_pre_review)
+      assert runner_result == {:ok, :ok}
+      assert_receive {:DOWN, ^maestro_ref, :process, ^maestro_pid, :normal}, 1_000
     after
       File.rm_rf(test_root)
     end

@@ -37,6 +37,13 @@ Main Flow has already closed `## Requirements` (a `✅` human approval or a
 this skill. Just read the `## Requirements` artifact to extract `Primary:`,
 `验收标准 S<N>`, and `关键假设` before designing the approach.
 
+Treat the current `## Requirements` artifact as the close-test source of truth.
+Design may explain how each `S<N>` will be proven, but must not narrow, split,
+defer, waive, or reassign any `S<N>` to another issue. If human clarification,
+related-issue evidence, or design discovery shows the close test needs to
+change, use Cross-phase rework to Requirements before writing a new Design
+artifact.
+
 If this run is a rework of `## Design` (the artifact has unresolved human
 feedback in its thread), follow the same-phase Rework cycle in your workflow instructions.
 
@@ -411,11 +418,12 @@ Once no batched question remains, proceed to Exit.
 
 ## Cross-phase rework
 
-If `Rework` feedback indicates that Requirements need fundamental revision
-(problem statement wrong, acceptance criteria invalid) rather than a Design
-fix, do not patch it within `## Design`. Follow the cross-phase rework
-protocol in your workflow instructions: resolve this artifact, resolve `## Requirements`,
-update workpad `current_phase: Requirements`, and open `phase-requirements`.
+If human clarification, `Rework` feedback, or Design discovery indicates that
+Requirements need fundamental revision (problem statement wrong, acceptance
+criteria invalid, or close-test ownership changed) rather than a Design fix, do
+not patch it within `## Design`. Follow the cross-phase rework protocol in your
+workflow instructions: resolve this artifact, resolve `## Requirements`, update
+workpad `current_phase: Requirements`, and open `phase-requirements`.
 
 ## Exit
 
