@@ -104,6 +104,7 @@ defmodule SymphonyElixir.MaestroPreReview do
   defp prepare_main_branch(workspace, nil) do
     case System.cmd("sh", ["-lc", prepare_main_branch_command()],
            cd: workspace,
+           env: [{"GIT_CEILING_DIRECTORIES", Path.dirname(Path.expand(workspace))}],
            stderr_to_stdout: true
          ) do
       {_output, 0} -> :ok

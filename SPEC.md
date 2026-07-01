@@ -1340,6 +1340,8 @@ SHOULD return:
   - SHOULD identify direct, partial, and missing data sources
   - SHOULD keep GitHub/Linear-derived metrics separate from runtime-derived metrics unless the data
     source is actually collected
+  - SHOULD read durable GitHub/Linear proof from an explicit bounded snapshot window and fail closed
+    when that snapshot is missing or outside the read window
 
 RECOMMENDED snapshot error modes:
 
@@ -2148,7 +2150,7 @@ Use the same validation profiles as Section 17:
 - `linear_graphql` client-side tool extension exposes raw Linear GraphQL access through the
   app-server session using configured Symphony auth or an explicit host-bound token.
 - TODO: Persist retry queue and session metadata across process restarts.
-- TODO: Define analytics retention and optional Linear/GitHub aggregation jobs beyond runtime events.
+- TODO: Define long-term analytics retention beyond the bounded runtime/proof snapshot windows.
 - TODO: Add first-class tracker write APIs (comments/state transitions) in the orchestrator instead
   of only via agent tools.
 - TODO: Add pluggable issue tracker adapters beyond Linear.

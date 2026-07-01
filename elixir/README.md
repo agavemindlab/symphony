@@ -223,6 +223,10 @@ codex:
   through a `<path>.lock` directory. Dashboard reads use the latest bounded window and report
   truncation in Data Quality when older append-only events are outside that window. Processes
   configured with different files are separate data sources and are not merged in v1.
+- The poll loop also starts a background `outcome_proof_snapshot` collector at most once every 15
+  minutes when Linear/GitHub proof is readable. Runtime panels still use the latest 500 events;
+  outcome-proof panels independently look for the latest snapshot in the latest 5,000 events and
+  fail closed when it is outside that window.
 - Capacity snapshots are written only when running/retry/blocked counts change, so idle polling does
   not flood the bounded dashboard read window.
 - `server.port` or CLI `--port` enables the optional Phoenix LiveView dashboard and JSON API at
@@ -237,8 +241,8 @@ The observability UI now runs on a minimal Phoenix stack:
 - Bandit as the HTTP server
 - Phoenix dependency static assets for the LiveView client bootstrap
 - Tracker issue identifiers link to the tracker-provided URL when it uses `http` or `https`
-- A v1 efficiency analytics section backed by persisted Symphony runtime events, with Linear and
-  GitHub coverage gaps called out in the data-quality panel
+- A v1 efficiency analytics section backed by persisted Symphony runtime and outcome-proof events,
+  with Linear/GitHub gaps kept visible until a durable snapshot proves the metric
 
 ## Project Layout
 

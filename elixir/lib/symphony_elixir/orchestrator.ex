@@ -13,6 +13,7 @@ defmodule SymphonyElixir.Orchestrator do
     Config,
     IssueRunHook,
     MaestroPreReview,
+    OutcomeProof,
     StatusDashboard,
     Tracker,
     Workspace
@@ -24,6 +25,7 @@ defmodule SymphonyElixir.Orchestrator do
   @failure_retry_base_ms 10_000
   # Slightly above the dashboard render interval so "checking now…" can render.
   @poll_transition_render_delay_ms 20
+  @outcome_proof_collection_interval_ms 15 * 60 * 1_000
   @empty_codex_totals %{
     input_tokens: 0,
     output_tokens: 0,
@@ -44,6 +46,8 @@ defmodule SymphonyElixir.Orchestrator do
       :tick_timer_ref,
       :tick_token,
       :last_capacity_snapshot,
+      :outcome_proof_task_ref,
+      :last_outcome_proof_started_at_ms,
       running: %{},
       completed: MapSet.new(),
       claimed: MapSet.new(),
@@ -123,11 +127,25 @@ defmodule SymphonyElixir.Orchestrator do
     state = refresh_runtime_config(state)
     state = maybe_dispatch(state)
     state = record_capacity_snapshot(state)
+    state = maybe_start_outcome_proof_snapshot(state, System.monotonic_time(:millisecond))
     state = schedule_tick(state, state.poll_interval_ms)
     state = %{state | poll_check_in_progress: false}
 
     notify_dashboard()
     {:noreply, state}
+  end
+
+  def handle_info({ref, _result}, %{outcome_proof_task_ref: ref} = state) when is_reference(ref) do
+    Process.demonitor(ref, [:flush])
+    {:noreply, %{state | outcome_proof_task_ref: nil}}
+  end
+
+  def handle_info({:DOWN, ref, :process, _pid, reason}, %{outcome_proof_task_ref: ref} = state) when is_reference(ref) do
+    if reason != :normal do
+      Logger.debug("Outcome proof collection task stopped: #{inspect(reason)}")
+    end
+
+    {:noreply, %{state | outcome_proof_task_ref: nil}}
   end
 
   def handle_info(
@@ -419,6 +437,21 @@ defmodule SymphonyElixir.Orchestrator do
   def record_capacity_snapshot_for_test(%State{} = state) do
     record_capacity_snapshot(state)
   end
+
+  @spec maybe_start_outcome_proof_snapshot_for_test(term(), function()) :: term()
+  def maybe_start_outcome_proof_snapshot_for_test(%State{} = state, start_fun) when is_function(start_fun, 1) do
+    maybe_start_outcome_proof_snapshot(state, System.monotonic_time(:millisecond), start_fun)
+  end
+
+  @doc false
+  @spec maybe_start_outcome_proof_snapshot_for_test(term(), integer(), function()) :: term()
+  def maybe_start_outcome_proof_snapshot_for_test(%State{} = state, now_ms, start_fun) when is_integer(now_ms) and is_function(start_fun, 1) do
+    maybe_start_outcome_proof_snapshot(state, now_ms, start_fun)
+  end
+
+  @doc false
+  @spec outcome_proof_collection_interval_ms_for_test() :: pos_integer()
+  def outcome_proof_collection_interval_ms_for_test, do: @outcome_proof_collection_interval_ms
 
   @doc false
   @spec dispatch_issue_for_test(term(), Issue.t(), function()) :: term()
@@ -2086,6 +2119,62 @@ defmodule SymphonyElixir.Orchestrator do
     else
       Analytics.record_event(Map.put(snapshot, :event_type, :capacity_snapshot))
       %{state | last_capacity_snapshot: snapshot}
+    end
+  end
+
+  defp maybe_start_outcome_proof_snapshot(state, now_ms, start_fun \\ &start_outcome_proof_task/1)
+
+  defp maybe_start_outcome_proof_snapshot(%State{outcome_proof_task_ref: ref} = state, _now_ms, _start_fun) when is_reference(ref) do
+    state
+  end
+
+  defp maybe_start_outcome_proof_snapshot(%State{} = state, now_ms, start_fun) when is_integer(now_ms) and is_function(start_fun, 1) do
+    if outcome_proof_collection_due?(state, now_ms) do
+      start_outcome_proof_snapshot(state, now_ms, start_fun)
+    else
+      state
+    end
+  end
+
+  defp outcome_proof_collection_due?(%State{last_outcome_proof_started_at_ms: nil}, _now_ms), do: true
+
+  defp outcome_proof_collection_due?(%State{last_outcome_proof_started_at_ms: started_at_ms}, now_ms) when is_integer(started_at_ms) do
+    now_ms - started_at_ms >= @outcome_proof_collection_interval_ms
+  end
+
+  defp start_outcome_proof_snapshot(%State{} = state, now_ms, start_fun) do
+    case start_fun.(fn -> record_outcome_proof_snapshot() end) do
+      %Task{ref: ref} when is_reference(ref) ->
+        %{state | outcome_proof_task_ref: ref, last_outcome_proof_started_at_ms: now_ms}
+
+      ref when is_reference(ref) ->
+        %{state | outcome_proof_task_ref: ref, last_outcome_proof_started_at_ms: now_ms}
+
+      _ ->
+        state
+    end
+  rescue
+    exception ->
+      Logger.debug("Outcome proof collection task start skipped: #{Exception.message(exception)}")
+      state
+  catch
+    kind, reason ->
+      Logger.debug("Outcome proof collection task start skipped: #{inspect({kind, reason})}")
+      state
+  end
+
+  defp start_outcome_proof_task(fun) when is_function(fun, 0) do
+    Task.Supervisor.async_nolink(SymphonyElixir.TaskSupervisor, fun)
+  end
+
+  defp record_outcome_proof_snapshot do
+    case OutcomeProof.collect() do
+      {:ok, _snapshot} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.debug("Outcome proof collection skipped: #{inspect(reason)}")
+        :ok
     end
   end
 

@@ -414,6 +414,64 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
            ] = capacity_events(path)
   end
 
+  test "outcome proof collection starts in the background and is not duplicated" do
+    ref = make_ref()
+    now_ms = 1_000
+    interval_ms = Orchestrator.outcome_proof_collection_interval_ms_for_test()
+
+    start_fun = fn fun ->
+      send(self(), {:outcome_proof_started, fun})
+      ref
+    end
+
+    state = %Orchestrator.State{}
+    started = Orchestrator.maybe_start_outcome_proof_snapshot_for_test(state, now_ms, start_fun)
+
+    assert_receive {:outcome_proof_started, fun}
+    assert is_function(fun, 0)
+    assert started.outcome_proof_task_ref == ref
+    assert started.last_outcome_proof_started_at_ms == now_ms
+
+    duplicate =
+      Orchestrator.maybe_start_outcome_proof_snapshot_for_test(started, now_ms + interval_ms, fn _fun ->
+        flunk("outcome proof collection must not start while one is in flight")
+      end)
+
+    assert duplicate.outcome_proof_task_ref == ref
+
+    assert {:noreply, cleared} = Orchestrator.handle_info({ref, :ok}, duplicate)
+    assert cleared.outcome_proof_task_ref == nil
+    assert cleared.last_outcome_proof_started_at_ms == now_ms
+
+    throttled =
+      Orchestrator.maybe_start_outcome_proof_snapshot_for_test(cleared, now_ms + interval_ms - 1, fn _fun ->
+        flunk("outcome proof collection must wait for its cadence interval")
+      end)
+
+    assert throttled.outcome_proof_task_ref == nil
+
+    next_ref = make_ref()
+
+    restarted =
+      Orchestrator.maybe_start_outcome_proof_snapshot_for_test(throttled, now_ms + interval_ms, fn fun ->
+        send(self(), {:outcome_proof_restarted, fun})
+        next_ref
+      end)
+
+    assert_receive {:outcome_proof_restarted, restart_fun}
+    assert is_function(restart_fun, 0)
+    assert restarted.outcome_proof_task_ref == next_ref
+    assert restarted.last_outcome_proof_started_at_ms == now_ms + interval_ms
+
+    down_ref = make_ref()
+    down_state = %{state | outcome_proof_task_ref: down_ref}
+
+    assert {:noreply, cleared_down} =
+             Orchestrator.handle_info({:DOWN, down_ref, :process, self(), :normal}, down_state)
+
+    assert cleared_down.outcome_proof_task_ref == nil
+  end
+
   test "capacity snapshots record effective capacity expanded by configured projects" do
     path = analytics_tmp_path("effective-capacity-snapshots.ndjson")
     Application.put_env(:symphony_elixir, :analytics_file, path)
