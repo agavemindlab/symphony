@@ -65,6 +65,21 @@ defmodule SymphonyElixir.SymphonyRunTest do
     assert capture["ARGS"] =~ " --port 4321 "
   end
 
+  test "can launch the Maestro workflow with a caller-selected profile" do
+    capture =
+      run_launcher!("symphony",
+        profile: "maestro",
+        workflow_file: "MAESTRO_WORKFLOW.md",
+        profile_env: """
+        LINEAR_API_KEY="maestro-token"
+        """
+      )
+
+    assert capture["SYMPHONY_PROFILE"] == "maestro"
+    assert capture["WORKFLOW"] =~ "/workflows/symphony/MAESTRO_WORKFLOW.md"
+    assert capture["SYMPHONY_MAESTRO_WORKSPACE_ROOT"] == capture["SYMPHONY_WORKSPACE_ROOT"] <> "-maestro"
+  end
+
   test "Agavemindlab Linear project slugs use Linear slugId values" do
     expected_slugs = %{
       "gl-infra" => "02773795419d",
@@ -99,23 +114,10 @@ defmodule SymphonyElixir.SymphonyRunTest do
     File.mkdir_p!(Path.join(fake_repo_root, "workflows/#{project}"))
     File.mkdir_p!(Path.join(fake_repo_root, "workflows/agavemindlab"))
     File.write!(Path.join(fake_repo_root, "workflows/agavemindlab/WORKFLOW.md"), "# Test workflow\n")
+    File.write!(Path.join(fake_repo_root, "workflows/agavemindlab/MAESTRO_WORKFLOW.md"), "# Maestro workflow\n")
 
-    real_workflow_file = Path.join(@repo_root, "workflows/#{project}/WORKFLOW.md")
-    fake_workflow_file = Path.join(fake_repo_root, "workflows/#{project}/WORKFLOW.md")
-
-    namespace =
-      case File.read_link(real_workflow_file) do
-        {:ok, target} ->
-          File.ln_s!(target, fake_workflow_file)
-          resolved_target = Path.expand(target, Path.dirname(fake_workflow_file))
-          File.mkdir_p!(Path.dirname(resolved_target))
-          File.write!(resolved_target, "# Test workflow\n")
-          target |> Path.dirname() |> Path.basename()
-
-        {:error, _} ->
-          File.write!(fake_workflow_file, "# Test workflow\n")
-          project
-      end
+    workflow_name = Keyword.get(opts, :workflow_file, "WORKFLOW.md")
+    namespace = setup_workflow_fixture!(fake_repo_root, project, workflow_name)
 
     real_defaults = Path.join(@repo_root, "workflows/#{namespace}/project.env.defaults")
 
@@ -130,23 +132,18 @@ defmodule SymphonyElixir.SymphonyRunTest do
 
     File.write!(Path.join(fake_repo_root, "workflows/agavemindlab/WORKFLOW.md"), "# Test workflow\n")
 
-    project_env =
-      case Keyword.fetch(opts, :project_env) do
-        {:ok, contents} ->
-          contents
-
-        :error ->
-          Path.join(@repo_root, "workflows/#{project}/project.env")
-          |> File.read!()
-          |> Kernel.<>(Keyword.get(opts, :project_env_extra, ""))
-      end
-
+    project_env = project_env_fixture(project, opts)
     File.write!(Path.join(fake_repo_root, "workflows/#{project}/project.env"), project_env)
+
+    profile = Keyword.get(opts, :profile, "grandline")
+    profile_env = Keyword.get(opts, :profile_env, "LINEAR_API_KEY=\"test-token\"\n")
 
     File.write!(
       Path.join(home, ".config/symphony/grandline.env"),
-      Keyword.get(opts, :profile_env, "LINEAR_API_KEY=\"test-token\"\n")
+      profile_env
     )
+
+    File.write!(Path.join(home, ".config/symphony/#{profile}.env"), profile_env)
 
     File.write!(Path.join(fake_bin, "mise"), fake_mise_script())
     File.chmod!(Path.join(fake_bin, "mise"), 0o755)
@@ -157,7 +154,8 @@ defmodule SymphonyElixir.SymphonyRunTest do
       {"SYMPHONY_REPO_ROOT", fake_repo_root},
       {"SYMPHONY_RUN_CAPTURE", capture_path},
       {"SYMPHONY_RUN_CALLS", calls_path},
-      {"SYMPHONY_PROFILE", nil},
+      {"SYMPHONY_PROFILE", if(profile == "grandline", do: nil, else: profile)},
+      {"SYMPHONY_WORKFLOW_FILE", if(workflow_name == "WORKFLOW.md", do: nil, else: workflow_name)},
       {"SYMPHONY_PROJECT_SLUG", nil},
       {"SYMPHONY_PROJECT_SLUGS", nil},
       {"SYMPHONY_PROJECT_NAME", nil},
@@ -166,18 +164,60 @@ defmodule SymphonyElixir.SymphonyRunTest do
       {"SYMPHONY_BASE_BRANCH", nil},
       {"SYMPHONY_PROJECT_DIR", nil},
       {"SYMPHONY_PORT", nil},
+      {"SYMPHONY_MAESTRO_WORKSPACE_ROOT", nil},
       {"AUTOMATED_REVIEWER", nil}
     ]
 
     try do
       assert {output, 0} = System.cmd(@launcher, [project], env: env, stderr_to_stdout: true)
-      assert output =~ "symphony-run: starting project=#{project} profile=grandline"
+      assert output =~ "symphony-run: starting project=#{project} profile=#{profile}"
 
       capture_path
       |> File.read!()
       |> parse_capture()
     after
       File.rm_rf(tmp_root)
+    end
+  end
+
+  defp setup_workflow_fixture!(fake_repo_root, project, workflow_name) do
+    real_workflow_file = Path.join(@repo_root, "workflows/#{project}/WORKFLOW.md")
+    fake_workflow_file = Path.join(fake_repo_root, "workflows/#{project}/WORKFLOW.md")
+
+    case File.read_link(real_workflow_file) do
+      {:ok, target} ->
+        File.ln_s!(target, fake_workflow_file)
+        maybe_link_alternate_workflow!(fake_repo_root, project, target, workflow_name)
+
+        resolved_target = Path.expand(target, Path.dirname(fake_workflow_file))
+        File.mkdir_p!(Path.dirname(resolved_target))
+        File.write!(resolved_target, "# Test workflow\n")
+        target |> Path.dirname() |> Path.basename()
+
+      {:error, _} ->
+        File.write!(fake_workflow_file, "# Test workflow\n")
+        project
+    end
+  end
+
+  defp maybe_link_alternate_workflow!(_fake_repo_root, _project, _target, "WORKFLOW.md"), do: :ok
+
+  defp maybe_link_alternate_workflow!(fake_repo_root, project, target, workflow_name) do
+    File.ln_s!(
+      "../#{Path.basename(Path.dirname(target))}/#{workflow_name}",
+      Path.join(fake_repo_root, "workflows/#{project}/#{workflow_name}")
+    )
+  end
+
+  defp project_env_fixture(project, opts) do
+    case Keyword.fetch(opts, :project_env) do
+      {:ok, contents} ->
+        contents
+
+      :error ->
+        Path.join(@repo_root, "workflows/#{project}/project.env")
+        |> File.read!()
+        |> Kernel.<>(Keyword.get(opts, :project_env_extra, ""))
     end
   end
 
@@ -202,6 +242,8 @@ defmodule SymphonyElixir.SymphonyRunTest do
       printf 'SYMPHONY_PROJECT_NAMES=%s\\n' "${SYMPHONY_PROJECT_NAMES-}"
       printf 'SYMPHONY_REPO=%s\\n' "${SYMPHONY_REPO-}"
       printf 'SYMPHONY_BASE_BRANCH=%s\\n' "${SYMPHONY_BASE_BRANCH-}"
+      printf 'SYMPHONY_WORKSPACE_ROOT=%s\\n' "${SYMPHONY_WORKSPACE_ROOT-}"
+      printf 'SYMPHONY_MAESTRO_WORKSPACE_ROOT=%s\\n' "${SYMPHONY_MAESTRO_WORKSPACE_ROOT-}"
       printf 'PWD=%s\\n' "$PWD"
       printf 'ARGS=%s\\n' "$*"
       printf 'WORKFLOW=%s\\n' "$workflow"
