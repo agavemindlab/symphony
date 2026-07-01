@@ -98,6 +98,14 @@ defmodule SymphonyElixirWeb.DashboardLive do
           </article>
 
           <article class="metric-card">
+            <p class="metric-label">Resumable</p>
+            <p class="metric-value numeric"><%= @payload.counts.resumable %></p>
+            <p class="metric-detail">
+              <%= if @payload.dispatch && @payload.dispatch.paused, do: "Dispatch paused", else: "Dispatch open" %>
+            </p>
+          </article>
+
+          <article class="metric-card">
             <p class="metric-label">Total tokens</p>
             <p class="metric-value numeric"><%= format_int(@payload.codex_totals.total_tokens) %></p>
             <p class="metric-detail numeric">
@@ -110,6 +118,43 @@ defmodule SymphonyElixirWeb.DashboardLive do
             <p class="metric-value numeric"><%= format_runtime_seconds(total_runtime_seconds(@payload, @now)) %></p>
             <p class="metric-detail">Total Codex runtime across completed and active sessions.</p>
           </article>
+        </section>
+
+        <section class="section-card">
+          <div class="section-header">
+            <div>
+              <h2 class="section-title">Restart readiness</h2>
+              <p class="section-copy">
+                <%= if @payload.dispatch && @payload.dispatch.paused, do: "Dispatch paused", else: "Dispatch open" %>
+                · Resumable <%= @payload.counts.resumable %>
+              </p>
+            </div>
+          </div>
+
+          <%= if @payload.resumable == [] do %>
+            <p class="empty-state">No resumable sessions.</p>
+          <% else %>
+            <div class="table-wrap">
+              <table class="data-table" style="min-width: 760px;">
+                <thead>
+                  <tr>
+                    <th>Issue</th>
+                    <th>Thread</th>
+                    <th>Session</th>
+                    <th>Workspace</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr :for={entry <- @payload.resumable}>
+                    <td><.issue_identifier identifier={entry.issue_identifier} url={entry.issue_url} /></td>
+                    <td class="mono"><%= entry.thread_id || "n/a" %></td>
+                    <td class="mono"><%= entry.session_id || "n/a" %></td>
+                    <td class="mono"><%= entry.workspace_path || "n/a" %></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          <% end %>
         </section>
 
         <section class="section-card">

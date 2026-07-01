@@ -40,13 +40,14 @@ defmodule SymphonyElixir.Codex.AppServer do
   def start_session(workspace, opts \\ []) do
     worker_host = Keyword.get(opts, :worker_host)
     issue = Keyword.get(opts, :issue)
+    resume_thread_id = Keyword.get(opts, :thread_id)
 
     with {:ok, expanded_workspace} <- validate_workspace_cwd(workspace, worker_host),
          {:ok, port} <- start_port(expanded_workspace, worker_host, issue) do
       metadata = port_metadata(port, worker_host)
 
       with {:ok, session_policies} <- session_policies(expanded_workspace, worker_host),
-           {:ok, thread_id} <- do_start_session(port, expanded_workspace, session_policies) do
+           {:ok, thread_id} <- do_start_session(port, expanded_workspace, session_policies, resume_thread_id) do
         {:ok,
          %{
            port: port,
@@ -320,25 +321,46 @@ defmodule SymphonyElixir.Codex.AppServer do
     Config.codex_runtime_settings(workspace, remote: true)
   end
 
-  defp do_start_session(port, workspace, session_policies) do
+  defp do_start_session(port, workspace, session_policies, resume_thread_id) do
     case send_initialize(port) do
-      :ok -> start_thread(port, workspace, session_policies)
+      :ok -> start_thread(port, workspace, session_policies, resume_thread_id)
       {:error, reason} -> {:error, reason}
     end
   end
 
-  defp start_thread(port, workspace, %{approval_policy: approval_policy, thread_sandbox: thread_sandbox}) do
+  defp start_thread(port, workspace, session_policies, resume_thread_id)
+       when is_binary(resume_thread_id) and resume_thread_id != "" do
+    send_message(port, %{
+      "method" => "thread/resume",
+      "id" => @thread_start_id,
+      "params" =>
+        thread_params(workspace, session_policies)
+        |> Map.put("threadId", resume_thread_id)
+    })
+
+    await_thread_response(port)
+  end
+
+  defp start_thread(port, workspace, session_policies, _resume_thread_id) do
     send_message(port, %{
       "method" => "thread/start",
       "id" => @thread_start_id,
-      "params" => %{
-        "approvalPolicy" => approval_policy,
-        "sandbox" => thread_sandbox,
-        "cwd" => workspace,
-        "dynamicTools" => DynamicTool.tool_specs()
-      }
+      "params" => thread_params(workspace, session_policies)
     })
 
+    await_thread_response(port)
+  end
+
+  defp thread_params(workspace, %{approval_policy: approval_policy, thread_sandbox: thread_sandbox}) do
+    %{
+      "approvalPolicy" => approval_policy,
+      "sandbox" => thread_sandbox,
+      "cwd" => workspace,
+      "dynamicTools" => DynamicTool.tool_specs()
+    }
+  end
+
+  defp await_thread_response(port) do
     case await_response(port, @thread_start_id) do
       {:ok, %{"thread" => thread_payload}} ->
         case thread_payload do

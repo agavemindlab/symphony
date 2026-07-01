@@ -28,8 +28,13 @@ Symphony stops the active agent for that issue and cleans up matching workspaces
 
 If Codex reports that operator input, approval, or MCP elicitation is required, Symphony keeps the
 issue claimed and exposes it as blocked in the runtime state, JSON API, and dashboard. Blocked
-entries are in memory only; restarting the orchestrator clears that blocked map, so any still-active
-Linear issue can become a dispatch candidate again after restart.
+entries are in memory only.
+
+Active Codex thread state is persisted in a per-workflow/profile run registry. After a process
+restart, Symphony revalidates those issues, resumes eligible threads with `thread/resume`, and
+sends restart recovery guidance instead of starting from scratch. A separate dispatch pause marker
+can stop new issue and continuation launches during a restart window while polling and
+reconciliation keep running.
 
 ## How to use it
 
@@ -227,6 +232,8 @@ codex:
   not flood the bounded dashboard read window.
 - `server.port` or CLI `--port` enables the optional Phoenix LiveView dashboard and JSON API at
   `/`, `/api/v1/state`, `/api/v1/<issue_identifier>`, and `/api/v1/refresh`.
+- `/api/v1/state` and the dashboard include dispatch pause state and resumable thread summaries so
+  operators can verify restart readiness before replacing the process.
 
 ## Web dashboard
 

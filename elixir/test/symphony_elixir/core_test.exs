@@ -1459,7 +1459,7 @@ defmodule SymphonyElixir.CoreTest do
     log =
       capture_log(fn ->
         send(pid, {:DOWN, ref, :process, self(), :normal})
-        Process.sleep(50)
+        :sys.get_state(pid)
       end)
 
     state = :sys.get_state(pid)
@@ -3117,6 +3117,119 @@ defmodule SymphonyElixir.CoreTest do
     after
       System.delete_env("SYMP_TEST_CODEx_TRACE")
       System.delete_env("SYMP_TEST_STOP_MARKER")
+      File.rm_rf(test_root)
+    end
+  end
+
+  test "agent runner resumes a persisted thread with restart continuation guidance" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-agent-runner-resume-thread-#{System.unique_integer([:positive])}"
+      )
+
+    try do
+      template_repo = Path.join(test_root, "source")
+      workspace_root = Path.join(test_root, "workspaces")
+      codex_binary = Path.join(test_root, "fake-codex")
+      trace_file = Path.join(test_root, "codex-resume.trace")
+
+      File.mkdir_p!(template_repo)
+      File.write!(Path.join(template_repo, "README.md"), "# test")
+      System.cmd("git", ["-C", template_repo, "init", "-b", "main"])
+      System.cmd("git", ["-C", template_repo, "config", "user.name", "Test User"])
+      System.cmd("git", ["-C", template_repo, "config", "user.email", "test@example.com"])
+      System.cmd("git", ["-C", template_repo, "add", "README.md"])
+      System.cmd("git", ["-C", template_repo, "commit", "-m", "initial"])
+
+      File.write!(codex_binary, """
+      #!/bin/sh
+      trace_file="${SYMP_TEST_CODEx_TRACE:-/tmp/codex-resume.trace}"
+      printf 'RUN\\n' >> "$trace_file"
+
+      while IFS= read -r line; do
+        printf 'JSON:%s\\n' "$line" >> "$trace_file"
+
+        case "$line" in
+          *'"method":"initialize"'*)
+            printf '%s\\n' '{"id":1,"result":{}}'
+            ;;
+          *'"method":"thread/resume"'*)
+            printf '%s\\n' '{"id":2,"result":{"thread":{"id":"thread-resume"}}}'
+            ;;
+          *'"method":"turn/start"'*)
+            printf '%s\\n' '{"id":3,"result":{"turn":{"id":"turn-resume"}}}'
+            printf '%s\\n' '{"method":"turn/completed"}'
+            exit 0
+            ;;
+        esac
+      done
+      """)
+
+      File.chmod!(codex_binary, 0o755)
+      System.put_env("SYMP_TEST_CODEx_TRACE", trace_file)
+
+      on_exit(fn -> System.delete_env("SYMP_TEST_CODEx_TRACE") end)
+
+      write_workflow_file!(Workflow.workflow_file_path(),
+        workspace_root: workspace_root,
+        hook_after_create: "cp #{Path.join(template_repo, "README.md")} README.md",
+        codex_command: "#{codex_binary} app-server",
+        max_turns: 3
+      )
+
+      issue = %Issue{
+        id: "issue-resume-thread",
+        identifier: "MT-250",
+        title: "Resume thread",
+        description: "Resume from persisted thread",
+        state: "In Progress",
+        url: "https://example.org/issues/MT-250",
+        labels: []
+      }
+
+      assert :ok =
+               AgentRunner.run(
+                 issue,
+                 self(),
+                 resume_thread_id: "thread-resume",
+                 issue_state_fetcher: fn [_issue_id] -> {:ok, [%{issue | state: "Done"}]} end
+               )
+
+      assert_receive {:codex_worker_update, "issue-resume-thread",
+                      %{
+                        event: :thread_started,
+                        thread_id: "thread-resume",
+                        workspace_path: workspace_path
+                      }},
+                     1_000
+
+      assert String.ends_with?(workspace_path, Path.join(["workspaces", "MT-250"]))
+
+      requests =
+        trace_file
+        |> File.read!()
+        |> String.split("\n", trim: true)
+        |> Enum.filter(&String.starts_with?(&1, "JSON:"))
+        |> Enum.map(&String.trim_leading(&1, "JSON:"))
+        |> Enum.map(&Jason.decode!/1)
+
+      refute Enum.any?(requests, &(&1["method"] == "thread/start"))
+      assert Enum.any?(requests, &(&1["method"] == "thread/resume"))
+
+      [turn_start] = Enum.filter(requests, &(&1["method"] == "turn/start"))
+
+      prompt =
+        turn_start
+        |> get_in(["params", "input"])
+        |> Enum.map_join("\n", &Map.get(&1, "text", ""))
+
+      assert prompt =~ "Restart recovery guidance:"
+      assert prompt =~ "thread-resume"
+      assert prompt =~ "inspect the workspace"
+      refute prompt =~ "You are an agent for this repository."
+    after
+      System.delete_env("SYMP_TEST_CODEx_TRACE")
       File.rm_rf(test_root)
     end
   end

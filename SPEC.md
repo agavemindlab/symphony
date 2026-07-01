@@ -274,6 +274,7 @@ Fields:
 - `running` (map `issue_id -> running entry`)
 - `claimed` (set of issue IDs reserved/running/retrying)
 - `retry_attempts` (map `issue_id -> RetryEntry`)
+- `resumable` (map `issue_id -> persisted Codex thread entry revalidated at startup)
 - `completed` (set of issue IDs; bookkeeping only, not dispatch gating)
 - `codex_totals` (aggregate tokens + runtime seconds)
 - `codex_rate_limits` (latest rate-limit snapshot from agent events)
@@ -991,6 +992,9 @@ client to:
 - Supply the absolute per-issue workspace path as the thread/turn working directory wherever the
   targeted protocol accepts cwd.
 - Start the first turn with the rendered issue prompt.
+- When resuming a persisted thread after process restart, start the first recovered turn with
+  restart continuation guidance that tells the agent to inspect workspace, workpad, PR, and tracker
+  state before proceeding.
 - Start later in-worker continuation turns on the same live thread with continuation guidance rather
   than resending the original issue prompt.
 - Supply the implementation's documented approval and sandbox policy using fields supported by the
@@ -1329,6 +1333,8 @@ SHOULD return:
 - `running` (list of running session rows)
 - each running row SHOULD include `turn_count`
 - `retrying` (list of retry queue rows)
+- `resumable` (list of revalidated persisted thread rows waiting to resume)
+- `dispatch` (scheduler pause/open state and registry/control paths)
 - session and retry rows SHOULD include the tracker-provided issue URL when available
 - `codex_totals`
   - `input_tokens`
@@ -1447,7 +1453,16 @@ Minimum endpoints:
       "generated_at": "2026-02-24T20:15:30Z",
       "counts": {
         "running": 2,
-        "retrying": 1
+        "retrying": 1,
+        "blocked": 0,
+        "resumable": 1
+      },
+      "dispatch": {
+        "paused": true,
+        "reason": "restart window",
+        "paused_at": "2026-02-24T20:14:00Z",
+        "path": "/var/log/symphony-dispatch-paused.json",
+        "registry_path": "/var/log/symphony-run-registry.json"
       },
       "running": [
         {
@@ -1455,6 +1470,7 @@ Minimum endpoints:
           "issue_identifier": "MT-649",
           "issue_url": "https://tracker.example/issues/MT-649",
           "state": "In Progress",
+          "thread_id": "thread-1",
           "session_id": "thread-1-turn-1",
           "turn_count": 7,
           "last_event": "turn_completed",
@@ -1466,6 +1482,19 @@ Minimum endpoints:
             "output_tokens": 800,
             "total_tokens": 2000
           }
+        }
+      ],
+      "resumable": [
+        {
+          "issue_id": "ghi789",
+          "issue_identifier": "MT-651",
+          "issue_url": "https://tracker.example/issues/MT-651",
+          "thread_id": "thread-9",
+          "session_id": "thread-9-turn-1",
+          "worker_host": null,
+          "workspace_path": "/tmp/symphony_workspaces/MT-651",
+          "started_at": "2026-02-24T20:05:00Z",
+          "updated_at": "2026-02-24T20:14:30Z"
         }
       ],
       "retrying": [
@@ -1627,19 +1656,24 @@ API design notes:
 
 ### 14.3 Partial State Recovery (Restart)
 
-Current design is intentionally in-memory for scheduler state.
-Restart recovery means the service can resume useful operation by polling tracker state and reusing
-preserved workspaces. It does not mean retry timers, running sessions, or live worker state survive
-process restart.
+Retry timers and live worker handles remain process-local, but active Codex thread identity is
+durable. Restart recovery means the service revalidates the run registry, resumes eligible Codex
+threads, and reuses preserved workspaces.
 
 After restart:
 
 - No retry timers are restored from prior process memory.
-- No running sessions are assumed recoverable.
+- Running sessions with a valid persisted `thread_id` are recoverable through `thread/resume`.
+- Completed, terminal, non-active, missing, non-routable, or incompatible registry entries are
+  deleted or skipped.
 - Service recovers by:
   - startup terminal workspace cleanup
+  - run registry revalidation
+  - resumable thread dispatch before fresh candidates when dispatch is open
   - fresh polling of active issues
-  - re-dispatching eligible work
+  - re-dispatching other eligible work
+- While dispatch pause is active, polling and reconciliation continue but fresh, retry,
+  continuation, and resumable launches do not start.
 
 ### 14.4 Operator Intervention Points
 
@@ -2147,7 +2181,6 @@ Use the same validation profiles as Section 17:
   exposes the baseline endpoints/error semantics in Section 13.7 if shipped.
 - `linear_graphql` client-side tool extension exposes raw Linear GraphQL access through the
   app-server session using configured Symphony auth or an explicit host-bound token.
-- TODO: Persist retry queue and session metadata across process restarts.
 - TODO: Define analytics retention and optional Linear/GitHub aggregation jobs beyond runtime events.
 - TODO: Add first-class tracker write APIs (comments/state transitions) in the orchestrator instead
   of only via agent tools.
