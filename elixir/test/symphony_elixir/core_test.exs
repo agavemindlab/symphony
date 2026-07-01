@@ -1431,7 +1431,7 @@ defmodule SymphonyElixir.CoreTest do
     log =
       capture_log(fn ->
         send(pid, {:DOWN, ref, :process, self(), :normal})
-        Process.sleep(50)
+        wait_until(fn -> Map.has_key?(:sys.get_state(pid).retry_attempts, issue_id) end)
       end)
 
     state = :sys.get_state(pid)
@@ -3561,6 +3561,19 @@ defmodule SymphonyElixir.CoreTest do
   defp shared_workflow_prompt do
     File.read!(Path.expand("../workflows/agavemindlab/WORKFLOW.md", File.cwd!()))
   end
+
+  defp wait_until(fun, attempts \\ 20)
+
+  defp wait_until(fun, attempts) when attempts > 0 do
+    if fun.() do
+      :ok
+    else
+      Process.sleep(25)
+      wait_until(fun, attempts - 1)
+    end
+  end
+
+  defp wait_until(_fun, 0), do: :ok
 
   defp dry_run_artifact_calls(workflow, :clarification_answer, phase, old_artifact) do
     required_contracts = [
