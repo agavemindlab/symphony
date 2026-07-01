@@ -355,9 +355,13 @@ defmodule SymphonyElixir.AgentRunner do
   defp maybe_run_maestro_pre_review(_issue, _codex_update_recipient, _opts, _worker_host), do: :ok
 
   defp start_maestro_pre_review(%Issue{} = issue, runner, runner_opts) when is_function(runner, 2) do
-    Task.Supervisor.async_nolink(SymphonyElixir.TaskSupervisor, fn ->
-      run_maestro_pre_review_task(issue, runner, runner_opts)
-    end)
+    if MaestroPreReview.claim_handoff(issue) do
+      Task.Supervisor.async_nolink(SymphonyElixir.TaskSupervisor, fn ->
+        run_maestro_pre_review_task(issue, runner, runner_opts)
+      end)
+    else
+      Logger.info("Skipping duplicate Maestro pre-review for #{issue_context(issue)}")
+    end
 
     :ok
   rescue
