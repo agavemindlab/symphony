@@ -302,8 +302,8 @@ When the human feedback requires revisiting an earlier phase (e.g., a design fla
 
 1. Before resolving anything, copy any unaddressed human feedback on the phases being rolled back into the workpad `notes`, so it survives once those artifacts are resolved and is reconsidered when those phases are redone.
 2. Reply in the awaiting-review artifact's thread: `🔄 反馈要求回到 [Target Phase]，当前阶段暂停`.
-3. Resolve the awaiting-review artifact.
-4. For each intermediate phase between target and the awaiting-review phase (if any), resolve that artifact too with a reply: `🔄 因跨阶段回退，此阶段需重新完成`.
+3. Resolve all phase artifact comments invalidated by the rollback from the target phase through the awaiting-review phase, including stale same-phase target artifacts that the replacement target artifact will supersede.
+4. Do not resolve standalone human comments, proposal comments, or approved phase artifacts that the new source of truth explicitly keeps/references.
 5. Set workpad `current_phase` to the target phase and open the target phase skill.
 
 The approval chain restarts from the target phase. All artifacts from target onward will be re-posted as those phases complete again.

@@ -305,10 +305,10 @@ the implementation:
 - **Design flaw** (approach needs to change) → target `phase-design`
 - **Requirements flaw** (problem statement or acceptance criteria wrong) → target `phase-requirements`
 
-Follow the cross-phase rework protocol in your workflow instructions: resolve intermediate
-artifacts in reverse order (Implementation first, then any phases between
-target and Implementation), update workpad `current_phase` to the target
-phase, and open the target phase skill.
+Follow the cross-phase rework protocol in your workflow instructions: resolve every invalidated
+phase artifact from the target phase through Implementation, including stale same-phase target artifacts;
+leave standalone human comments and artifacts explicitly kept by the new source of truth unresolved.
+Then update workpad `current_phase` to the target phase and open the target phase skill.
 
 ## Exit conditions
 
