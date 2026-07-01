@@ -49,14 +49,14 @@ For a `Type:Spike` issue the deliverable is the **findings / recommendation**,
 not shipped code. Carry out the investigation plan from `## Design`, then write
 a findings artifact in place of the normal `## Implementation` artifact:
 state each Requirements question's answer, the evidence backing it, and the
-recommended decision. Open with that answer; do not lead with PR metadata. TDD
-and local runtime acceptance apply only to throwaway code you write to learn (a
-prototype, a benchmark) — keep it on a scratch branch and do not treat it as
-production work. The PR/CI line is optional: cite a prototype branch or an
-ADR/docs PR if one exists, else omit it. Exit to `Human Review` as usual; for a
-no-PR spike the human moves the issue straight to `Done`. The rest of this
-skill (PR feedback sweep, Merge-gated Deployment) applies only when the spike
-actually produced a PR worth landing.
+recommended decision. Open with that answer in plain language; do not lead with
+PR metadata. TDD and local runtime acceptance apply only to throwaway code you
+write to learn (a prototype, a benchmark) — keep it on a scratch branch and do
+not treat it as production work. The PR/CI line is optional: cite a prototype
+branch or an ADR/docs PR if one exists, else omit it. Exit to `Human Review` as
+usual; for a no-PR spike the human moves the issue straight to `Done`. The rest
+of this skill (PR feedback sweep, Merge-gated Deployment) applies only when the
+spike actually produced a PR worth landing.
 
 If the workpad (`.symphony/workpad.md`) does not exist, create it with the
 template from your workflow instructions. If this run is a rework of `## Implementation`
@@ -193,7 +193,7 @@ comfort.
 ```md
 ## Implementation
 
-<第一句直接写结论、影响和需要 reviewer 做的决定；不要从状态元数据开始。>
+<第一句先说人话：这轮结论是什么、为什么重要、需要 reviewer 批什么；不要从模板字段或元数据开始。>
 
 ### Root cause / recommendation（根因/结论）
 
