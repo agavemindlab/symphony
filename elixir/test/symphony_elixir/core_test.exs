@@ -1161,6 +1161,34 @@ defmodule SymphonyElixir.CoreTest do
     refute Map.has_key?(updated_state.retry_attempts, issue_id)
   end
 
+  test "retry releases its claim when issue has a non-terminal blocker" do
+    issue_id = "retry-blocked"
+
+    state = %Orchestrator.State{
+      max_concurrent_agents: 0,
+      running: %{},
+      claimed: MapSet.new([issue_id]),
+      retry_attempts: %{}
+    }
+
+    issue = %Issue{
+      id: issue_id,
+      identifier: "MT-566",
+      title: "Retry blocked by dependency",
+      state: "In Progress",
+      blocked_by: [%{id: "blocker-4", identifier: "MT-567", state: "In Progress"}]
+    }
+
+    updated_state =
+      Orchestrator.handle_retry_issue_lookup_for_test(issue, state, issue_id, 1, %{
+        identifier: issue.identifier,
+        error: "agent exited"
+      })
+
+    refute MapSet.member?(updated_state.claimed, issue_id)
+    refute Map.has_key?(updated_state.retry_attempts, issue_id)
+  end
+
   test "agent runner does not continue after a required label is removed" do
     write_workflow_file!(Workflow.workflow_file_path(), tracker_required_labels: ["symphony"])
 
