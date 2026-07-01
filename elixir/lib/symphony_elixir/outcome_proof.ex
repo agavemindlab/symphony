@@ -16,7 +16,7 @@ defmodule SymphonyElixir.OutcomeProof do
 
   @query_by_project_slug """
   query SymphonyOutcomeProofIssuesByProjectSlug($projectSlug: String!, $stateNames: [String!]!, $first: Int!) {
-    issues(filter: {project: {slugId: {eq: $projectSlug}}, or: [{state: {name: {in: $stateNames}}}, {comments: {some: {body: {contains: "✅ 已批准，进入 Deployment"}}}}]}, first: $first) {
+    issues(filter: {project: {slugId: {eq: $projectSlug}}, or: [{state: {name: {in: $stateNames}}}, {comments: {some: {body: {contains: "✅ 已批准，进入 Deployment"}, parent: {body: {contains: "## Implementation"}}}}}]}, first: $first) {
       nodes {
         id
         identifier
@@ -58,7 +58,7 @@ defmodule SymphonyElixir.OutcomeProof do
 
   @query_by_project_name """
   query SymphonyOutcomeProofIssuesByProjectName($projectName: String!, $stateNames: [String!]!, $first: Int!) {
-    issues(filter: {project: {name: {eq: $projectName}}, or: [{state: {name: {in: $stateNames}}}, {comments: {some: {body: {contains: "✅ 已批准，进入 Deployment"}}}}]}, first: $first) {
+    issues(filter: {project: {name: {eq: $projectName}}, or: [{state: {name: {in: $stateNames}}}, {comments: {some: {body: {contains: "✅ 已批准，进入 Deployment"}, parent: {body: {contains: "## Implementation"}}}}}]}, first: $first) {
       nodes {
         id
         identifier

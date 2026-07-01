@@ -186,7 +186,7 @@ defmodule SymphonyElixir.OutcomeProofTest do
       send(self(), {:linear_query, query, variables})
 
       nodes =
-        if query =~ "✅ 已批准" do
+        if query =~ "✅ 已批准，进入 Deployment" and query =~ "parent: {body: {contains: \"## Implementation\"}}" do
           [
             %{
               "id" => "issue-accepted",
@@ -257,7 +257,8 @@ defmodule SymphonyElixir.OutcomeProofTest do
              )
 
     assert_receive {:linear_query, query, variables}
-    assert query =~ "✅ 已批准"
+    assert query =~ "✅ 已批准，进入 Deployment"
+    assert query =~ "parent: {body: {contains: \"## Implementation\"}}"
     assert variables.first == 201
 
     assert snapshot.accepted_issue_count == 1
