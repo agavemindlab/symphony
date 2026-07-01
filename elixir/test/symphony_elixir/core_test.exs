@@ -233,11 +233,11 @@ defmodule SymphonyElixir.CoreTest do
     assert Map.fetch!(tracker, "required_labels") == ["symphony", "symphony:maestro"]
     assert get_in(config, ["workspace", "root"]) == "$SYMPHONY_MAESTRO_WORKSPACE_ROOT"
 
-    assert prompt =~ "$maestro {{ issue.identifier }}"
+    assert prompt =~ "invoke the `$maestro` launcher or spawn a subagent"
+    assert prompt =~ ~r/this workflow session is\s+already the isolated reviewer/
     assert prompt =~ "fresh Codex session"
-    assert prompt =~ "context forking disabled"
     assert prompt =~ "upstream/${SYMPHONY_BASE_BRANCH:-main}"
-    assert prompt =~ "Linear / GitHub / repository"
+    assert prompt =~ ~r/Linear \/ GitHub \/\s+repository/
     assert prompt =~ "evidence"
     assert prompt =~ "Maestro OAuth app"
     assert prompt =~ "remove `symphony:maestro`"
@@ -245,14 +245,18 @@ defmodule SymphonyElixir.CoreTest do
     assert prompt =~ "`Rework`"
     assert prompt =~ "`approve`"
     assert prompt =~ "0-10"
-    assert prompt =~ "keep the issue in `Human Review`"
+    assert prompt =~ ~r/keep the issue in\s+`Human Review`/
     assert prompt =~ "no-action"
     assert prompt =~ "same artifact/head"
+    assert prompt =~ ~r/Ignore any Maestro status recommendation to move an approve\s+result to `In Progress`/
     assert prompt =~ "Do not move the issue to `Merging` or `Done`"
     assert prompt =~ "Every review/no-action reply starts"
     assert prompt =~ "phase-closing replies"
     assert prompt =~ "✅ 已批准"
     assert prompt =~ "⏩ 自动进入"
+
+    linear_skill = File.read!(Path.expand("../workflows/agavemindlab/skills/symphony-linear/SKILL.md", File.cwd!()))
+    refute linear_skill =~ "### Add or remove an issue label"
   end
 
   test "requirements skill publishes reworked clarification artifacts through workflow protocol" do

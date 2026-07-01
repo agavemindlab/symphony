@@ -105,29 +105,36 @@ Maestro OAuth app identity.
    ```
 
    If checkout fails, remove `symphony:maestro` if Linear auth works, then stop.
-3. Use `$maestro {{ issue.identifier }}`. The `$maestro` skill must run with
-   context forking disabled and collect only Linear / GitHub / repository
-   evidence. Do not pass it facts from this prompt beyond the issue key.
+3. Act as the Maestro reviewer directly in this session. Read
+   `.codex/skills/maestro/agents/maestro-reviewer.md`, collect Linear / GitHub /
+   repository evidence, and decide the review outcome from that prompt. Do not
+   invoke the `$maestro` launcher or spawn a subagent; this workflow session is
+   already the isolated reviewer.
 4. Identify the current awaiting-review phase artifact and current PR/head when
    one exists. If there is already a `🤖 Maestro 预审核:` reply for the same
    artifact/head, write no second review. Remove `symphony:maestro` and stop.
 
 ## Apply The Recommendation
 
-Approvals and no-action keep the issue in `Human Review`.
+Always remove `symphony:maestro` before stopping, after any best-effort
+reply/state update.
+
+Approvals, ask-clarification, no-reply, and no-action keep the issue in
+`Human Review`. Ignore any Maestro status recommendation to move an approve
+result to `In Progress`; `Human Review` remains the human gate.
 Do not move the issue to `Merging` or `Done`.
 
-- If `$maestro` says `request changes` / `rework`, reply in the current artifact
-  thread with the Maestro-chosen request-changes content, include the
-  artifact id and head, move the issue to `Rework`, then remove
-  `symphony:maestro`.
-- If `$maestro` says `approve`, reply in the current artifact thread with the
-  Maestro-chosen approval content, include the artifact id and head, add a
+- If the review decision is `request changes` / `rework`, reply in the current
+  artifact thread with the Maestro-chosen request-changes content, include the
+  artifact id and head, then move the issue to `Rework`.
+- If the review decision is `approve`, reply in the current artifact thread with
+  the Maestro-chosen approval content, include the artifact id and head, add a
   `0-10` confidence score plus short rationale, keep the issue in
-  `Human Review`, then remove `symphony:maestro`.
-- If `$maestro` has no actionable approve/rework decision, reply with a concise
-  no-action reason when there is a safe artifact thread, keep the issue in
-  `Human Review`, then remove `symphony:maestro`.
+  `Human Review`.
+- If the reviewer would address a human (`ask clarification`, `no reply yet`, or
+  another non-approve/rework outcome), reply with that human-facing draft or a
+  concise no-action reason when there is a safe artifact thread, then keep the
+  issue in `Human Review`.
 
 Every review/no-action reply starts with `🤖 Maestro 预审核:`. Do not write
 phase-closing replies such as `✅ 已批准` or `⏩ 自动进入`.
