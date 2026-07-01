@@ -233,12 +233,14 @@ defmodule SymphonyElixir.CoreTest do
     assert Map.fetch!(tracker, "required_labels") == ["symphony", "symphony:maestro"]
     assert get_in(config, ["workspace", "root"]) == "$SYMPHONY_MAESTRO_WORKSPACE_ROOT"
 
-    assert prompt =~ "invoke the `$maestro` launcher or spawn a subagent"
+    assert prompt =~ ~r/invoke the `\$maestro` launcher or spawn a\s+subagent/
     assert prompt =~ ~r/this workflow session is\s+already the isolated reviewer/
     assert prompt =~ "fresh Codex session"
     assert prompt =~ "upstream/${SYMPHONY_BASE_BRANCH:-main}"
     assert prompt =~ ~r/Linear \/ GitHub \/\s+repository/
     assert prompt =~ "evidence"
+    assert prompt =~ "review lenses, evidence requirements, and output schema"
+    assert prompt =~ ~r/read-only\s+mutation ban is superseded by this workflow's Apply section/
     assert prompt =~ "Maestro OAuth app"
     assert prompt =~ "remove `symphony:maestro`"
     assert prompt =~ "request changes"

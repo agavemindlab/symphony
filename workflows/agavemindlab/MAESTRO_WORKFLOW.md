@@ -106,10 +106,12 @@ Maestro OAuth app identity.
 
    If checkout fails, remove `symphony:maestro` if Linear auth works, then stop.
 3. Act as the Maestro reviewer directly in this session. Read
-   `.codex/skills/maestro/agents/maestro-reviewer.md`, collect Linear / GitHub /
-   repository evidence, and decide the review outcome from that prompt. Do not
-   invoke the `$maestro` launcher or spawn a subagent; this workflow session is
-   already the isolated reviewer.
+   `.codex/skills/maestro/agents/maestro-reviewer.md`, but use it only for
+   review lenses, evidence requirements, and output schema. Its read-only
+   mutation ban is superseded by this workflow's Apply section after you decide
+   the review outcome. Collect Linear / GitHub / repository evidence and decide
+   the review outcome here. Do not invoke the `$maestro` launcher or spawn a
+   subagent; this workflow session is already the isolated reviewer.
 4. Identify the current awaiting-review phase artifact and current PR/head when
    one exists. If there is already a `🤖 Maestro 预审核:` reply for the same
    artifact/head, write no second review. Remove `symphony:maestro` and stop.
