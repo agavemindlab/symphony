@@ -468,7 +468,7 @@ writes the `⏩` reply, sets `current_phase: Implementation`, persists state,
 and stops this agent run. The next Symphony dispatch opens
 `phase-implementation`.
 
-Otherwise choose **`stop`** — Main Flow adds `maestro-preflight`, then moves the issue to `Human Review`.
+Otherwise choose **`stop`** — Main Flow adds `symphony:maestro`, then moves the issue to `Human Review`.
 This is the right outcome for a rework, for a human already in the thread,
 for the `Rework` state, and for the **complete-but-not-confident** case:
 there is a real architectural fork a reasonable reviewer might decide

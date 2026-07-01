@@ -355,7 +355,7 @@ mutation MoveIssueToState($id: String!, $stateId: String!) {
 
 ### Add or remove an issue label
 
-Use this before the clean phase handoff to add `maestro-preflight`, and in
+Use this before the clean phase handoff to add `symphony:maestro`, and in
 `MAESTRO_WORKFLOW.md` cleanup to remove it. Read current issue labels and team
 labels first. If the team label does not exist, try creating it; if Linear
 returns a permission error, stop blocked with that captured error and do not
@@ -399,7 +399,7 @@ mutation SetIssueLabels($issueId: String!, $labelIds: [String!]) {
 
 For add: set `labelIds` to current ids plus the target label id, de-duped. For
 remove: set `labelIds` to current ids except the target label id. Add
-`maestro-preflight` before moving the issue to `Human Review`; remove it after
+`symphony:maestro` before moving the issue to `Human Review`; remove it after
 the Maestro workflow writes or skips its preflight result.
 
 ### Attach a GitHub PR to an issue
