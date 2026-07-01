@@ -59,6 +59,9 @@ listed in the `cleanup` field.
 ## Land (merge entry only)
 
 Open and follow `.agents/skills/symphony-land/SKILL.md` to merge the PR.
+The current PR's own post-merge CI/deploy run completion is part of that land
+gate; do not post `## Deployment` until it reaches success, failure,
+cancelled, or a land-skill timeout/risk decision.
 
 ## Verification
 
@@ -111,6 +114,8 @@ When a post-merge acceptance check requires logged-in user state:
    judge it against the predicate — never weaken the predicate to pass it).
 2. **Leave genuinely-pending items `⚠️ 待观察`** with a concrete reason and a
    concrete way to make the condition happen:
+   - Do not use `⚠️ 待观察` for the current PR's own post-merge CI/deploy run
+     completion; that is the merge-entry land gate above.
    - `延迟验收` whose window is still open — on **merge entry** the deploy
      **starts** the window: carry the runnable spec forward from
      `## Implementation` 的 `Merge 后验证`, stamp the **window-end date**
@@ -140,6 +145,8 @@ rework below; use `⚠️ 待观察` only for checks that are not runnable yet.
 
 ```md
 ## Deployment
+
+<用人话先说明结论和影响，再列证据。>
 
 **PR**: [#NNNN](URL) · **Merge commit**: [`<sha>`](URL) · **Deploy**: [pipeline](URL)
 

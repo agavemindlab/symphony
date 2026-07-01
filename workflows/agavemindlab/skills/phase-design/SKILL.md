@@ -282,6 +282,8 @@ them.
 ```md
 ## Design
 
+<用人话先说明结论和影响，再列证据。>
+
 ### 核心机制（mechanism）
 <how the system works end-to-end; for cross-component flows include trigger,
 input, key steps, output, and blocking point（触发者 / 输入 / 关键步骤 / 输出 /

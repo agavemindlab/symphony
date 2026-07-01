@@ -49,13 +49,14 @@ For a `Type:Spike` issue the deliverable is the **findings / recommendation**,
 not shipped code. Carry out the investigation plan from `## Design`, then write
 a findings artifact in place of the normal `## Implementation` artifact:
 state each Requirements question's answer, the evidence backing it, and the
-recommended decision. TDD and local runtime acceptance apply only to throwaway
-code you write to learn (a prototype, a benchmark) — keep it on a scratch
-branch and do not treat it as production work. The PR/CI line is optional: cite
-a prototype branch or an ADR/docs PR if one exists, else omit it. Exit to
-`Human Review` as usual; for a no-PR spike the human moves the issue straight
-to `Done`. The rest of this skill (PR feedback sweep, Merge-gated Deployment)
-applies only when the spike actually produced a PR worth landing.
+recommended decision. Open with that answer in plain language; do not lead with
+PR metadata. TDD and local runtime acceptance apply only to throwaway code you
+write to learn (a prototype, a benchmark) — keep it on a scratch branch and do
+not treat it as production work. The PR/CI line is optional: cite a prototype
+branch or an ADR/docs PR if one exists, else omit it. Exit to `Human Review` as
+usual; for a no-PR spike the human moves the issue straight to `Done`. The rest
+of this skill (PR feedback sweep, Merge-gated Deployment) applies only when the
+spike actually produced a PR worth landing.
 
 If the workpad (`.symphony/workpad.md`) does not exist, create it with the
 template from your workflow instructions. If this run is a rework of `## Implementation`
@@ -192,20 +193,22 @@ comfort.
 ```md
 ## Implementation
 
+<用人话先说明结论和影响，再列证据。>
+
+### Root cause / recommendation（根因/结论）
+
+<用中文说明 accepted root cause / chosen approach。讲清楚为什么这个改动能解决
+问题；Type:Spike 写 findings/recommendation。不要把 PR 状态、验证输出和根因混在同一段。>
+
 ### 当前对象
 
 - **Status**: Waiting for human PR review
 - Spec: <source issue/comment, e.g. DEV-123 `## Design` or Source comment: URL>
-- PR: <PR URL>
-- Head: `<full head sha>`
-- CI: `<workflow/check>` <passed|failed|pending>
+- PR: <PR URL; omit for no-PR Spike>
+- Head: `<full head sha; omit for no-PR Spike>`
+- CI: `<workflow/check>` <passed|failed|pending|omit for no-PR Spike>
 - Automated review: `<reviewer>` <approved|commented|timed out>, 只作为自动
   review evidence，不等于人工批准
-
-### Root cause（根因）
-
-<用中文说明 accepted root cause / chosen approach。讲清楚为什么这个改动能解决
-问题，不要把 PR 状态、验证输出和根因混在同一段。>
 
 ### Rework 已回应（omit if not rework）
 
@@ -315,10 +318,10 @@ the implementation:
 - **Design flaw** (approach needs to change) → target `phase-design`
 - **Requirements flaw** (problem statement or acceptance criteria wrong) → target `phase-requirements`
 
-Follow the cross-phase rework protocol in your workflow instructions: resolve intermediate
-artifacts in reverse order (Implementation first, then any phases between
-target and Implementation), update workpad `current_phase` to the target
-phase, and open the target phase skill.
+Follow the cross-phase rework protocol in your workflow instructions: resolve every invalidated
+phase artifact from the target phase through Implementation, including stale same-phase target artifacts;
+leave standalone human comments and artifacts explicitly kept by the new source of truth unresolved.
+Then update workpad `current_phase` to the target phase and open the target phase skill.
 
 ## Exit conditions
 

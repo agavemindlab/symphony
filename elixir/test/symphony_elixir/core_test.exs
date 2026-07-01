@@ -247,6 +247,47 @@ defmodule SymphonyElixir.CoreTest do
     refute skill =~ "Post or update the `## Design` artifact"
   end
 
+  test "cross-phase rollback supersedes stale target-through-awaiting artifacts" do
+    workflow = shared_workflow_prompt()
+
+    implementation_skill =
+      File.read!(Path.expand("../workflows/agavemindlab/skills/phase-implementation/SKILL.md", File.cwd!()))
+
+    artifacts = [
+      %{id: "stale-requirements", phase: "Requirements", kind: :phase_artifact, invalidated?: true},
+      %{id: "stale-design", phase: "Design", kind: :phase_artifact, invalidated?: true},
+      %{
+        id: "approved-still-referenced-design",
+        phase: "Design",
+        kind: :phase_artifact,
+        invalidated?: false
+      },
+      %{id: "stale-implementation", phase: "Implementation", kind: :phase_artifact, invalidated?: true},
+      %{id: "standalone-human-feedback", kind: :human_feedback, invalidated?: true}
+    ]
+
+    calls = dry_run_artifact_calls(workflow, :cross_phase_rollback, "Requirements", "Implementation", artifacts)
+    resolved_ids = resolved_comment_ids(calls)
+
+    assert resolved_ids == ["stale-requirements", "stale-design", "stale-implementation"]
+    refute "approved-still-referenced-design" in resolved_ids
+    refute "standalone-human-feedback" in resolved_ids
+    assert {:commentCreate, :top_level_phase_artifact, "## Requirements"} in calls
+
+    active_requirements =
+      calls
+      |> active_artifacts_after_rollback(artifacts, %{
+        id: "new-requirements",
+        phase: "Requirements",
+        kind: :phase_artifact
+      })
+      |> Enum.filter(&(&1.phase == "Requirements"))
+
+    assert Enum.map(active_requirements, & &1.id) == ["new-requirements"]
+    assert implementation_skill =~ "target phase through Implementation"
+    assert implementation_skill =~ "including stale same-phase target artifacts"
+  end
+
   test "DEV-5321 style clarification resume fixture publishes a fresh artifact version" do
     workflow = shared_workflow_prompt()
 
@@ -1149,6 +1190,34 @@ defmodule SymphonyElixir.CoreTest do
       title: "Retry opted out",
       state: "In Progress",
       labels: []
+    }
+
+    updated_state =
+      Orchestrator.handle_retry_issue_lookup_for_test(issue, state, issue_id, 1, %{
+        identifier: issue.identifier,
+        error: "agent exited"
+      })
+
+    refute MapSet.member?(updated_state.claimed, issue_id)
+    refute Map.has_key?(updated_state.retry_attempts, issue_id)
+  end
+
+  test "retry releases its claim when issue has a non-terminal blocker" do
+    issue_id = "retry-blocked"
+
+    state = %Orchestrator.State{
+      max_concurrent_agents: 0,
+      running: %{},
+      claimed: MapSet.new([issue_id]),
+      retry_attempts: %{}
+    }
+
+    issue = %Issue{
+      id: issue_id,
+      identifier: "MT-566",
+      title: "Retry blocked by dependency",
+      state: "In Progress",
+      blocked_by: [%{id: "blocker-4", identifier: "MT-567", state: "In Progress"}]
     }
 
     updated_state =
@@ -3611,6 +3680,57 @@ defmodule SymphonyElixir.CoreTest do
     else
       [{:commentUpdate, artifact.id, "## #{phase}"}]
     end
+  end
+
+  defp dry_run_artifact_calls(workflow, :cross_phase_rollback, target_phase, awaiting_phase, artifacts) do
+    required_contracts = [
+      "from the target phase through the awaiting-review phase",
+      "including stale same-phase target artifacts",
+      "phase artifact comments invalidated by the rollback",
+      "Do not resolve standalone human comments",
+      "new source of truth explicitly keeps"
+    ]
+
+    artifacts_to_resolve =
+      artifacts
+      |> Enum.filter(&phase_artifact_invalidated_between?(&1, target_phase, awaiting_phase))
+      |> then(fn invalidated ->
+        if Enum.all?(required_contracts, &String.contains?(workflow, &1)) do
+          invalidated
+        else
+          Enum.reject(invalidated, &(&1.phase == target_phase))
+        end
+      end)
+
+    Enum.map(artifacts_to_resolve, &{:commentResolve, &1.id}) ++
+      [{:commentCreate, :top_level_phase_artifact, "## #{target_phase}"}]
+  end
+
+  defp phase_artifact_invalidated_between?(artifact, target_phase, awaiting_phase) do
+    artifact.kind == :phase_artifact and artifact.invalidated? and
+      phase_between?(artifact.phase, target_phase, awaiting_phase)
+  end
+
+  defp phase_between?(phase, target_phase, awaiting_phase) do
+    phase_order = ["Requirements", "Design", "Implementation", "Deployment"]
+    phase_index = Enum.find_index(phase_order, &(&1 == phase))
+    target_index = Enum.find_index(phase_order, &(&1 == target_phase))
+    awaiting_index = Enum.find_index(phase_order, &(&1 == awaiting_phase))
+
+    phase_index >= target_index and phase_index <= awaiting_index
+  end
+
+  defp resolved_comment_ids(calls) do
+    for {:commentResolve, id} <- calls, do: id
+  end
+
+  defp active_artifacts_after_rollback(calls, artifacts, replacement_artifact) do
+    resolved_ids = MapSet.new(resolved_comment_ids(calls))
+
+    artifacts
+    |> Enum.concat([replacement_artifact])
+    |> Enum.filter(&(&1.kind == :phase_artifact))
+    |> Enum.reject(&MapSet.member?(resolved_ids, &1.id))
   end
 
   defp fresh_artifact_version(old_artifact) do
