@@ -177,12 +177,25 @@ defmodule SymphonyElixir.CoreTest do
     assert prompt =~ "retain each comment's `parent { id }`"
     assert prompt =~ "reply node as standalone top-level feedback"
     assert prompt =~ "## Phase Artifact Protocol"
+    assert prompt =~ "Each phase artifact version is a top-level Linear comment"
+    assert prompt =~ "clarification-answer resume"
+    assert prompt =~ "fresh top-level artifact"
+    refute prompt =~ "posts or updates its own artifact"
+    refute prompt =~ "exactly one top-level comment"
+    refute prompt =~ "updates the existing one in place via `commentUpdate`"
     assert prompt =~ "## Workpad"
-    assert prompt =~ "✅ 已批准，进入 [Next Phase]"
     assert prompt =~ "⏩ 自动进入 [Next Phase]"
+    assert prompt =~ "✅ 已批准，进入 [Next Phase]"
+    assert prompt =~ ">>> 🛠️ 本次激活的 skills"
+    assert prompt =~ "Implementation never auto-advances"
     assert prompt =~ "Deployment only via `Merging`"
+    assert prompt =~ "## 建议新建 issue"
+    assert prompt =~ "Do **not** use GitHub-style"
+    assert prompt =~ "Phase Artifact Protocol"
+    assert prompt =~ "Rework cycle"
+    assert prompt =~ "Cross-phase rework"
+    assert prompt =~ "Agent never moves to `Done`"
     assert prompt =~ "**`Human Review` is not an agent state**"
-    assert prompt =~ "Do **not** use GitHub-style `> [!NOTE]`"
     assert prompt =~ "collapsible sections (`>>>`)"
     assert prompt =~ "Skills-activated footer"
     assert prompt =~ "Codex session id"
@@ -207,14 +220,70 @@ defmodule SymphonyElixir.CoreTest do
   end
 
   test "requirements skill publishes reworked clarification artifacts through workflow protocol" do
+    workflow =
+      File.read!(Path.expand("../workflows/agavemindlab/WORKFLOW.md", File.cwd!()))
+
     skill =
       File.read!(Path.expand("../workflows/agavemindlab/skills/phase-requirements/SKILL.md", File.cwd!()))
 
-    assert skill =~ ~r/same-phase Rework\s+cycle/
+    assert workflow =~ "clarification-answer resume"
+    assert workflow =~ "same-phase Rework cycle"
+    assert workflow =~ "even if the Linear state is `In Progress`"
+    assert workflow =~ "post a fresh top-level artifact"
     assert skill =~ "workflow artifact protocol"
+    assert skill =~ "not the old comment body"
     refute skill =~ "Post (or update) the `## Requirements` artifact"
     refute skill =~ "Post or update the artifact comment."
     refute skill =~ "Post or update the `## Requirements` artifact"
+  end
+
+  test "design skill publishes reworked clarification artifacts through workflow protocol" do
+    skill =
+      File.read!(Path.expand("../workflows/agavemindlab/skills/phase-design/SKILL.md", File.cwd!()))
+
+    assert skill =~ "workflow artifact protocol"
+    assert skill =~ "not the old comment body"
+    refute skill =~ "Post or update the artifact comment."
+    refute skill =~ "Post or update the `## Design` artifact"
+  end
+
+  test "DEV-5321 style clarification resume fixture publishes a fresh artifact version" do
+    workflow = shared_workflow_prompt()
+
+    old_artifact = %{
+      id: "80905809-e1e6-4ff6-a275-c94c2415e7ce",
+      created_at: ~U[2026-06-20 01:00:00Z]
+    }
+
+    for phase <- ["Requirements", "Design"] do
+      new_artifact = fresh_artifact_version(old_artifact)
+      calls = dry_run_artifact_calls(workflow, :clarification_answer, phase, old_artifact)
+
+      assert calls == [
+               {:commentResolve, old_artifact.id},
+               {:commentCreate, :top_level_phase_artifact, "## #{phase}"},
+               {:commentCreate, {:reply_to_new_artifact, new_artifact.id}, "clarification summary"}
+             ]
+
+      assert new_artifact.id != old_artifact.id
+      assert DateTime.compare(new_artifact.created_at, old_artifact.created_at) == :gt
+      refute_called_comment_update_for_artifact(calls, old_artifact.id)
+    end
+  end
+
+  test "DEV-5338 style question discussion fixture replies without rewriting artifacts" do
+    workflow = shared_workflow_prompt()
+    artifact = %{id: "requirements-question-thread", created_at: ~U[2026-06-23 01:00:00Z]}
+
+    calls = dry_run_artifact_calls(workflow, :question_discussion, "Requirements", artifact)
+
+    assert calls == [{:commentCreate, {:reply_to_artifact, artifact.id}, "answer Requirements question"}]
+    refute Enum.any?(calls, fn {operation, _, _} -> operation in [:commentResolve, :commentUpdate] end)
+
+    refute Enum.any?(calls, fn
+             {:commentCreate, :top_level_phase_artifact, _body} -> true
+             _ -> false
+           end)
   end
 
   test "aggregate dispatch ordering interleaves projects" do
@@ -302,6 +371,90 @@ defmodule SymphonyElixir.CoreTest do
           "request changes"
         ] do
       assert reviewer =~ contract
+    end
+  end
+
+  test "maestro reviewer challenges undersized retention windows for trend claims" do
+    reviewer =
+      File.read!(Path.expand("../.codex/skills/maestro/agents/maestro-reviewer.md", File.cwd!()))
+
+    for contract <- [
+          "retention window",
+          "long-term",
+          "large enough",
+          "request changes or ask clarification"
+        ] do
+      assert reviewer =~ contract
+    end
+  end
+
+  test "maestro resumes human answers to clarification markers through active state" do
+    launcher = File.read!(Path.expand("../.codex/skills/maestro/SKILL.md", File.cwd!()))
+
+    reviewer =
+      File.read!(Path.expand("../.codex/skills/maestro/agents/maestro-reviewer.md", File.cwd!()))
+
+    assert launcher =~ "clarification-answer resume"
+    assert launcher =~ "set the issue to `In Progress`"
+    assert reviewer =~ "clarification answer already exists"
+    assert reviewer =~ "not phase approval"
+  end
+
+  test "maestro reviewer does not overstate readback as regression verification" do
+    reviewer =
+      File.read!(Path.expand("../.codex/skills/maestro/agents/maestro-reviewer.md", File.cwd!()))
+
+    for contract <- [
+          "merged-file readback",
+          "Linear relation checks",
+          "regression verification/evidence",
+          "command, log, test, or manual exercise"
+        ] do
+      assert reviewer =~ contract
+    end
+  end
+
+  test "maestro reviewer blocks Done when required regression validation is missing" do
+    reviewer =
+      File.read!(Path.expand("../.codex/skills/maestro/agents/maestro-reviewer.md", File.cwd!()))
+
+    for contract <- [
+          "required regression validation",
+          "回归例",
+          "historical issue",
+          "sole evidence",
+          "workflow path",
+          "existing Linear state",
+          "readback satisfies",
+          "readback-only risk",
+          "bundled `S1-S6`",
+          "separate evidence",
+          "close-test gap",
+          "request changes",
+          "not completion",
+          "Readback cannot satisfy it",
+          "manual exercise of the affected behavior"
+        ] do
+      assert reviewer =~ contract
+    end
+  end
+
+  test "maestro launcher task repeats required regression validation gate" do
+    skill = File.read!(Path.expand("../.codex/skills/maestro/SKILL.md", File.cwd!()))
+
+    for contract <- [
+          "required",
+          "regression validation",
+          "回归例",
+          "historical issue",
+          "workflow path",
+          "readback-only risk",
+          "bundled `S1-S6`",
+          "command, log, test, or manual exercise",
+          "request changes instead of completion",
+          "confirmation"
+        ] do
+      assert skill =~ contract
     end
   end
 
@@ -511,6 +664,85 @@ defmodule SymphonyElixir.CoreTest do
     after
       File.rm_rf(test_root)
     end
+  end
+
+  test "human review reconcile starts maestro pre-review before stopping active agent" do
+    write_workflow_file!(Workflow.workflow_file_path(), tracker_required_labels: ["symphony"])
+    SymphonyElixir.MaestroPreReview.reset_handoff_claims_for_test()
+
+    parent = self()
+    issue_id = "issue-human-review-reconcile"
+
+    agent_pid =
+      spawn(fn ->
+        receive do
+          :stop -> :ok
+        end
+      end)
+
+    pre_review_runner = fn issue, opts ->
+      send(parent, {:maestro_pre_review, issue.identifier, issue.state, opts[:worker_host]})
+      :ok
+    end
+
+    state =
+      %Orchestrator.State{
+        running: %{
+          issue_id => %{
+            pid: agent_pid,
+            ref: nil,
+            identifier: "MT-HUMAN-REVIEW",
+            issue: %Issue{
+              id: issue_id,
+              identifier: "MT-HUMAN-REVIEW",
+              state: "In Progress",
+              labels: ["symphony"]
+            },
+            worker_host: nil,
+            started_at: DateTime.utc_now()
+          }
+        },
+        claimed: MapSet.new([issue_id]),
+        codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
+        retry_attempts: %{}
+      }
+      |> Map.put(:maestro_pre_review_runner, pre_review_runner)
+
+    issue = %Issue{
+      id: issue_id,
+      identifier: "MT-HUMAN-REVIEW",
+      state: "Human Review",
+      title: "Ready for review",
+      description: "Stopped by reconciliation",
+      labels: ["symphony"]
+    }
+
+    updated_state = Orchestrator.reconcile_issue_states_for_test([issue], state)
+
+    assert_receive {:maestro_pre_review, "MT-HUMAN-REVIEW", "Human Review", nil}
+    refute Map.has_key?(updated_state.running, issue_id)
+    refute MapSet.member?(updated_state.claimed, issue_id)
+    refute Process.alive?(agent_pid)
+  end
+
+  test "maestro pre-review handoff claim is shared across launch paths" do
+    SymphonyElixir.MaestroPreReview.reset_handoff_claims_for_test()
+
+    handoff_at = DateTime.from_naive!(~N[2026-06-25 10:00:00], "Etc/UTC")
+
+    issue = %Issue{
+      id: "issue-shared-maestro-claim",
+      identifier: "MT-SHARED-MAESTRO",
+      state: "Human Review",
+      labels: ["symphony"],
+      updated_at: handoff_at
+    }
+
+    assert SymphonyElixir.MaestroPreReview.claim_handoff_for_test(issue)
+    refute SymphonyElixir.MaestroPreReview.claim_handoff_for_test(issue)
+
+    next_handoff = %{issue | updated_at: DateTime.add(handoff_at, 60)}
+    assert SymphonyElixir.MaestroPreReview.claim_handoff_for_test(next_handoff)
   end
 
   test "terminal issue state stops running agent and cleans workspace" do
@@ -1922,6 +2154,8 @@ defmodule SymphonyElixir.CoreTest do
     assert prompt =~ "This is an unattended Symphony orchestration session."
     assert prompt =~ "Stop early only for a true blocker"
     assert prompt =~ "Do not include generic \"next steps for user\""
+    assert prompt =~ "unresolved Phase artifacts"
+    assert prompt =~ "most recent unresolved artifact with no closing reply"
     assert prompt =~ "Open and follow `.agents/skills/symphony-linear/SKILL.md`"
     assert prompt =~ "When the target phase is a rework of its own artifact"
     assert prompt =~ "Requirements rework must also state"
@@ -1938,6 +2172,11 @@ defmodule SymphonyElixir.CoreTest do
     assert prompt =~ "retain each comment's `parent { id }`"
     assert prompt =~ "reply node as standalone top-level feedback"
     assert prompt =~ "feedback keeps the phase intent of that artifact"
+    assert prompt =~ "Implementation → Deployment is gated by `Merging`"
+    assert prompt =~ "open the matching phase skill"
+    assert prompt =~ ".agents/skills/symphony-linear/SKILL.md"
+    assert prompt =~ "## Phase Map"
+    assert prompt =~ "## Main Flow"
     assert prompt =~ "Continuation context:"
     assert prompt =~ "retry attempt #2"
 
@@ -2408,21 +2647,36 @@ defmodule SymphonyElixir.CoreTest do
       }
 
       pre_review_runner = fn refreshed_issue, opts ->
-        send(parent, {:maestro_pre_review, refreshed_issue.identifier, refreshed_issue.state, opts[:worker_host]})
+        send(parent, {:maestro_pre_review, self(), refreshed_issue.identifier, refreshed_issue.state, opts[:worker_host]})
+
+        receive do
+          :finish_maestro_pre_review -> :ok
+        after
+          5_000 -> :ok
+        end
+
         :ok
       end
 
-      assert :ok =
-               AgentRunner.run(
-                 issue,
-                 nil,
-                 issue_state_fetcher: fn [_issue_id] ->
-                   {:ok, [%{issue | state: "Human Review"}]}
-                 end,
-                 maestro_pre_review_runner: pre_review_runner
-               )
+      runner_task =
+        Task.async(fn ->
+          AgentRunner.run(
+            issue,
+            nil,
+            issue_state_fetcher: fn [_issue_id] ->
+              {:ok, [%{issue | state: "Human Review"}]}
+            end,
+            maestro_pre_review_runner: pre_review_runner
+          )
+        end)
 
-      assert_receive {:maestro_pre_review, "MT-5316", "Human Review", nil}
+      assert_receive {:maestro_pre_review, maestro_pid, "MT-5316", "Human Review", nil}, 5_000
+      runner_result = Task.yield(runner_task, 200)
+      maestro_ref = Process.monitor(maestro_pid)
+
+      send(maestro_pid, :finish_maestro_pre_review)
+      assert runner_result == {:ok, :ok}
+      assert_receive {:DOWN, ^maestro_ref, :process, ^maestro_pid, :normal}, 1_000
     after
       File.rm_rf(test_root)
     end
@@ -3302,5 +3556,61 @@ defmodule SymphonyElixir.CoreTest do
       labels: ["symphony"],
       created_at: created_at
     }
+  end
+
+  defp shared_workflow_prompt do
+    File.read!(Path.expand("../workflows/agavemindlab/WORKFLOW.md", File.cwd!()))
+  end
+
+  defp dry_run_artifact_calls(workflow, :clarification_answer, phase, old_artifact) do
+    required_contracts = [
+      "clarification-answer resume",
+      "even if the Linear state is `In Progress`",
+      "resolve the old artifact",
+      "post a fresh top-level artifact",
+      "do not `commentUpdate` the old artifact",
+      "resolves the old artifact with `commentResolve`",
+      "fresh top-level artifact with `commentCreate`"
+    ]
+
+    if Enum.all?(required_contracts, &String.contains?(workflow, &1)) do
+      new_artifact = fresh_artifact_version(old_artifact)
+
+      [
+        {:commentResolve, old_artifact.id},
+        {:commentCreate, :top_level_phase_artifact, "## #{phase}"},
+        {:commentCreate, {:reply_to_new_artifact, new_artifact.id}, "clarification summary"}
+      ]
+    else
+      [{:commentUpdate, old_artifact.id, "## #{phase}"}]
+    end
+  end
+
+  defp dry_run_artifact_calls(workflow, :question_discussion, phase, artifact) do
+    required_contracts = [
+      "**Question / discussion**",
+      "answer in that artifact's thread",
+      "Do **not** write an approval reply, advance, resolve, or re-post the artifact"
+    ]
+
+    if Enum.all?(required_contracts, &String.contains?(workflow, &1)) do
+      [{:commentCreate, {:reply_to_artifact, artifact.id}, "answer #{phase} question"}]
+    else
+      [{:commentUpdate, artifact.id, "## #{phase}"}]
+    end
+  end
+
+  defp fresh_artifact_version(old_artifact) do
+    %{
+      id: "fresh-#{old_artifact.id}",
+      created_at: DateTime.add(old_artifact.created_at, 1, :second)
+    }
+  end
+
+  defp refute_called_comment_update_for_artifact(calls, artifact_id) do
+    refute Enum.any?(calls, fn
+             {:commentUpdate, ^artifact_id, _body} -> true
+             _ -> false
+           end)
   end
 end

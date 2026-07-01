@@ -309,20 +309,52 @@ defmodule SymphonyElixir.AgentRunner do
         on_message: codex_message_handler(codex_update_recipient, issue)
       ]
 
-      case runner.(issue, runner_opts) do
-        :ok ->
-          :ok
-
-        {:error, reason} ->
-          Logger.warning("Maestro pre-review failed for #{issue_context(issue)}: #{inspect(reason)}")
-          :ok
-      end
+      start_maestro_pre_review(issue, runner, runner_opts)
     else
       :ok
     end
   end
 
   defp maybe_run_maestro_pre_review(_issue, _codex_update_recipient, _opts, _worker_host), do: :ok
+
+  defp start_maestro_pre_review(%Issue{} = issue, runner, runner_opts) when is_function(runner, 2) do
+    if MaestroPreReview.claim_handoff(issue) do
+      Task.Supervisor.async_nolink(SymphonyElixir.TaskSupervisor, fn ->
+        run_maestro_pre_review_task(issue, runner, runner_opts)
+      end)
+    else
+      Logger.info("Skipping duplicate Maestro pre-review for #{issue_context(issue)}")
+    end
+
+    :ok
+  rescue
+    exception ->
+      log_maestro_pre_review_failed(issue, Exception.message(exception))
+  catch
+    kind, reason ->
+      log_maestro_pre_review_failed(issue, {kind, reason})
+  end
+
+  defp run_maestro_pre_review_task(%Issue{} = issue, runner, runner_opts) do
+    case runner.(issue, runner_opts) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        log_maestro_pre_review_failed(issue, reason)
+    end
+  rescue
+    exception ->
+      log_maestro_pre_review_failed(issue, Exception.message(exception))
+  catch
+    kind, reason ->
+      log_maestro_pre_review_failed(issue, {kind, reason})
+  end
+
+  defp log_maestro_pre_review_failed(%Issue{} = issue, reason) do
+    Logger.warning("Maestro pre-review failed for #{issue_context(issue)}: #{inspect(reason)}")
+    :ok
+  end
 
   defp human_review_issue?(%Issue{state: state}) when is_binary(state) do
     normalize_issue_state(state) == "human review"

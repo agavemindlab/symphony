@@ -12,6 +12,8 @@ defmodule SymphonyElixir.MaestroPreReview do
 
   @workspace_suffix "-maestro"
   @maestro_linear_api_key_env "MAESTRO_LINEAR_API_KEY"
+  @handoff_claims_key {__MODULE__, :handoff_claims}
+  @handoff_claim_lock {__MODULE__, :handoff_claim_lock}
   @viewer_query """
   query SymphonyLinearViewer {
     viewer {
@@ -62,6 +64,29 @@ defmodule SymphonyElixir.MaestroPreReview do
         record_no_action_reason(issue, reason)
         error
     end
+  end
+
+  @doc false
+  @spec claim_handoff(Issue.t()) :: boolean()
+  def claim_handoff(%Issue{} = issue) do
+    # ponytail: in-memory claim closes same-BEAM launch races; Linear marker stays durable after restart.
+    key = handoff_claim_key(issue)
+
+    case :global.trans(@handoff_claim_lock, fn -> claim_handoff_key(key) end) do
+      true -> true
+      _ -> false
+    end
+  end
+
+  @doc false
+  @spec claim_handoff_for_test(Issue.t()) :: boolean()
+  def claim_handoff_for_test(%Issue{} = issue), do: claim_handoff(issue)
+
+  @doc false
+  @spec reset_handoff_claims_for_test() :: :ok
+  def reset_handoff_claims_for_test do
+    :persistent_term.erase(@handoff_claims_key)
+    :ok
   end
 
   @doc false
@@ -188,6 +213,32 @@ defmodule SymphonyElixir.MaestroPreReview do
   defp graphql_success?(%{"data" => _data}), do: true
   defp graphql_success?(%{data: _data}), do: true
   defp graphql_success?(_response), do: false
+
+  defp handoff_claim_key(%Issue{} = issue) do
+    {
+      issue.id || issue.identifier || "unknown",
+      normalize_claim_part(issue.state),
+      normalize_claim_updated_at(issue.updated_at)
+    }
+  end
+
+  defp claim_handoff_key(key) do
+    claims = :persistent_term.get(@handoff_claims_key, MapSet.new())
+
+    if MapSet.member?(claims, key) do
+      false
+    else
+      :persistent_term.put(@handoff_claims_key, MapSet.put(claims, key))
+      true
+    end
+  end
+
+  defp normalize_claim_updated_at(%DateTime{} = updated_at), do: DateTime.to_unix(updated_at, :microsecond)
+  defp normalize_claim_updated_at(updated_at) when is_binary(updated_at), do: updated_at
+  defp normalize_claim_updated_at(_updated_at), do: :unknown_updated_at
+
+  defp normalize_claim_part(value) when is_binary(value), do: String.downcase(String.trim(value))
+  defp normalize_claim_part(value), do: value
 
   defp maestro_tool_executor(api_key, linear_client) do
     fn tool, arguments ->

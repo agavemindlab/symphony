@@ -218,12 +218,14 @@ Before routing phase feedback, normalize both representations: inspect each
 artifact's `children` / thread replies, and exclude any `comments.nodes` item
 with `parent { id }` from standalone top-level comments.
 
-**Default contract**: this read returns *active* state only. Drop every node
-whose `resolvedAt` is non-null before using the result — resolved comments are
-historical rework versions and must not enter context. The GraphQL response
-includes them (the API has no `resolvedAt` filter argument), so apply the drop
-client-side. Callers receive only `resolvedAt: null` comments, which represent
-the current state of each phase.
+**Default contract**: drop every node whose `resolvedAt` is non-null before
+using the result — resolved comments are superseded rework versions or
+cross-phase rollback history. Keep unresolved top-level Phase artifacts even
+when their thread contains a phase-closing reply (`✅ 已批准...` or `⏩ 自动进入...`);
+the closing reply makes them closed for routing, not expired. Callers must
+distinguish the awaiting-review artifact (unresolved, no closing reply) from
+phase-closed artifacts that remain in the current chain and may receive
+cross-phase feedback.
 
 **Exception — explicit back-reference**: dropping resolved comments is a default,
 not a prohibition. When current human feedback refers back to an earlier round
@@ -281,8 +283,11 @@ mutation ReplyToComment($issueId: String!, $parentId: String!, $body: String!) {
 ### Resolve a comment
 
 Resolves the comment and collapses it (with its thread) in the Linear UI.
-Use this after replying with the rework-change summary, before posting a
-fresh Phase artifact.
+Use this only when an artifact is superseded by same-phase rework or rolled back
+by Cross-phase rework. A phase-closing reply alone is not a reason to resolve.
+During same-phase rework, resolve the old artifact before posting the fresh
+Phase artifact; the rework-change summary belongs on the new artifact after it
+is posted.
 
 ```graphql
 mutation ResolveComment($id: String!) {
@@ -388,11 +393,11 @@ mutation AttachURL($issueId: String!, $url: String!, $title: String) {
 
 ### Spawn a Linear issue (create + link)
 
-Used by the `symphony-issue` skill. Three reads to gather ids, then create,
-then link.
+Used by the `symphony-issue` skill. Resolve the routed target project from the
+WORKFLOW project routing registry, then gather ids, create, and link.
 
 **1. Read the fields needed to spawn from the current issue** — its
-`creator`, `team`, and `project`:
+`creator`, `team`, and current `project`:
 
 ```graphql
 query SpawnContext($id: String!) {
@@ -402,17 +407,32 @@ query SpawnContext($id: String!) {
     url
     creator { id }
     team { id }
-    project { id }
+    project { id name }
   }
 }
 ```
 
-**2. Resolve the intake `stateId` by `type`, never by name.** Reuse the
+**2. Resolve the routed `projectId`.** If the routing registry names a target
+project, look it up and pass its id to `issueCreate`:
+
+```graphql
+query ProjectByName($name: String!) {
+  projects(filter: { name: { eqIgnoreCase: $name } }, first: 2) {
+    nodes { id name }
+  }
+}
+```
+
+If the route is unclear, do not create a likely wrong issue; let
+`symphony-issue` ask for human routing clarification in the current phase
+artifact.
+
+**3. Resolve the intake `stateId` by `type`, never by name.** Reuse the
 `IssueTeamStates` query above; from `team.states.nodes`, pick the state with
 `type == "triage"` if one exists, else `type == "backlog"`. Teams rename
 states, so matching the literal name "Backlog" is wrong — match on `type`.
 
-**3. Resolve the `Type:Xxx` `labelId`** from the team's labels:
+**4. Resolve the `Type:Xxx` `labelId`** from the team's labels:
 
 ```graphql
 query TeamLabels($id: String!) {
@@ -427,7 +447,7 @@ query TeamLabels($id: String!) {
 }
 ```
 
-**4. Create the issue.** `parentId` only for sub-issues; omit otherwise.
+**5. Create the issue.** `parentId` only for sub-issues; omit otherwise.
 
 ```graphql
 mutation CreateIssue($input: IssueCreateInput!) {
@@ -442,9 +462,9 @@ mutation CreateIssue($input: IssueCreateInput!) {
 }
 ```
 
-`input`: `{ teamId, title, description, stateId, assigneeId, labelIds, parentId? }`.
+`input`: `{ teamId, title, description, stateId, assigneeId, labelIds, projectId?, parentId? }`.
 
-**5. Link the issue** (skip for sub-issues — parent-child is set via
+**6. Link the issue** (skip for sub-issues — parent-child is set via
 `parentId` above, not a relation):
 
 ```graphql
@@ -557,10 +577,12 @@ frontmatter.
 
 Persist:
 
-1. Create a tarball containing agent state:
+1. Create a tarball containing only the agent-state files listed in the workpad
+   `cleanup` field, not the whole `.symphony/` directory. For the default
+   state files:
 
    ```sh
-   tar -czf /tmp/symphony-agent-state.tgz .symphony/
+   tar -czf /tmp/symphony-agent-state.tgz .symphony/workpad.md .symphony/design.md
    ```
 
 2. Upload it with `fileUpload` using filename
@@ -585,8 +607,10 @@ Restore:
    grep -qxF '.symphony/' .git/info/exclude || printf '\n.symphony/\n' >> .git/info/exclude
    ```
 
-Do not include secrets or credentials in state attachments. Keep the tarball
-limited to files listed in the workpad `cleanup` field.
+Do not include secrets or credentials in state attachments. Store
+human-provided issue-scoped secrets in `.issue-secrets/`, never under
+`.symphony/`, and keep the tarball limited to files listed in the workpad
+`cleanup` field.
 
 ## Usage rules
 
