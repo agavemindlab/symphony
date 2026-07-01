@@ -335,7 +335,7 @@ defmodule SymphonyElixir.Analytics do
         question: "How often does Symphony advance without human intervention?",
         status: proof_panel_status(proof, "autonomy_funnel", "partial"),
         metrics: [
-          metric("Phase events", metrics.phase_event_count, "direct"),
+          proof_metric(proof, "linear_phase_handoff_count", "Linear phase handoffs", "Linear phase handoff proof required", "gap"),
           proof_metric(proof, "auto_advance_rate", "Auto-advance rate", "Linear phase comments required", "gap"),
           proof_metric(proof, "human_touch_count", "Human touch count", "Linear comments required", "gap"),
           proof_metric(proof, "human_review_wait_seconds", "Human review wait", "Linear state history required", "gap")

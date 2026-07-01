@@ -130,7 +130,8 @@ defmodule SymphonyElixir.AnalyticsTest do
     assert %{status: "partial", metrics: autonomy_metrics} =
              panel(summary, "autonomy_funnel")
 
-    assert %{label: "Phase events", value: 1, status: "direct"} in autonomy_metrics
+    assert %{label: "Linear phase handoffs", value: "Linear phase handoff proof required", status: "gap"} in autonomy_metrics
+    refute Enum.any?(autonomy_metrics, &(&1.label == "Phase events"))
 
     assert %{status: "gap", metrics: quality_metrics} =
              panel(summary, "quality_rework")
@@ -207,6 +208,16 @@ defmodule SymphonyElixir.AnalyticsTest do
     assert Enum.map(summary.outcome_proof.cohorts, & &1.week) == ["2026-W25", "2026-W26"]
 
     assert %{status: "direct", metrics: autonomy_metrics} = panel(summary, "autonomy_funnel")
+
+    assert %{
+             label: "Linear phase handoffs",
+             value: 3,
+             status: "direct",
+             source: "linear",
+             numerator: 3,
+             denominator: 2
+           } in autonomy_metrics
+
     assert %{label: "Auto-advance rate", value: "1 / 3", status: "direct", source: "linear", numerator: 1, denominator: 3} in autonomy_metrics
     assert %{label: "Human touch count", value: 1, status: "direct", source: "linear", numerator: 1, denominator: 2} in autonomy_metrics
 
@@ -487,6 +498,15 @@ defmodule SymphonyElixir.AnalyticsTest do
       latest: %{week: "2026-W26", sample_count: 1},
       trend: %{status: "direct"},
       metrics: [
+        %{
+          id: "linear_phase_handoff_count",
+          label: "Linear phase handoffs",
+          value: 3,
+          status: "direct",
+          source: "linear",
+          numerator: 3,
+          denominator: 2
+        },
         %{
           id: "auto_advance_rate",
           label: "Auto-advance rate",

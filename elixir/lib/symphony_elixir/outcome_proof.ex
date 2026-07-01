@@ -472,6 +472,7 @@ defmodule SymphonyElixir.OutcomeProof do
     accepted_ids = accepted_issue_ids(accepted_issues)
 
     [
+      linear_phase_handoff_metric(accepted_issues),
       auto_advance_metric(accepted_issues),
       human_touch_metric(accepted_issues),
       human_review_wait_metric(accepted_issues),
@@ -484,6 +485,25 @@ defmodule SymphonyElixir.OutcomeProof do
       blocked_denominator_metric(accepted_issues, runtime_events, accepted_ids),
       capacity_trend_metric(runtime_events, baseline, latest)
     ]
+  end
+
+  defp linear_phase_handoff_metric(issues) do
+    handoffs =
+      issues
+      |> Enum.flat_map(&get_list(&1, :phase_closings))
+      |> Enum.count(&(get_string(&1, :phase) != ""))
+
+    denominator = length(issues)
+
+    %{
+      id: "linear_phase_handoff_count",
+      label: "Linear phase handoffs",
+      value: if(denominator > 0, do: handoffs, else: "accepted issue denominator required"),
+      status: status_for(denominator),
+      source: "linear",
+      numerator: handoffs,
+      denominator: denominator
+    }
   end
 
   defp auto_advance_metric(issues) do

@@ -94,6 +94,8 @@ defmodule SymphonyElixir.OutcomeProofTest do
     assert variables.first == 201
 
     metrics = metrics_by_id(snapshot)
+    assert metrics["linear_phase_handoff_count"].value == 1
+    assert metrics["linear_phase_handoff_count"].source == "linear"
     assert metrics["auto_advance_rate"].numerator == 1
     assert metrics["human_touch_count"].value == 1
     assert metrics["pr_human_review_count"].value == 1
@@ -265,6 +267,8 @@ defmodule SymphonyElixir.OutcomeProofTest do
     assert [%{week: "2026-W26", sample_count: 1}] = snapshot.cohorts
 
     metrics = metrics_by_id(snapshot)
+    assert metrics["linear_phase_handoff_count"].value == 1
+    assert metrics["linear_phase_handoff_count"].denominator == 1
     assert metrics["auto_advance_rate"].denominator == 1
   end
 
@@ -346,7 +350,10 @@ defmodule SymphonyElixir.OutcomeProofTest do
               identifier: "DEV-1",
               project: "symphony",
               accepted_at: "2026-06-15T12:00:00Z",
-              phase_closings: [%{kind: "auto_advance"}, %{kind: "human_approval"}],
+              phase_closings: [
+                %{kind: "auto_advance", phase: "Requirements"},
+                %{kind: "human_approval", phase: "Implementation"}
+              ],
               comments: [
                 %{user: %{app: false}, bot_actor: nil},
                 %{user: %{app: true}, bot_actor: %{name: "Symphony"}}
@@ -376,7 +383,7 @@ defmodule SymphonyElixir.OutcomeProofTest do
               identifier: "DEV-2",
               project: "symphony",
               accepted_at: "2026-06-22T12:00:00Z",
-              phase_closings: [%{kind: "human_approval"}],
+              phase_closings: [%{kind: "human_approval", phase: "Implementation"}],
               comments: [],
               state_spans: [],
               pull_request: %{head_sha: "def456", reviews: [], comments: [], checks: [%{sha: "def456", conclusion: "failure"}]}
@@ -417,6 +424,8 @@ defmodule SymphonyElixir.OutcomeProofTest do
 
     metrics = metrics_by_id(snapshot)
 
+    assert metrics["linear_phase_handoff_count"].value == 3
+    assert metrics["linear_phase_handoff_count"].denominator == 2
     assert metrics["auto_advance_rate"].numerator == 1
     assert metrics["auto_advance_rate"].denominator == 3
     assert metrics["human_touch_count"].value == 1
