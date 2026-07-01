@@ -179,6 +179,94 @@ defmodule SymphonyElixir.OutcomeProofTest do
     assert metrics["ci_success_rate"].status == "gap"
   end
 
+  test "collects non-terminal issues accepted by implementation approval replies" do
+    path = tmp_path("outcome-proof-non-terminal-accepted.ndjson")
+
+    linear_graphql = fn query, variables ->
+      send(self(), {:linear_query, query, variables})
+
+      nodes =
+        if query =~ "✅ 已批准" do
+          [
+            %{
+              "id" => "issue-accepted",
+              "identifier" => "DEV-accepted",
+              "completedAt" => nil,
+              "updatedAt" => "2026-04-01T12:00:00Z",
+              "state" => %{"name" => "Human Review"},
+              "project" => %{"name" => "symphony"},
+              "comments" => %{
+                "nodes" => [
+                  %{
+                    "body" => "## Implementation",
+                    "createdAt" => "2026-06-20T12:00:00Z",
+                    "user" => %{"name" => "Symphony", "app" => true},
+                    "botActor" => %{"name" => "Symphony"},
+                    "children" => %{
+                      "nodes" => [
+                        %{
+                          "body" => "✅ 已批准，进入 Deployment（2026-06-22 10:00:00 CST）",
+                          "createdAt" => "2026-06-22T02:00:00Z",
+                          "user" => %{"name" => "Symphony", "app" => true},
+                          "botActor" => %{"name" => "Symphony"}
+                        }
+                      ]
+                    }
+                  }
+                ]
+              },
+              "stateHistory" => %{"nodes" => []},
+              "attachments" => %{"nodes" => []}
+            },
+            %{
+              "id" => "issue-noise",
+              "identifier" => "DEV-noise",
+              "completedAt" => nil,
+              "updatedAt" => "2026-06-22T12:00:00Z",
+              "state" => %{"name" => "Human Review"},
+              "project" => %{"name" => "symphony"},
+              "comments" => %{
+                "nodes" => [
+                  %{
+                    "body" => "✅ 已批准，进入 Deployment（standalone note, not a phase artifact）",
+                    "createdAt" => "2026-06-22T03:00:00Z",
+                    "user" => %{"name" => "Symphony", "app" => true},
+                    "botActor" => %{"name" => "Symphony"},
+                    "children" => %{"nodes" => []}
+                  }
+                ]
+              },
+              "stateHistory" => %{"nodes" => []},
+              "attachments" => %{"nodes" => []}
+            }
+          ]
+        else
+          []
+        end
+
+      {:ok, %{"data" => %{"issues" => %{"nodes" => nodes}}}}
+    end
+
+    assert {:ok, snapshot} =
+             OutcomeProof.collect(
+               path: path,
+               linear_graphql: linear_graphql,
+               github_pull_request: fn url -> flunk("unexpected GitHub fetch for #{url}") end,
+               collected_at: "2026-07-01T00:00:00Z",
+               now: ~D[2026-07-01]
+             )
+
+    assert_receive {:linear_query, query, variables}
+    assert query =~ "✅ 已批准"
+    assert variables.first == 201
+
+    assert snapshot.accepted_issue_count == 1
+    assert [%{week: "2026-W26", sample_count: 1}] = snapshot.cohorts
+
+    metrics = metrics_by_id(snapshot)
+    assert metrics["auto_advance_rate"].denominator == 1
+  end
+
   test "returns linear collector errors without writing a proof snapshot" do
     path = tmp_path("outcome-proof-linear-error.ndjson")
 

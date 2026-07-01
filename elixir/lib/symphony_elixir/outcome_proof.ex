@@ -16,7 +16,7 @@ defmodule SymphonyElixir.OutcomeProof do
 
   @query_by_project_slug """
   query SymphonyOutcomeProofIssuesByProjectSlug($projectSlug: String!, $stateNames: [String!]!, $first: Int!) {
-    issues(filter: {project: {slugId: {eq: $projectSlug}}, state: {name: {in: $stateNames}}}, first: $first) {
+    issues(filter: {project: {slugId: {eq: $projectSlug}}, or: [{state: {name: {in: $stateNames}}}, {comments: {some: {body: {contains: "✅ 已批准，进入 Deployment"}}}}]}, first: $first) {
       nodes {
         id
         identifier
@@ -28,11 +28,13 @@ defmodule SymphonyElixir.OutcomeProof do
         comments(first: 50) {
           nodes {
             body
+            createdAt
             user { name app }
             botActor { name type }
             children(first: 20) {
               nodes {
                 body
+                createdAt
                 user { name app }
                 botActor { name type }
               }
@@ -56,7 +58,7 @@ defmodule SymphonyElixir.OutcomeProof do
 
   @query_by_project_name """
   query SymphonyOutcomeProofIssuesByProjectName($projectName: String!, $stateNames: [String!]!, $first: Int!) {
-    issues(filter: {project: {name: {eq: $projectName}}, state: {name: {in: $stateNames}}}, first: $first) {
+    issues(filter: {project: {name: {eq: $projectName}}, or: [{state: {name: {in: $stateNames}}}, {comments: {some: {body: {contains: "✅ 已批准，进入 Deployment"}}}}]}, first: $first) {
       nodes {
         id
         identifier
@@ -68,11 +70,13 @@ defmodule SymphonyElixir.OutcomeProof do
         comments(first: 50) {
           nodes {
             body
+            createdAt
             user { name app }
             botActor { name type }
             children(first: 20) {
               nodes {
                 body
+                createdAt
                 user { name app }
                 botActor { name type }
               }
@@ -221,17 +225,19 @@ defmodule SymphonyElixir.OutcomeProof do
   defp project_query(:name), do: @query_by_project_name
 
   defp normalize_linear_issue(issue) do
-    comments = flatten_comments(get_in(issue, ["comments", "nodes"]) || [])
+    raw_comments = get_in(issue, ["comments", "nodes"]) || []
+    comments = flatten_comments(raw_comments)
+    phase_closings = phase_closings(raw_comments)
     pull_request_url = issue |> get_in(["attachments", "nodes"]) |> github_pull_request_url()
 
     %{
       id: issue["id"],
       identifier: issue["identifier"],
       url: issue["url"],
-      accepted_at: issue["completedAt"] || issue["updatedAt"],
+      accepted_at: accepted_at(issue, phase_closings),
       state: get_in(issue, ["state", "name"]),
       project: get_in(issue, ["project", "name"]) || get_in(issue, ["project", "slugId"]),
-      phase_closings: phase_closings(comments),
+      phase_closings: phase_closings,
       comments: comments,
       state_spans: state_spans(get_in(issue, ["stateHistory", "nodes"]) || []),
       clarification?: Enum.any?(comments, &String.contains?(get_string(&1, :body), "[NEEDS CLARIFICATION]")),
@@ -267,14 +273,68 @@ defmodule SymphonyElixir.OutcomeProof do
   defp phase_closings(comments) do
     comments
     |> Enum.flat_map(fn comment ->
-      body = get_string(comment, :body)
+      phase = phase_heading(get_string(comment, :body))
 
-      cond do
-        String.contains?(body, "⏩ 自动进入") -> [%{kind: "auto_advance"}]
-        String.contains?(body, "✅ 已批准") -> [%{kind: "human_approval"}]
-        true -> []
-      end
+      [comment | get_in(comment, ["children", "nodes"]) || []]
+      |> Enum.flat_map(&phase_closing(&1, phase))
     end)
+  end
+
+  defp phase_closing(comment, phase) do
+    body = get_string(comment, :body)
+
+    cond do
+      String.contains?(body, "⏩ 自动进入") ->
+        [%{kind: "auto_advance", phase: phase, created_at: comment_created_at(comment)}]
+
+      String.contains?(body, "✅ 已批准") ->
+        [%{kind: "human_approval", phase: phase, created_at: comment_created_at(comment)}]
+
+      true ->
+        []
+    end
+  end
+
+  defp phase_heading(body) when is_binary(body) do
+    case Regex.run(~r/^##\s+(Requirements|Design|Implementation|Deployment)\b/m, body) do
+      [_, phase] -> phase
+      _ -> nil
+    end
+  end
+
+  defp comment_created_at(comment), do: get_string(comment, :createdAt)
+
+  defp accepted_at(issue, phase_closings) do
+    phase_acceptance_at(phase_closings) || terminal_acceptance_at(issue)
+  end
+
+  defp phase_acceptance_at(phase_closings) do
+    phase_closings
+    |> Enum.filter(&implementation_or_deployment_approval?/1)
+    |> Enum.map(&get_string(&1, :created_at))
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.sort(:desc)
+    |> List.first()
+  end
+
+  defp implementation_or_deployment_approval?(closing) do
+    closing_kind(closing) == "human_approval" and get_string(closing, :phase) in ["Implementation", "Deployment"]
+  end
+
+  defp terminal_acceptance_at(issue) do
+    state = get_in(issue, ["state", "name"])
+
+    if terminal_state?(state) and not excluded_state?(state) do
+      issue["completedAt"] || issue["updatedAt"]
+    end
+  end
+
+  defp terminal_state?(state) do
+    state = normalize_issue_state(state)
+
+    Config.settings!().tracker.terminal_states
+    |> Enum.map(&normalize_issue_state/1)
+    |> Enum.member?(state)
   end
 
   defp state_spans(spans) when is_list(spans) do
@@ -353,8 +413,16 @@ defmodule SymphonyElixir.OutcomeProof do
   defp excluded_issue?(issue) do
     issue
     |> get_string(:state)
+    |> excluded_state?()
+  end
+
+  defp excluded_state?(state), do: normalize_issue_state(state) in ["canceled", "cancelled", "duplicate"]
+
+  defp normalize_issue_state(state) do
+    state
+    |> to_string()
+    |> String.trim()
     |> String.downcase()
-    |> then(&(&1 in ["canceled", "cancelled", "duplicate"]))
   end
 
   defp cap_accepted_issues(issues) do
