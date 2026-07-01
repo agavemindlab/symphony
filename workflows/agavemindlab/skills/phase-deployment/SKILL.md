@@ -146,6 +146,8 @@ rework below; use `⚠️ 待观察` only for checks that are not runnable yet.
 ```md
 ## Deployment
 
+<用人话先说明结论和影响，再列证据。>
+
 **PR**: [#NNNN](URL) · **Merge commit**: [`<sha>`](URL) · **Deploy**: [pipeline](URL)
 
 ### 部署结果

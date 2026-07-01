@@ -568,6 +568,23 @@ mutation FileUpload(
 }
 ```
 
+### Read Linear upload attachments
+
+Raw Linear upload URLs in issue descriptions or comments may return `401` even
+when this session is authenticated for Linear API calls. When the issue itself
+points to an upload you need to read, use the authenticated Linear CLI and keep
+its downloads inside the repo workspace:
+
+```sh
+mkdir -p .symphony/linear-tmp
+TMPDIR="$PWD/.symphony/linear-tmp" linear issue view DEV-123 --no-pager
+```
+
+The rendered issue output links downloaded files under
+`.symphony/linear-tmp/linear-cli-images/` or
+`.symphony/linear-tmp/linear-cli-attachments/`. Read only the issue-scoped files
+needed for the task, and do not stage or persist this temporary directory.
+
 ### Persist and restore Symphony agent state
 
 Use Linear attachments for agent-only files that must survive session loss but
