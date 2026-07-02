@@ -174,8 +174,12 @@ Reply locations:
   `AUTOMATED_REVIEWER` from workflow env/defaults such as
   `workflows/<project>/project.env*`; run `gh pr view` with PR metadata,
   reviews, comments, and status rollup; run `gh pr diff`; run `gh pr checks`
-  when available. Exclude bot/configured automated reviewer feedback when
-  judging human intent.
+  when available. If the issue has multiple linked/open PRs, identify the
+  current merge target and classify every other open PR as superseded/stale or
+  still relevant; request changes or clarification when the target is ambiguous
+  or another open PR has unmerged scope, current human feedback, or unresolved
+  checks not covered by the target. Exclude bot/configured automated reviewer
+  feedback when judging human intent.
 - For `## Implementation`, audit the awaiting artifact body itself for an
   explicit merge-risk judgment tied to the current PR head. PR metadata,
   check/review facts, prior artifacts, or an older head's risk judgment do not
