@@ -8,9 +8,45 @@ defmodule SymphonyElixir.Analytics do
   alias SymphonyElixir.{Config, LogFile}
 
   @default_max_events 500
+  @proof_max_events 5_000
   @read_chunk_bytes 65_536
   @lock_retry_ms 10
   @lock_timeout_ms 5_000
+  @outcome_proof_keys %{
+    "id" => :id,
+    "label" => :label,
+    "value" => :value,
+    "status" => :status,
+    "source" => :source,
+    "numerator" => :numerator,
+    "denominator" => :denominator,
+    "week" => :week,
+    "project" => :project,
+    "sample_count" => :sample_count,
+    "complete_week?" => :complete_week?,
+    "truncated?" => :truncated?,
+    "direct" => :direct,
+    "partial" => :partial,
+    "gaps" => :gaps,
+    "warnings" => :warnings,
+    "reason" => :reason,
+    "collection" => :collection,
+    "trigger" => :trigger,
+    "interval_ms" => :interval_ms,
+    "sources" => :sources,
+    "linear" => :linear,
+    "github" => :github,
+    "runtime" => :runtime,
+    "scope" => :scope,
+    "kind" => :kind,
+    "values" => :values,
+    "accepted_issue_count" => :accepted_issue_count,
+    "pull_request_count" => :pull_request_count,
+    "ci_check_count" => :ci_check_count,
+    "missing_ci_count" => :missing_ci_count,
+    "event_count" => :event_count,
+    "accepted_issue_source_count" => :accepted_issue_source_count
+  }
 
   @type event :: map()
   @type read_result :: %{
@@ -62,12 +98,14 @@ defmodule SymphonyElixir.Analytics do
   @spec summary(keyword()) :: map()
   def summary(opts \\ []) do
     %{events: events, warnings: warnings, truncated?: truncated?} = read_events(opts)
+    proof = outcome_proof(opts)
     metrics = runtime_metrics(events)
 
     %{
       event_sample_count: length(events),
-      panels: panels(metrics),
-      data_quality: data_quality(warnings, truncated?),
+      outcome_proof: proof,
+      panels: panels(metrics, proof),
+      data_quality: data_quality(warnings, truncated?, proof),
       warnings: warnings,
       truncated?: truncated?
     }
@@ -254,7 +292,50 @@ defmodule SymphonyElixir.Analytics do
     }
   end
 
-  defp panels(metrics) do
+  defp outcome_proof(opts) do
+    opts
+    |> Keyword.put(:max_events, @proof_max_events)
+    |> read_events()
+    |> latest_outcome_proof()
+  end
+
+  defp latest_outcome_proof(%{events: events, truncated?: truncated?}) do
+    events
+    |> Enum.reverse()
+    |> Enum.find(&(Map.get(&1, "event_type") == "outcome_proof_snapshot"))
+    |> case do
+      nil ->
+        %{
+          status: "gap",
+          reason: if(truncated?, do: "proof_snapshot_outside_read_window", else: "outcome_proof_snapshot_required")
+        }
+
+      snapshot ->
+        normalize_outcome_proof_snapshot(snapshot)
+    end
+  end
+
+  defp normalize_outcome_proof_snapshot(snapshot) when is_map(snapshot) do
+    %{
+      status: snapshot_status(snapshot),
+      collected_at: Map.get(snapshot, "collected_at"),
+      collection: atomize_known_map(Map.get(snapshot, "collection")),
+      sources: atomize_known_map(Map.get(snapshot, "sources")),
+      accepted_issue_count: integer_value(Map.get(snapshot, "accepted_issue_count")),
+      cohorts: atomize_known_maps(Map.get(snapshot, "cohorts", [])),
+      baseline: atomize_known_map(Map.get(snapshot, "baseline")),
+      latest: atomize_known_map(Map.get(snapshot, "latest")),
+      trend: atomize_known_map(Map.get(snapshot, "trend")),
+      metrics: atomize_known_maps(Map.get(snapshot, "metrics", [])),
+      data_quality: atomize_known_map(Map.get(snapshot, "data_quality"))
+    }
+  end
+
+  defp snapshot_status(%{"trend" => %{"status" => "direct"}}), do: "direct"
+  defp snapshot_status(%{"trend" => %{"status" => "partial"}}), do: "partial"
+  defp snapshot_status(_snapshot), do: "gap"
+
+  defp panels(metrics, proof) do
     [
       %{
         id: "delivery_cycle",
@@ -270,29 +351,33 @@ defmodule SymphonyElixir.Analytics do
         id: "autonomy_funnel",
         title: "Autonomy Funnel",
         question: "How often does Symphony advance without human intervention?",
-        status: "partial",
+        status: proof_panel_status(proof, "autonomy_funnel", "partial"),
         metrics: [
-          metric("Phase events", metrics.phase_event_count, "direct"),
-          metric("Auto-advance rate", "Linear phase comments required", "gap"),
-          metric("Human touch count", "Linear comments required", "gap")
+          proof_metric(proof, "linear_phase_handoff_count", "Linear phase handoffs", "Linear phase handoff proof required", "gap"),
+          proof_metric(proof, "auto_advance_rate", "Auto-advance rate", "Linear phase comments required", "gap"),
+          proof_metric(proof, "human_touch_count", "Human touch count", "Linear comments required", "gap"),
+          proof_metric(proof, "human_review_wait_seconds", "Human review wait", "Linear state history required", "gap")
         ]
       },
       %{
         id: "quality_rework",
         title: "Quality / Rework",
         question: "How much accepted work comes back as rework or PR/CI failure?",
-        status: "gap",
+        status: proof_metric_status(proof, ["clarification_rate", "rework_rate", "pr_human_review_count", "ci_success_rate"], "gap"),
         metrics: [
-          metric("Rework rate", "Linear state history required", "gap"),
-          metric("PR review quality", "GitHub review/CI data gap", "gap")
+          proof_metric(proof, "clarification_rate", "Clarification rate", "Linear phase comments required", "gap"),
+          proof_metric(proof, "rework_rate", "Rework rate", "Linear state history required", "gap"),
+          proof_metric(proof, "pr_human_review_count", "PR review quality", "GitHub review/CI data gap", "gap"),
+          proof_metric(proof, "ci_success_rate", "GitHub CI pass rate", "GitHub CI data gap", "gap")
         ]
       },
       %{
         id: "cost_per_accepted_issue",
         title: "Cost Per Accepted Issue",
         question: "What token and runtime cost is attached to accepted issues?",
-        status: "direct",
+        status: proof_metric_status(proof, ["tokens_per_accepted_issue"], "gap"),
         metrics: [
+          proof_metric(proof, "tokens_per_accepted_issue", "Tokens per accepted issue", "Accepted issue denominator required", "gap"),
           metric("Runtime seconds", metrics.runtime_seconds, "partial"),
           metric("Total tokens", metrics.total_tokens, "partial"),
           metric("Input tokens", metrics.input_tokens, "partial"),
@@ -303,8 +388,8 @@ defmodule SymphonyElixir.Analytics do
         id: "capacity_reliability",
         title: "Capacity / Reliability",
         question: "Where do retries, blockers, or capacity pressure stall throughput?",
-        status: "direct",
-        metrics: capacity_metrics(metrics)
+        status: proof_metric_status(proof, ["capacity_trend", "retry_denominator", "blocked_denominator"], "gap"),
+        metrics: capacity_metrics(metrics, proof)
       },
       %{
         id: "data_quality_exclusions",
@@ -314,7 +399,7 @@ defmodule SymphonyElixir.Analytics do
         metrics: [
           metric("Direct sources", 1, "direct"),
           metric("Partial sources", 1, "partial"),
-          metric("Gap sources", 2, "gap")
+          metric("Gap sources", gap_source_count(proof), "gap")
         ]
       }
     ]
@@ -322,10 +407,43 @@ defmodule SymphonyElixir.Analytics do
 
   defp metric(label, value, status), do: %{label: label, value: value, status: status}
 
-  defp capacity_metrics(%{latest_capacity: latest_capacity} = metrics) do
+  defp proof_metric(%{metrics: metrics}, id, fallback_label, fallback_value, fallback_status) when is_list(metrics) do
+    case Enum.find(metrics, &(&1.id == id)) do
+      nil -> metric(fallback_label, fallback_value, fallback_status)
+      metric -> Map.take(metric, [:label, :value, :status, :numerator, :denominator, :source, :reason])
+    end
+  end
+
+  defp proof_metric(_proof, _id, fallback_label, fallback_value, fallback_status),
+    do: metric(fallback_label, fallback_value, fallback_status)
+
+  defp proof_panel_status(%{status: status}, _panel, _fallback) when status in ["direct", "partial"], do: status
+  defp proof_panel_status(_proof, _panel, fallback), do: fallback
+
+  defp proof_metric_status(%{metrics: metrics}, ids, fallback) when is_list(metrics) and is_list(ids) do
+    statuses =
+      metrics
+      |> Enum.filter(&(&1.id in ids))
+      |> Enum.map(& &1.status)
+
+    cond do
+      statuses == [] -> fallback
+      Enum.any?(statuses, &(&1 == "gap")) -> "gap"
+      Enum.any?(statuses, &(&1 == "partial")) -> "partial"
+      Enum.all?(statuses, &(&1 == "direct")) -> "direct"
+      true -> fallback
+    end
+  end
+
+  defp proof_metric_status(_proof, _ids, fallback), do: fallback
+
+  defp capacity_metrics(%{latest_capacity: latest_capacity} = metrics, proof) do
     latest_capacity = latest_capacity || %{}
 
     [
+      proof_metric(proof, "capacity_trend", "Capacity trend", "Capacity proof required", "gap"),
+      proof_metric(proof, "retry_denominator", "Retry denominator", "Accepted issue denominator required", "gap"),
+      proof_metric(proof, "blocked_denominator", "Blocked denominator", "Accepted issue denominator required", "gap"),
       metric("Retry events", metrics.retry_count, "partial"),
       metric("Blocked events", metrics.blocked_count, "partial"),
       metric("Running count", Map.get(latest_capacity, "running_count", 0), "partial"),
@@ -337,20 +455,46 @@ defmodule SymphonyElixir.Analytics do
     ]
   end
 
-  defp data_quality(warnings, truncated?) do
+  defp data_quality(warnings, truncated?, proof) do
     gaps =
-      [
-        "GitHub review/CI data is not configured in v1",
-        "Linear phase metrics require collector availability"
-      ] ++ if(truncated?, do: ["Analytics event file was truncated to the latest window"], else: [])
+      proof_gaps(proof) ++
+        if(truncated?, do: ["Analytics event file was truncated to the latest window"], else: [])
 
     %{
-      direct: ["Symphony runtime event store"],
-      partial: ["Linear issue lifecycle and phase comments"],
+      direct: ["Symphony runtime event store"] ++ proof_sources(proof, :direct),
+      partial: proof_sources(proof, :partial),
       gaps: gaps,
       warnings: warnings
     }
   end
+
+  defp proof_gaps(%{status: status, data_quality: data_quality}) when status in ["direct", "partial"] and is_map(data_quality) do
+    Map.get(data_quality, :gaps, [])
+  end
+
+  defp proof_gaps(%{reason: "proof_snapshot_outside_read_window"}) do
+    [
+      "proof_snapshot_outside_read_window",
+      "GitHub review/CI data is not configured in v1",
+      "Linear phase metrics require collector availability"
+    ]
+  end
+
+  defp proof_gaps(_proof) do
+    [
+      "GitHub review/CI data is not configured in v1",
+      "Linear phase metrics require collector availability"
+    ]
+  end
+
+  defp proof_sources(%{data_quality: data_quality}, key) when is_map(data_quality) do
+    Map.get(data_quality, key, [])
+  end
+
+  defp proof_sources(_proof, _key), do: []
+
+  defp gap_source_count(%{data_quality: %{gaps: gaps}}) when is_list(gaps), do: length(gaps)
+  defp gap_source_count(_proof), do: 2
 
   defp count_events(events, event_type) do
     Enum.count(events, &(Map.get(&1, "event_type") == event_type))
@@ -404,6 +548,25 @@ defmodule SymphonyElixir.Analytics do
   defp integer_value(value) when is_integer(value), do: value
   defp integer_value(value) when is_float(value), do: trunc(value)
   defp integer_value(_value), do: 0
+
+  defp atomize_known_maps(values) when is_list(values), do: Enum.map(values, &atomize_known_map/1)
+  defp atomize_known_maps(_values), do: []
+
+  defp atomize_known_map(value) when is_map(value) do
+    Map.new(value, fn {key, nested} ->
+      {known_atom_key(key), atomize_known_value(nested)}
+    end)
+  end
+
+  defp atomize_known_map(_value), do: nil
+
+  defp atomize_known_value(values) when is_list(values), do: Enum.map(values, &atomize_known_value/1)
+  defp atomize_known_value(value) when is_map(value), do: atomize_known_map(value)
+  defp atomize_known_value(value), do: value
+
+  defp known_atom_key(key) when is_binary(key) do
+    Map.get(@outcome_proof_keys, key, key)
+  end
 
   defp iso8601(%DateTime{} = datetime) do
     datetime

@@ -158,7 +158,7 @@ Notes:
   configured label to dispatch or continue running. Label matching ignores
   case and surrounding whitespace. A blank configured label matches no issue.
 - Safer Codex defaults are used when policy fields are omitted:
-  - `codex.approval_policy` defaults to `{"reject":{"sandbox_approval":true,"rules":true,"mcp_elicitations":true}}`
+  - `codex.approval_policy` defaults to `never`
   - `codex.thread_sandbox` defaults to `workspace-write`
   - `codex.turn_sandbox_policy` defaults to a `workspaceWrite` policy rooted at the current issue workspace
 - Supported `codex.approval_policy` values depend on the targeted Codex app-server version. In the current local Codex schema, string values include `untrusted`, `on-failure`, `on-request`, and `never`, and object-form `reject` is also supported.
@@ -223,6 +223,13 @@ codex:
   through a `<path>.lock` directory. Dashboard reads use the latest bounded window and report
   truncation in Data Quality when older append-only events are outside that window. Processes
   configured with different files are separate data sources and are not merged in v1.
+- The poll loop also starts a background `outcome_proof_snapshot` collector at most once every 15
+  minutes when Linear/GitHub proof is readable. Runtime panels still use the latest 500 events;
+  outcome-proof panels independently look for the latest snapshot in the latest 5,000 events and
+  fail closed when it is outside that window.
+- Each proof snapshot carries API-visible `collection` and `sources` metadata so reviewers can see
+  which trigger wrote it, which Linear project scope was queried, and how many GitHub/runtime source
+  records backed the non-empty panels.
 - Capacity snapshots are written only when running/retry/blocked counts change, so idle polling does
   not flood the bounded dashboard read window.
 - `server.port` or CLI `--port` enables the optional Phoenix LiveView dashboard and JSON API at
@@ -237,8 +244,8 @@ The observability UI now runs on a minimal Phoenix stack:
 - Bandit as the HTTP server
 - Phoenix dependency static assets for the LiveView client bootstrap
 - Tracker issue identifiers link to the tracker-provided URL when it uses `http` or `https`
-- A v1 efficiency analytics section backed by persisted Symphony runtime events, with Linear and
-  GitHub coverage gaps called out in the data-quality panel
+- A v1 efficiency analytics section backed by persisted Symphony runtime and outcome-proof events,
+  with Linear/GitHub gaps kept visible until a durable snapshot proves the metric
 
 ## Project Layout
 

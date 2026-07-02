@@ -197,12 +197,22 @@ comfort.
 
 <用人话一句话说明本轮是否已准备好 review / rework / merge，点名 PR，说明影响，并给出建议动作。>
 
+### 当前对象
+
+- **Status**: Waiting for human PR review
+- Spec: <source issue/comment, e.g. DEV-123 `## Design` or Source comment: URL>
+- PR: <PR URL; omit for no-PR Spike>
+- Head: `<full head sha; omit for no-PR Spike>`
+- CI: `<workflow/check>` <passed|failed|pending|omit for no-PR Spike>
+- Automated review: `<reviewer>` <approved|commented|timed out>, 只作为自动
+  review evidence，不等于人工批准
+
 ### Root cause / recommendation（根因/结论）
 
 <用中文说明 accepted root cause / chosen approach。讲清楚为什么这个改动能解决
 问题；Type:Spike 写 findings/recommendation。不要把 PR 状态、验证输出和根因混在同一段。>
 
-### 本轮变化
+### Code changes
 
 - `path/file`: <中文说明该文件改了什么和为什么>
 - `path/test_file`: <中文说明覆盖了哪些行为 / 回归；没有测试文件则省略>
@@ -214,7 +224,7 @@ comfort.
   mergeability / 冲突状态；完整 git hygiene 放在 `>>> 🔎 审计证据`>
 - <逐条说明旧证据、旧 head、旧假设或 reviewer feedback 如何被替换 / 回应>
 
-### 验证结论
+### Verification
 
 - <命令 / CI / reviewer signal 的结论；完整命令、输出和 check metadata 放在
   `>>> 🔎 审计证据`>
