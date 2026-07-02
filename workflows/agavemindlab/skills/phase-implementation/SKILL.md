@@ -195,7 +195,7 @@ comfort.
 
 ### 结论
 
-<一句话说明本轮是否已准备好 review / rework / merge，点名 PR，并给出建议动作。>
+<用人话一句话说明本轮是否已准备好 review / rework / merge，点名 PR，说明影响，并给出建议动作。>
 
 ### Root cause / recommendation（根因/结论）
 
