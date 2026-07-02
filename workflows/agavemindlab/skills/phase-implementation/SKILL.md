@@ -193,41 +193,31 @@ comfort.
 ```md
 ## Implementation
 
-<用人话先说明结论和影响，再列证据。>
+### 结论
+
+<一句话说明本轮是否已准备好 review / rework / merge，点名 PR，并给出建议动作。>
 
 ### Root cause / recommendation（根因/结论）
 
 <用中文说明 accepted root cause / chosen approach。讲清楚为什么这个改动能解决
 问题；Type:Spike 写 findings/recommendation。不要把 PR 状态、验证输出和根因混在同一段。>
 
-### 当前对象
+### 本轮变化
 
-- **Status**: Waiting for human PR review
-- Spec: <source issue/comment, e.g. DEV-123 `## Design` or Source comment: URL>
-- PR: <PR URL; omit for no-PR Spike>
-- Head: `<full head sha; omit for no-PR Spike>`
-- CI: `<workflow/check>` <passed|failed|pending|omit for no-PR Spike>
-- Automated review: `<reviewer>` <approved|commented|timed out>, 只作为自动
-  review evidence，不等于人工批准
+- `path/file`: <中文说明该文件改了什么和为什么>
+- `path/test_file`: <中文说明覆盖了哪些行为 / 回归；没有测试文件则省略>
 
 ### Rework 已回应（omit if not rework）
 
 - Source comment: <Linear / GitHub feedback URL>
 - Current-main compatibility: <当前 head 是否已刷新到 current `main`，以及
-  mergeability / 冲突状态>
+  mergeability / 冲突状态；完整 git hygiene 放在 `>>> 🔎 审计证据`>
 - <逐条说明旧证据、旧 head、旧假设或 reviewer feedback 如何被替换 / 回应>
 
-### Code changes
+### 验证结论
 
-- `path/file`
-  - <中文说明该文件改了什么和为什么>
-- `path/test_file`
-  - <中文说明覆盖了哪些行为 / 回归>
-
-### Verification
-
-- <命令或检查>: `<关键结果，例如 14 passed>`
-- <CI / reviewer signal>: <当前 head 上的结论；自动 review 只能作为 evidence>
+- <命令 / CI / reviewer signal 的结论；完整命令、输出和 check metadata 放在
+  `>>> 🔎 审计证据`>
 - S2 direct verification: <对当场可验或 Implementation 阶段验收项的直接证明>
 
 ### Acceptance mapping
@@ -257,6 +247,24 @@ comfort.
 ### 风险/注意（optional: non-merge caveats only）
 
 - <只列不属于合并风险判断、但仍影响 review 的事项；没有就省略>
+
+>>> 🔎 审计证据（默认折叠）
+- Spec: <source issue/comment, e.g. DEV-123 `## Design` or Source comment: URL>
+- PR: <PR URL>
+- Head: `<full head sha>`
+- CI / checks: `<workflow/check>` <passed|failed|pending>
+- Automated review: `<reviewer>` <approved|commented|timed out>，只作为自动
+  review evidence，不等于人工批准
+- Commands:
+  - `<exact command>` → <关键结果，例如 14 passed>
+- Red/Green 过程: <failing check → fix → passing check；没有则写 N/A + 原因>
+- PR feedback / check metadata: <review comments, review states, request-review
+  status>
+- Git hygiene: <base/head refresh, mergeability/conflict state, agent-state
+  cleanup not in PR diff>
+- 行号级证据:
+  - `path/file:line`: <证据说明>
+>>>
 
 >>> 🛠️ 本次激活的 skills（mirror workpad notes: invoked + Skipped）
 - Codex session id: `<session_id | n/a>`
