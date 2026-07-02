@@ -428,13 +428,14 @@ defmodule SymphonyElixir.CoreTest do
       File.read!(Path.expand("../workflows/agavemindlab/skills/phase-implementation/SKILL.md", File.cwd!()))
 
     for section <- [
-          "### 当前对象",
+          "### 结论",
           "### Root cause",
           "### Rework 已回应",
-          "### Code changes",
-          "### Verification",
+          "### 本轮变化",
+          "### 验证结论",
           "### Acceptance mapping",
-          "### Human action needed"
+          "### Human action needed",
+          ">>> 🔎 审计证据"
         ] do
       assert phase_skill =~ section
     end
@@ -445,7 +446,9 @@ defmodule SymphonyElixir.CoreTest do
           "不等于人工批准",
           "S2 direct verification",
           "S1 post-deploy close test",
-          "Current-main compatibility"
+          "Current-main compatibility",
+          "Git hygiene",
+          "Red/Green 过程"
         ] do
       assert phase_skill =~ evidence
     end
