@@ -357,7 +357,7 @@ defmodule SymphonyElixir.Analytics do
         id: "cost_per_accepted_issue",
         title: "Cost Per Accepted Issue",
         question: "What token and runtime cost is attached to accepted issues?",
-        status: "direct",
+        status: proof_metric_status(proof, ["tokens_per_accepted_issue"], "gap"),
         metrics: [
           proof_metric(proof, "tokens_per_accepted_issue", "Tokens per accepted issue", "Accepted issue denominator required", "gap"),
           metric("Runtime seconds", metrics.runtime_seconds, "partial"),
@@ -370,7 +370,7 @@ defmodule SymphonyElixir.Analytics do
         id: "capacity_reliability",
         title: "Capacity / Reliability",
         question: "Where do retries, blockers, or capacity pressure stall throughput?",
-        status: "direct",
+        status: proof_metric_status(proof, ["capacity_trend", "retry_denominator", "blocked_denominator"], "gap"),
         metrics: capacity_metrics(metrics, proof)
       },
       %{
@@ -392,7 +392,7 @@ defmodule SymphonyElixir.Analytics do
   defp proof_metric(%{metrics: metrics}, id, fallback_label, fallback_value, fallback_status) when is_list(metrics) do
     case Enum.find(metrics, &(&1.id == id)) do
       nil -> metric(fallback_label, fallback_value, fallback_status)
-      metric -> Map.take(metric, [:label, :value, :status, :numerator, :denominator, :source])
+      metric -> Map.take(metric, [:label, :value, :status, :numerator, :denominator, :source, :reason])
     end
   end
 
@@ -401,6 +401,23 @@ defmodule SymphonyElixir.Analytics do
 
   defp proof_panel_status(%{status: status}, _panel, _fallback) when status in ["direct", "partial"], do: status
   defp proof_panel_status(_proof, _panel, fallback), do: fallback
+
+  defp proof_metric_status(%{metrics: metrics}, ids, fallback) when is_list(metrics) and is_list(ids) do
+    statuses =
+      metrics
+      |> Enum.filter(&(&1.id in ids))
+      |> Enum.map(& &1.status)
+
+    cond do
+      statuses == [] -> fallback
+      Enum.any?(statuses, &(&1 == "gap")) -> "gap"
+      Enum.any?(statuses, &(&1 == "partial")) -> "partial"
+      Enum.all?(statuses, &(&1 == "direct")) -> "direct"
+      true -> fallback
+    end
+  end
+
+  defp proof_metric_status(_proof, _ids, fallback), do: fallback
 
   defp capacity_metrics(%{latest_capacity: latest_capacity} = metrics, proof) do
     latest_capacity = latest_capacity || %{}

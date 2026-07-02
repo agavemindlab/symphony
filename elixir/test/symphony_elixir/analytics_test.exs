@@ -121,7 +121,7 @@ defmodule SymphonyElixir.AnalyticsTest do
     assert %{question: "Can accepted issues move faster with the current persisted signals?"} =
              panel(summary, "delivery_cycle")
 
-    assert %{status: "direct", metrics: cost_metrics} =
+    assert %{status: "gap", metrics: cost_metrics} =
              panel(summary, "cost_per_accepted_issue")
 
     assert %{label: "Runtime seconds", value: 42, status: "partial"} in cost_metrics
@@ -138,7 +138,7 @@ defmodule SymphonyElixir.AnalyticsTest do
 
     assert %{label: "PR review quality", value: "GitHub review/CI data gap", status: "gap"} in quality_metrics
 
-    assert %{status: "direct", metrics: capacity_metrics} =
+    assert %{status: "gap", metrics: capacity_metrics} =
              panel(summary, "capacity_reliability")
 
     assert %{label: "Retry events", value: 1, status: "partial"} in capacity_metrics
@@ -279,6 +279,207 @@ defmodule SymphonyElixir.AnalyticsTest do
     write_event!(gap_path, %{event_type: "outcome_proof_snapshot", trend: %{status: "gap"}})
 
     assert Analytics.summary(path: gap_path).outcome_proof.status == "gap"
+  end
+
+  test "cost and capacity panel statuses fail closed from proof metric gaps" do
+    path = tmp_path("outcome-proof-runtime-gaps.ndjson")
+
+    snapshot =
+      proof_snapshot()
+      |> Map.update!(:metrics, fn metrics ->
+        metrics ++
+          [
+            %{
+              id: "tokens_per_accepted_issue",
+              label: "Tokens per accepted issue",
+              value: "runtime cost snapshot required",
+              status: "gap",
+              source: "runtime",
+              numerator: 0,
+              denominator: 2
+            },
+            %{
+              id: "capacity_trend",
+              label: "Capacity trend",
+              value: "capacity source required",
+              status: "gap",
+              source: "runtime",
+              numerator: nil,
+              denominator: nil
+            },
+            %{
+              id: "retry_denominator",
+              label: "Retry denominator",
+              value: "runtime retry source required",
+              status: "gap",
+              source: "runtime",
+              numerator: nil,
+              denominator: 2
+            },
+            %{
+              id: "blocked_denominator",
+              label: "Blocked denominator",
+              value: "runtime blocked source required",
+              status: "gap",
+              source: "runtime",
+              numerator: nil,
+              denominator: 2
+            }
+          ]
+      end)
+      |> put_in([:data_quality, :gaps], [
+        "runtime cost snapshot required",
+        "capacity source required",
+        "runtime retry source required",
+        "runtime blocked source required"
+      ])
+
+    write_event!(path, snapshot)
+
+    summary = Analytics.summary(path: path)
+
+    assert %{status: "gap", metrics: cost_metrics} = panel(summary, "cost_per_accepted_issue")
+
+    assert %{
+             label: "Tokens per accepted issue",
+             value: "runtime cost snapshot required",
+             status: "gap",
+             source: "runtime",
+             numerator: 0,
+             denominator: 2
+           } in cost_metrics
+
+    assert %{status: "gap", metrics: capacity_metrics} = panel(summary, "capacity_reliability")
+
+    assert %{
+             label: "Capacity trend",
+             value: "capacity source required",
+             status: "gap",
+             source: "runtime",
+             numerator: nil,
+             denominator: nil
+           } in capacity_metrics
+
+    assert %{
+             label: "Retry denominator",
+             value: "runtime retry source required",
+             status: "gap",
+             source: "runtime",
+             numerator: nil,
+             denominator: 2
+           } in capacity_metrics
+
+    assert %{
+             label: "Blocked denominator",
+             value: "runtime blocked source required",
+             status: "gap",
+             source: "runtime",
+             numerator: nil,
+             denominator: 2
+           } in capacity_metrics
+
+    assert "runtime cost snapshot required" in summary.data_quality.gaps
+  end
+
+  test "cost and capacity panel statuses derive partial direct and fallback states from proof metrics" do
+    direct_path = tmp_path("outcome-proof-runtime-direct.ndjson")
+
+    direct_snapshot =
+      proof_snapshot()
+      |> Map.update!(:metrics, fn metrics ->
+        metrics ++
+          [
+            %{
+              id: "tokens_per_accepted_issue",
+              label: "Tokens per accepted issue",
+              value: 15,
+              status: "direct",
+              source: "runtime",
+              numerator: 30,
+              denominator: 2
+            },
+            %{
+              id: "capacity_trend",
+              label: "Capacity trend",
+              value: "+2",
+              status: "direct",
+              source: "runtime",
+              numerator: 6,
+              denominator: 4
+            },
+            %{
+              id: "retry_denominator",
+              label: "Retry denominator",
+              value: "1 / 2",
+              status: "direct",
+              source: "runtime",
+              numerator: 1,
+              denominator: 2
+            },
+            %{
+              id: "blocked_denominator",
+              label: "Blocked denominator",
+              value: "1 / 2",
+              status: "direct",
+              source: "runtime",
+              numerator: 1,
+              denominator: 2
+            }
+          ]
+      end)
+
+    write_event!(direct_path, direct_snapshot)
+    direct_summary = Analytics.summary(path: direct_path)
+
+    assert %{status: "direct"} = panel(direct_summary, "cost_per_accepted_issue")
+    assert %{status: "direct"} = panel(direct_summary, "capacity_reliability")
+
+    partial_path = tmp_path("outcome-proof-runtime-partial.ndjson")
+
+    partial_snapshot =
+      direct_snapshot
+      |> update_in([:metrics], fn metrics ->
+        Enum.map(metrics, fn
+          %{id: "tokens_per_accepted_issue"} = metric ->
+            metric
+            |> Map.put(:status, "partial")
+            |> Map.put(:reason, "runtime cost snapshot missing for accepted issues")
+
+          %{id: "retry_denominator"} = metric ->
+            metric
+            |> Map.put(:status, "partial")
+            |> Map.put(:reason, "runtime retry source missing for accepted issues")
+
+          metric ->
+            metric
+        end)
+      end)
+
+    write_event!(partial_path, partial_snapshot)
+    partial_summary = Analytics.summary(path: partial_path)
+
+    assert %{status: "partial"} = panel(partial_summary, "cost_per_accepted_issue")
+    assert %{status: "partial"} = panel(partial_summary, "capacity_reliability")
+
+    fallback_path = tmp_path("outcome-proof-runtime-fallback.ndjson")
+
+    fallback_snapshot =
+      proof_snapshot()
+      |> Map.update!(:metrics, fn metrics ->
+        metrics ++
+          [
+            %{
+              id: "tokens_per_accepted_issue",
+              label: "Tokens per accepted issue",
+              value: "unknown",
+              status: "unknown",
+              source: "runtime"
+            }
+          ]
+      end)
+
+    write_event!(fallback_path, fallback_snapshot)
+    assert %{status: "gap"} = fallback_path |> then(&Analytics.summary(path: &1)) |> panel("cost_per_accepted_issue")
   end
 
   test "handles best-effort write and timestamp edge cases" do

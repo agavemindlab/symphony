@@ -441,6 +441,92 @@ defmodule SymphonyElixir.OutcomeProofTest do
     assert metrics["capacity_trend"].value == "+2"
   end
 
+  test "surfaces missing CI checks instead of hiding them outside the denominator" do
+    snapshot =
+      OutcomeProof.snapshot(
+        %{
+          accepted_issues: [
+            %{
+              id: "issue-1",
+              project: "symphony",
+              accepted_at: "2026-06-15T12:00:00Z",
+              state: "Done",
+              pull_request: %{head_sha: "abc123", reviews: [], comments: [], checks: [%{sha: "abc123", conclusion: "success"}]}
+            },
+            %{
+              id: "issue-2",
+              project: "symphony",
+              accepted_at: "2026-06-22T12:00:00Z",
+              state: "Done",
+              pull_request: %{head_sha: "def456", reviews: [], comments: [], checks: []}
+            }
+          ],
+          runtime_events: []
+        },
+        collected_at: "2026-07-01T00:00:00Z",
+        now: ~D[2026-07-01]
+      )
+
+    metrics = metrics_by_id(snapshot)
+    assert metrics["ci_success_rate"].status == "partial"
+    assert metrics["ci_success_rate"].value == "1 / 1"
+    assert metrics["ci_success_rate"].reason == "missing_ci_checks"
+    assert "missing_ci_checks" in snapshot.data_quality.gaps
+  end
+
+  test "fails closed when accepted issues have no matching runtime proof records" do
+    snapshot =
+      OutcomeProof.snapshot(
+        %{
+          accepted_issues: [
+            %{id: "issue-1", project: "symphony", accepted_at: "2026-06-15T12:00:00Z", state: "Done"},
+            %{id: "issue-2", project: "symphony", accepted_at: "2026-06-22T12:00:00Z", state: "Done"}
+          ],
+          runtime_events: []
+        },
+        collected_at: "2026-07-01T00:00:00Z",
+        now: ~D[2026-07-01]
+      )
+
+    metrics = metrics_by_id(snapshot)
+    assert metrics["tokens_per_accepted_issue"].status == "gap"
+    assert metrics["tokens_per_accepted_issue"].value == "runtime cost snapshot required"
+    assert metrics["retry_denominator"].status == "gap"
+    assert metrics["retry_denominator"].value == "runtime retry source required"
+    assert metrics["blocked_denominator"].status == "gap"
+    assert metrics["blocked_denominator"].value == "runtime blocked source required"
+    assert metrics["capacity_trend"].status == "gap"
+    assert "runtime cost snapshot required" in snapshot.data_quality.gaps
+    assert "runtime retry source required" in snapshot.data_quality.gaps
+    assert "runtime blocked source required" in snapshot.data_quality.gaps
+    assert "capacity source required" in snapshot.data_quality.gaps
+  end
+
+  test "marks runtime denominators partial when source coverage misses accepted issues" do
+    snapshot =
+      OutcomeProof.snapshot(
+        %{
+          accepted_issues: [
+            %{id: "issue-1", project: "symphony", accepted_at: "2026-06-15T12:00:00Z", state: "Done"},
+            %{id: "issue-2", project: "symphony", accepted_at: "2026-06-22T12:00:00Z", state: "Done"}
+          ],
+          runtime_events: [
+            %{"event_type" => "cost_snapshot", "issue_id" => "issue-1", "tokens" => %{"total_tokens" => 10}}
+          ]
+        },
+        collected_at: "2026-07-01T00:00:00Z",
+        now: ~D[2026-07-01]
+      )
+
+    metrics = metrics_by_id(snapshot)
+    assert metrics["tokens_per_accepted_issue"].status == "partial"
+    assert metrics["tokens_per_accepted_issue"].reason == "runtime cost snapshot missing for accepted issues"
+    assert metrics["retry_denominator"].status == "partial"
+    assert metrics["retry_denominator"].reason == "runtime retry source missing for accepted issues"
+    assert metrics["blocked_denominator"].status == "partial"
+    assert metrics["blocked_denominator"].reason == "runtime blocked source missing for accepted issues"
+  end
+
   test "marks cohort trend partial when the accepted issue cap truncates the denominator" do
     accepted_issues =
       1..201

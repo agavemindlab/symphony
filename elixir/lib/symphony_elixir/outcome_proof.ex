@@ -591,24 +591,30 @@ defmodule SymphonyElixir.OutcomeProof do
   defp ci_success_metric(issues) do
     pull_requests = pull_requests(issues)
 
-    {success, total} =
-      Enum.reduce(pull_requests, {0, 0}, fn pull_request, {success, total} ->
+    {success, total, missing} =
+      Enum.reduce(pull_requests, {0, 0, 0}, fn pull_request, {success, total, missing} ->
         case ci_result(pull_request) do
-          :success -> {success + 1, total + 1}
-          :failure -> {success, total + 1}
-          :missing -> {success, total}
+          :success -> {success + 1, total + 1, missing}
+          :failure -> {success, total + 1, missing}
+          :missing -> {success, total, missing + 1}
         end
       end)
 
-    %{
+    metric = %{
       id: "ci_success_rate",
       label: "GitHub CI pass rate",
       value: ratio_value(success, total),
-      status: ci_status(total, length(pull_requests), length(issues)),
+      status: ci_status(total, missing, length(pull_requests), length(issues)),
       source: "github",
       numerator: success,
       denominator: total
     }
+
+    if missing > 0 do
+      Map.put(metric, :reason, "missing_ci_checks")
+    else
+      metric
+    end
   end
 
   defp pull_requests(issues) do
@@ -624,40 +630,67 @@ defmodule SymphonyElixir.OutcomeProof do
   defp linked_source_status(source_count, accepted_count) when source_count == accepted_count, do: "direct"
   defp linked_source_status(_source_count, _accepted_count), do: "partial"
 
-  defp ci_status(0, 0, _accepted_count), do: "gap"
-  defp ci_status(total, pull_request_count, accepted_count) when total == pull_request_count and pull_request_count == accepted_count, do: "direct"
-  defp ci_status(total, _pull_request_count, _accepted_count) when total > 0, do: "partial"
-  defp ci_status(_total, _pull_request_count, _accepted_count), do: "gap"
+  defp ci_status(0, 0, 0, _accepted_count), do: "gap"
+
+  defp ci_status(total, 0, pull_request_count, accepted_count) when total == pull_request_count and pull_request_count == accepted_count,
+    do: "direct"
+
+  defp ci_status(total, _missing, _pull_request_count, _accepted_count) when total > 0, do: "partial"
+  defp ci_status(_total, _missing, _pull_request_count, _accepted_count), do: "gap"
 
   defp tokens_per_accepted_issue_metric(issues, runtime_events, accepted_ids) do
-    total =
+    cost_events =
       runtime_events
       |> Enum.filter(&(MapSet.member?(accepted_ids, get_string(&1, :issue_id)) and get_string(&1, :event_type) == "cost_snapshot"))
+
+    total =
+      cost_events
       |> Enum.map(&integer_value(get_in(get_map(&1, :tokens), ["total_tokens"])))
       |> Enum.sum()
 
     denominator = length(issues)
-    value = if denominator > 0, do: div(total, denominator), else: "accepted issue denominator required"
+    cost_issue_count = cost_events |> Enum.map(&get_string(&1, :issue_id)) |> Enum.reject(&(&1 == "")) |> Enum.uniq() |> length()
 
-    %{
-      id: "tokens_per_accepted_issue",
-      label: "Tokens per accepted issue",
-      value: value,
-      status: status_for(denominator),
-      source: "runtime",
-      numerator: total,
-      denominator: denominator
-    }
+    cond do
+      denominator == 0 ->
+        gap_metric("tokens_per_accepted_issue", "Tokens per accepted issue", "accepted issue denominator required", "runtime")
+
+      cost_issue_count == 0 ->
+        runtime_gap_metric("tokens_per_accepted_issue", "Tokens per accepted issue", "runtime cost snapshot required", total, denominator)
+
+      cost_issue_count < denominator ->
+        %{
+          id: "tokens_per_accepted_issue",
+          label: "Tokens per accepted issue",
+          value: div(total, denominator),
+          status: "partial",
+          source: "runtime",
+          numerator: total,
+          denominator: denominator,
+          reason: "runtime cost snapshot missing for accepted issues"
+        }
+
+      true ->
+        %{
+          id: "tokens_per_accepted_issue",
+          label: "Tokens per accepted issue",
+          value: div(total, denominator),
+          status: "direct",
+          source: "runtime",
+          numerator: total,
+          denominator: denominator
+        }
+    end
   end
 
   defp retry_denominator_metric(issues, runtime_events, accepted_ids) do
     numerator = runtime_issue_event_count(runtime_events, accepted_ids, "retry_scheduled")
-    ratio_metric("retry_denominator", "Retry denominator", numerator, length(issues), "runtime")
+    runtime_denominator_metric("retry_denominator", "Retry denominator", numerator, issues, runtime_events, accepted_ids, "runtime retry source required")
   end
 
   defp blocked_denominator_metric(issues, runtime_events, accepted_ids) do
     numerator = runtime_issue_event_count(runtime_events, accepted_ids, "blocked")
-    ratio_metric("blocked_denominator", "Blocked denominator", numerator, length(issues), "runtime")
+    runtime_denominator_metric("blocked_denominator", "Blocked denominator", numerator, issues, runtime_events, accepted_ids, "runtime blocked source required")
   end
 
   defp capacity_trend_metric(runtime_events, baseline, latest) when is_map(baseline) and is_map(latest) do
@@ -693,7 +726,7 @@ defmodule SymphonyElixir.OutcomeProof do
     %{
       direct: metrics |> Enum.filter(&(&1.status == "direct")) |> Enum.map(& &1.source) |> Enum.uniq(),
       partial: metrics |> Enum.filter(&(&1.status == "partial")) |> Enum.map(& &1.source) |> Enum.uniq(),
-      gaps: metrics |> Enum.filter(&(&1.status == "gap")) |> Enum.map(& &1.value) |> Enum.filter(&is_binary/1) |> Enum.uniq(),
+      gaps: metrics |> Enum.map(&metric_gap_reason/1) |> Enum.filter(&is_binary/1) |> Enum.uniq(),
       warnings: proof_warnings(accepted_issues, truncated?, trend)
     }
   end
@@ -730,6 +763,50 @@ defmodule SymphonyElixir.OutcomeProof do
   defp gap_metric(id, label, value, source) do
     %{id: id, label: label, value: value, status: "gap", source: source, numerator: nil, denominator: nil}
   end
+
+  defp runtime_gap_metric(id, label, value, numerator, denominator) do
+    %{id: id, label: label, value: value, status: "gap", source: "runtime", numerator: numerator, denominator: denominator}
+  end
+
+  defp runtime_denominator_metric(id, label, numerator, issues, runtime_events, accepted_ids, missing_reason) do
+    denominator = length(issues)
+    source_count = runtime_source_issue_count(runtime_events, accepted_ids)
+
+    cond do
+      denominator == 0 ->
+        ratio_metric(id, label, numerator, denominator, "runtime")
+
+      source_count == 0 ->
+        runtime_gap_metric(id, label, missing_reason, nil, denominator)
+
+      source_count < denominator ->
+        id
+        |> ratio_metric(label, numerator, denominator, "runtime")
+        |> Map.put(:status, "partial")
+        |> Map.put(:reason, partial_runtime_reason(missing_reason))
+
+      true ->
+        ratio_metric(id, label, numerator, denominator, "runtime")
+    end
+  end
+
+  defp runtime_source_issue_count(runtime_events, accepted_ids) do
+    runtime_events
+    |> Enum.filter(fn event ->
+      MapSet.member?(accepted_ids, get_string(event, :issue_id)) and
+        get_string(event, :event_type) in ["cost_snapshot", "run_completed", "retry_scheduled", "blocked"]
+    end)
+    |> Enum.map(&get_string(&1, :issue_id))
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.uniq()
+    |> length()
+  end
+
+  defp partial_runtime_reason(reason), do: String.replace(reason, " required", " missing for accepted issues")
+
+  defp metric_gap_reason(%{reason: reason}) when is_binary(reason), do: reason
+  defp metric_gap_reason(%{status: "gap", value: value}) when is_binary(value), do: value
+  defp metric_gap_reason(_metric), do: nil
 
   defp ratio_value(_numerator, 0), do: "denominator required"
   defp ratio_value(numerator, denominator), do: "#{numerator} / #{denominator}"
