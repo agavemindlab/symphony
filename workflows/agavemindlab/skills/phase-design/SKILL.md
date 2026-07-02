@@ -37,6 +37,13 @@ Main Flow has already closed `## Requirements` (a `✅` human approval or a
 this skill. Just read the `## Requirements` artifact to extract `Primary:`,
 `验收标准 S<N>`, and `关键假设` before designing the approach.
 
+Treat the current `## Requirements` artifact as the close-test source of truth.
+Design may explain how each `S<N>` will be proven, but must not narrow, split,
+defer, waive, or reassign any `S<N>` to another issue. If human clarification,
+related-issue evidence, or design discovery shows the close test needs to
+change, use Cross-phase rework to Requirements before writing a new Design
+artifact.
+
 If this run is a rework of `## Design` (the artifact has unresolved human
 feedback in its thread), follow the same-phase Rework cycle in your workflow instructions.
 
@@ -275,6 +282,8 @@ them.
 ```md
 ## Design
 
+<用人话先说明结论和影响，再列证据。>
+
 ### 核心机制（mechanism）
 <how the system works end-to-end; for cross-component flows include trigger,
 input, key steps, output, and blocking point（触发者 / 输入 / 关键步骤 / 输出 /
@@ -346,11 +355,12 @@ preserve it here — do not flatten the reasoning down to a bare question.
 ```md
 ### 待确认（一次性审阅：认可全部推荐请回复「同意默认」，否则逐条说明）
 [NEEDS CLARIFICATION]
-Q1. <question> 〔影响：低〕
+**Q1. <question> 〔影响：低〕**
   背景: <一句：这个 fork 是什么 + 选错的代价>
   - A（推荐）: <answer> — <这样选的后果 / 为什么优于备选>
   - B: <answer> — <这样选的后果>
-Q2. <question> 🔴 〔影响：高 · 需明确回答〕
+
+**Q2. <question> 🔴 〔影响：高 · 需明确回答〕**
   背景: <一句：利害所在 / 为什么 blanket approval 不能覆盖>
   - A（推荐）: <answer> — <后果>
   - B: <answer> — <后果>
@@ -371,7 +381,7 @@ mis-scoped, that is a signal to propose a `sub-issue` split via `symphony-issue`
 When a batched `[NEEDS CLARIFICATION]` block remains after analysis:
 
 1. Write the batched block at the foot of the `## Design` artifact.
-2. Post or update the artifact comment.
+2. Publish the artifact through the workflow artifact protocol.
 3. Move the issue to `Human Review`.
 4. Stop.
 
@@ -389,7 +399,7 @@ When a batched `[NEEDS CLARIFICATION]` block remains after analysis:
 
 ### On resume
 
-Read the human's reply in the artifact thread and apply the consent convention:
+Read the human's reply in the artifact thread and apply the consent convention. Fold answers into the revised artifact content, not the old comment body:
 
 - For each **resolved** question, fold the chosen answer into the artifact
   (the `核心机制` / `方案（approach）` / `选择理由` / `风险/注意` as fitting) and drop
@@ -410,11 +420,12 @@ Once no batched question remains, proceed to Exit.
 
 ## Cross-phase rework
 
-If `Rework` feedback indicates that Requirements need fundamental revision
-(problem statement wrong, acceptance criteria invalid) rather than a Design
-fix, do not patch it within `## Design`. Follow the cross-phase rework
-protocol in your workflow instructions: resolve this artifact, resolve `## Requirements`,
-update workpad `current_phase: Requirements`, and open `phase-requirements`.
+If human clarification, `Rework` feedback, or Design discovery indicates that
+Requirements need fundamental revision (problem statement wrong, acceptance
+criteria invalid, or close-test ownership changed) rather than a Design fix, do
+not patch it within `## Design`. Follow the cross-phase rework protocol in your
+workflow instructions: resolve this artifact, resolve `## Requirements`, update
+workpad `current_phase: Requirements`, and open `phase-requirements`.
 
 ## Exit
 
@@ -437,7 +448,7 @@ about form, not correctness:
 - Type-specific approach emphasis satisfied for `Primary:`.
 - No unresolved `[NEEDS CLARIFICATION]` markers.
 
-Post or update the `## Design` artifact and set the workpad
+Publish the `## Design` artifact through the workflow artifact protocol and set the workpad
 `current_phase: Design`. Do **not** move the issue yourself on a clean exit —
 hand back one of two outcomes (`advance` / `stop`) for Main Flow to execute.
 The decision is yours; Main Flow only carries it out.

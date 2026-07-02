@@ -68,6 +68,9 @@ After all layers load, the launcher additionally exports:
 - `SYMPHONY_WORKSPACE_ROOT` (defaults to `$HOME/symphony-workspaces` if unset)
 - `SYMPHONY_PROFILE` (the resolved profile name)
 
+Set `SYMPHONY_PORT` in any environment layer to pass `--port` to the Symphony
+CLI and enable the dashboard.
+
 ## GitHub App authentication
 
 If all three GitHub App variables are set after the environment layers load,

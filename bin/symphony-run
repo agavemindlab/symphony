@@ -131,7 +131,13 @@ fi
 
 workflow_dir="$repo_root/workflows/$project"
 workflow_file="$workflow_dir/WORKFLOW.md"
-defaults_env="$repo_root/workflows/agavemindlab/project.env.defaults"
+if [ -L "$workflow_file" ]; then
+  link_target="$(readlink "$workflow_file")"
+  namespace="$(basename "$(dirname "$link_target")")"
+else
+  namespace="$project"
+fi
+defaults_env="$repo_root/workflows/$namespace/project.env.defaults"
 project_env="$workflow_dir/project.env"
 local_env="$workflow_dir/project.env.local"
 
@@ -189,4 +195,7 @@ printf 'symphony-run: starting project=%s profile=%s workflow=%s logs=%s\n' \
 
 cd "$repo_root/elixir"
 mise exec -- mix escript.build >/dev/null
-exec mise exec -- ./bin/symphony --i-understand-that-this-will-be-running-without-the-usual-guardrails "$workflow_file"
+symphony_args=(--i-understand-that-this-will-be-running-without-the-usual-guardrails)
+[ -z "${SYMPHONY_PORT:-}" ] || symphony_args+=(--port "$SYMPHONY_PORT")
+symphony_args+=("$workflow_file")
+exec mise exec -- ./bin/symphony "${symphony_args[@]}"

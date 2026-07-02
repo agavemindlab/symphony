@@ -228,11 +228,12 @@ preserve it here — do not flatten the reasoning down to a bare question.
 ```md
 ### 待确认（一次性审阅：认可全部推荐请回复「同意默认」，否则逐条说明）
 [NEEDS CLARIFICATION]
-Q1. <question> 〔影响：低〕
+**Q1. <question> 〔影响：低〕**
   背景: <一句：歧义在哪 + 选错的代价>
   - A（推荐）: <answer> — <这样选的后果 / 为什么是安全选择>
   - B: <answer> — <这样选的后果>
-Q2. <question> 🔴 〔影响：高 · 需明确回答〕
+
+**Q2. <question> 🔴 〔影响：高 · 需明确回答〕**
   背景: <一句：利害所在 / 为什么 blanket approval 不能覆盖>
   - A（推荐）: <answer> — <后果>
   - B: <answer> — <后果>
@@ -296,6 +297,8 @@ and runs once checkable (re-entered via `In Progress` — see your workflow inst
 ```md
 ## Requirements
 
+<用人话先说明结论和影响，再列证据。>
+
 Primary: Type:<Bug|Feature|Refactor|Performance|Migration|Chore|Spike|Other>
 
 要解决的问题（what）:
@@ -345,7 +348,7 @@ When a batched `[NEEDS CLARIFICATION]` block remains after honest analysis:
 
 ### On resume
 
-Read the human's reply in the artifact thread and apply the consent convention:
+Read the human's reply in the artifact thread and apply the consent convention. Fold answers into the revised artifact content, not the old comment body:
 
 - For each **resolved** question, fold the chosen answer into the artifact
   (into `要解决的问题` / `为什么解决` / `验收标准` / `关键假设` as fitting) and
