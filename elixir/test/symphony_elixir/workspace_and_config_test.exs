@@ -131,6 +131,55 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     end
   end
 
+  test "workspace creation retries failed init when cleanup cannot remove workspace" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-workspace-retry-after-cleanup-fail-#{System.unique_integer([:positive])}"
+      )
+
+    workspace_root = Path.join(test_root, "workspaces")
+
+    try do
+      attempts_file = Path.join(test_root, "attempts")
+      workspace = Path.join(workspace_root, "MT-CLEANUP-RETRY")
+
+      write_workflow_file!(Workflow.workflow_file_path(),
+        workspace_root: workspace_root,
+        hook_after_create: """
+        attempts_file="#{attempts_file}"
+        attempts=$(cat "$attempts_file" 2>/dev/null || printf 0)
+        attempts=$((attempts + 1))
+        printf '%s' "$attempts" > "$attempts_file"
+        printf 'partial attempt %s\\n' "$attempts" > partial.txt
+        if [ "$attempts" -eq 1 ]; then
+          chmod a-w .
+          exit 42
+        fi
+        printf 'initialized\\n' > initialized.txt
+        """
+      )
+
+      assert {:error, {:workspace_hook_failed, "after_create", 42, _output}} =
+               Workspace.create_for_issue("MT-CLEANUP-RETRY")
+
+      assert File.read!(attempts_file) == "1"
+      assert File.dir?(workspace)
+      assert File.read!(Path.join(workspace, "partial.txt")) == "partial attempt 1\n"
+
+      File.chmod!(workspace, 0o700)
+
+      assert {:ok, retry_workspace} = Workspace.create_for_issue("MT-CLEANUP-RETRY")
+      assert File.read!(attempts_file) == "2"
+      assert File.read!(Path.join(retry_workspace, "initialized.txt")) == "initialized\n"
+    after
+      workspace = Path.join(workspace_root, "MT-CLEANUP-RETRY")
+      if File.exists?(workspace), do: File.chmod(workspace, 0o700)
+      if File.exists?(workspace_root), do: File.chmod(workspace_root, 0o755)
+      File.rm_rf(test_root)
+    end
+  end
+
   test "workspace replaces stale non-directory paths" do
     workspace_root =
       Path.join(
