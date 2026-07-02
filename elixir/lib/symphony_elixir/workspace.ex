@@ -624,6 +624,9 @@ defmodule SymphonyElixir.Workspace do
     %{
       issue_id: issue_id,
       issue_identifier: identifier || "issue",
+      issue_title: Map.get(issue, :title),
+      issue_state: Map.get(issue, :state),
+      issue_url: Map.get(issue, :url),
       project: normalize_issue_project(Map.get(issue, :project))
     }
   end
@@ -632,6 +635,9 @@ defmodule SymphonyElixir.Workspace do
     %{
       issue_id: nil,
       issue_identifier: identifier,
+      issue_title: nil,
+      issue_state: nil,
+      issue_url: nil,
       project: nil
     }
   end
@@ -640,18 +646,27 @@ defmodule SymphonyElixir.Workspace do
     %{
       issue_id: nil,
       issue_identifier: "issue",
+      issue_title: nil,
+      issue_state: nil,
+      issue_url: nil,
       project: nil
     }
   end
 
   defp hook_env(issue_context) do
     [{"SYMPHONY_WORKFLOW_DIR", Path.dirname(Workflow.workflow_file_path())}]
+    |> Kernel.++(issue_hook_env(issue_context))
     |> Kernel.++(project_hook_env(Map.get(issue_context, :project)))
   end
 
   defp cleared_hook_env do
     [
       "SYMPHONY_WORKFLOW_DIR",
+      "SYMPHONY_ISSUE_ID",
+      "SYMPHONY_ISSUE_IDENTIFIER",
+      "SYMPHONY_ISSUE_TITLE",
+      "SYMPHONY_ISSUE_STATE",
+      "SYMPHONY_ISSUE_URL",
       "SYMPHONY_PROJECT_DIR",
       "SYMPHONY_LINEAR_PROJECT_ID",
       "SYMPHONY_LINEAR_PROJECT_SLUG",
@@ -678,6 +693,16 @@ defmodule SymphonyElixir.Workspace do
     """
   end
 
+  defp issue_hook_env(issue_context) do
+    [
+      {"SYMPHONY_ISSUE_ID", env_value(Map.get(issue_context, :issue_id))},
+      {"SYMPHONY_ISSUE_IDENTIFIER", env_value(Map.get(issue_context, :issue_identifier))},
+      {"SYMPHONY_ISSUE_TITLE", env_value(Map.get(issue_context, :issue_title))},
+      {"SYMPHONY_ISSUE_STATE", env_value(Map.get(issue_context, :issue_state))},
+      {"SYMPHONY_ISSUE_URL", env_value(Map.get(issue_context, :issue_url))}
+    ]
+  end
+
   defp project_hook_env(%{id: id, slug_id: slug_id, name: name}) do
     []
     |> maybe_put_hook_env("SYMPHONY_LINEAR_PROJECT_ID", id)
@@ -689,6 +714,10 @@ defmodule SymphonyElixir.Workspace do
 
   defp maybe_put_hook_env(env, name, value) when is_binary(value), do: env ++ [{name, value}]
   defp maybe_put_hook_env(env, _name, _value), do: env
+
+  defp env_value(nil), do: ""
+  defp env_value(value) when is_binary(value), do: value
+  defp env_value(value), do: to_string(value)
 
   defp normalize_issue_project(%{id: _id, slug_id: _slug_id, name: _name} = project), do: project
   defp normalize_issue_project(_project), do: nil
