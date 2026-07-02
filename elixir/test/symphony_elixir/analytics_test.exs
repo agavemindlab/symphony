@@ -221,7 +221,7 @@ defmodule SymphonyElixir.AnalyticsTest do
     assert %{label: "Auto-advance rate", value: "1 / 3", status: "direct", source: "linear", numerator: 1, denominator: 3} in autonomy_metrics
     assert %{label: "Human touch count", value: 1, status: "direct", source: "linear", numerator: 1, denominator: 2} in autonomy_metrics
 
-    assert %{status: "direct", metrics: quality_metrics} = panel(summary, "quality_rework")
+    assert %{status: "partial", metrics: quality_metrics} = panel(summary, "quality_rework")
     assert %{label: "PR review quality", value: 2, status: "direct", source: "github", numerator: 2, denominator: 2} in quality_metrics
     assert %{label: "GitHub CI pass rate", value: "1 / 2", status: "partial", source: "github", numerator: 1, denominator: 2} in quality_metrics
 
@@ -724,6 +724,15 @@ defmodule SymphonyElixir.AnalyticsTest do
           status: "direct",
           source: "linear",
           numerator: 1,
+          denominator: 2
+        },
+        %{
+          id: "clarification_rate",
+          label: "Clarification rate",
+          value: "0 / 2",
+          status: "direct",
+          source: "linear",
+          numerator: 0,
           denominator: 2
         },
         %{

@@ -345,7 +345,7 @@ defmodule SymphonyElixir.Analytics do
         id: "quality_rework",
         title: "Quality / Rework",
         question: "How much accepted work comes back as rework or PR/CI failure?",
-        status: proof_panel_status(proof, "quality_rework", "gap"),
+        status: proof_metric_status(proof, ["clarification_rate", "rework_rate", "pr_human_review_count", "ci_success_rate"], "gap"),
         metrics: [
           proof_metric(proof, "clarification_rate", "Clarification rate", "Linear phase comments required", "gap"),
           proof_metric(proof, "rework_rate", "Rework rate", "Linear state history required", "gap"),
