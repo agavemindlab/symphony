@@ -233,6 +233,23 @@ defmodule SymphonyElixir.CoreTest do
     assert Map.fetch!(tracker, "required_labels") == ["symphony", "symphony:maestro"]
     assert get_in(config, ["workspace", "root"]) == "$SYMPHONY_MAESTRO_WORKSPACE_ROOT"
 
+    after_create = get_in(config, ["hooks", "after_create"])
+    assert after_create =~ "maestro-preflight-failure.sh"
+    assert after_create =~ "SYMPHONY_MAESTRO_FAILURE_STATUS"
+    assert after_create =~ "SYMPHONY_ISSUE_ID"
+    assert after_create =~ "trap 'status=$?"
+
+    failure_helper =
+      File.read!(Path.expand("../workflows/agavemindlab/maestro-preflight-failure.sh", File.cwd!()))
+
+    assert failure_helper =~ "🤖 Maestro 预审核:"
+    assert failure_helper =~ "comments(first: 50)"
+    assert failure_helper =~ "commentCreate"
+    assert failure_helper =~ "parentId"
+    assert failure_helper =~ "issueUpdate"
+    assert failure_helper =~ "symphony:maestro"
+    assert failure_helper =~ "Human Review"
+
     assert prompt =~ ~r/invoke the `\$maestro` launcher or spawn a\s+subagent/
     assert prompt =~ ~r/this workflow session is\s+already the isolated reviewer/
     assert prompt =~ "fresh Codex session"

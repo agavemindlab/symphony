@@ -23,6 +23,27 @@ hooks:
     set -e
     : "${SYMPHONY_WORKFLOW_DIR:?SYMPHONY_WORKFLOW_DIR is not set}"
 
+    workflow_file="$SYMPHONY_WORKFLOW_DIR/MAESTRO_WORKFLOW.md"
+    shared_workflow_dir="$SYMPHONY_WORKFLOW_DIR"
+    if [ -L "$workflow_file" ]; then
+      link_target="$(readlink "$workflow_file")"
+      case "$link_target" in
+        /*) shared_workflow_dir="$(cd "$(dirname "$link_target")" && pwd -P)" ;;
+        *) shared_workflow_dir="$(cd "$(dirname "$workflow_file")/$(dirname "$link_target")" && pwd -P)" ;;
+      esac
+    fi
+
+    maestro_after_create_failed() {
+      status="$1"
+      [ -n "${SYMPHONY_ISSUE_ID:-}" ] || return 0
+      [ -f "$shared_workflow_dir/maestro-preflight-failure.sh" ] || return 0
+      SYMPHONY_MAESTRO_FAILURE_STATUS="$status" \
+        SYMPHONY_MAESTRO_FAILURE_REASON="pre-prompt after_create failed" \
+        sh "$shared_workflow_dir/maestro-preflight-failure.sh" || true
+    }
+
+    trap 'status=$?; if [ "$status" -ne 0 ]; then maestro_after_create_failed "$status"; fi' EXIT
+
     if [ -f "$SYMPHONY_WORKFLOW_DIR/project-for-linear-project.sh" ]; then
       . "$SYMPHONY_WORKFLOW_DIR/project-for-linear-project.sh"
     fi
@@ -64,6 +85,8 @@ hooks:
         fi
       done
     fi
+
+    trap - EXIT
   issue_running: |
     set -e
     : "${SYMPHONY_WORKFLOW_DIR:?SYMPHONY_WORKFLOW_DIR is not set}"

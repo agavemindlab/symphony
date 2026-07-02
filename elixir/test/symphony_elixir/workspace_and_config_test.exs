@@ -1839,6 +1839,49 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     end
   end
 
+  test "local workspace hooks receive issue context environment" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-workspace-issue-hook-env-#{System.unique_integer([:positive])}"
+      )
+
+    try do
+      workspace_root = Path.join(test_root, "workspaces")
+      File.mkdir_p!(workspace_root)
+
+      write_workflow_file!(Workflow.workflow_file_path(),
+        workspace_root: workspace_root,
+        hook_after_create:
+          "printf '%s\\n%s\\n%s\\n%s\\n%s\\n' \"$SYMPHONY_ISSUE_ID\" \"$SYMPHONY_ISSUE_IDENTIFIER\" \"$SYMPHONY_ISSUE_TITLE\" \"$SYMPHONY_ISSUE_STATE\" \"$SYMPHONY_ISSUE_URL\" > after-create-issue-env.txt"
+      )
+
+      issue = %Issue{
+        id: "issue-workspace-hook",
+        identifier: "MT-WORKSPACE-HOOK",
+        title: "Workspace Hook",
+        state: "Human Review",
+        url: "https://linear.example/MT-WORKSPACE-HOOK"
+      }
+
+      assert {:ok, workspace} = Workspace.create_for_issue(issue)
+
+      assert File.read!(Path.join(workspace, "after-create-issue-env.txt")) ==
+               Enum.join(
+                 [
+                   "issue-workspace-hook",
+                   "MT-WORKSPACE-HOOK",
+                   "Workspace Hook",
+                   "Human Review",
+                   "https://linear.example/MT-WORKSPACE-HOOK"
+                 ],
+                 "\n"
+               ) <> "\n"
+    after
+      File.rm_rf(test_root)
+    end
+  end
+
   test "canonical workflow surfaces setup failures before installing shared skills" do
     test_root =
       Path.join(
