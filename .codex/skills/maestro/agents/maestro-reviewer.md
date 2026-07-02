@@ -324,6 +324,15 @@ Reply locations:
   acceptance criteria plus later human-approved scope changes. Request changes
   when the artifact would leave the next phase unable to satisfy that source of
   truth.
+- For Design or Implementation of a cross-component runtime path that touches a
+  user/API entrypoint plus durable state, a background worker, external process,
+  or metric/alert semantics, require one black-box or near-black-box runtime
+  exercise of that path. For Design, the verification plan must name that
+  exercise; for Implementation, the artifact must cite the command, log, or
+  manual exercise. Do not infer equivalence from unit/service tests, CI, PR diff,
+  approved Design, or future Deployment observation; an exception requires the
+  artifact to explicitly say the runtime exercise is impossible and map named
+  tests to each runtime boundary. Request changes when this is absent.
 - When feedback or evidence shows the accepted source of truth is incomplete,
   wrong, or newly changed, treat it as cross-phase rework. Target Requirements
   for scope, acceptance criteria, actor identity, auth/permission boundaries,
@@ -357,6 +366,10 @@ Reply locations:
   rework of the relevant earlier phase.
 - For `## Implementation`, request changes when the artifact 缺少合并风险判断,
   or when its 合并风险判断 is clearly contradicted by the PR diff / evidence.
+- For `## Implementation`, request changes when a cross-component runtime path
+  lacks artifact-cited black-box or near-black-box runtime exercise evidence;
+  targeted pytest, CI, PR diff, or an approved Design test plan do not satisfy
+  this by themselves.
 - For `## Implementation`, request changes instead of approve/merge nudge when
   a related issue contains operational prerequisites and the reviewed issue has
   no independent runtime/deployment value until that work finishes. If the
