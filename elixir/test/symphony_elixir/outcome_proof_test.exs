@@ -84,6 +84,8 @@ defmodule SymphonyElixir.OutcomeProofTest do
       path: path,
       linear_graphql: linear_graphql,
       github_pull_request: github_pull_request,
+      collection_trigger: "poll",
+      collection_interval_ms: 900_000,
       collected_at: "2026-07-01T00:00:00Z",
       now: ~D[2026-07-01]
     ]
@@ -100,6 +102,11 @@ defmodule SymphonyElixir.OutcomeProofTest do
     assert metrics["human_touch_count"].value == 1
     assert metrics["pr_human_review_count"].value == 1
     assert metrics["ci_success_rate"].value == "1 / 1"
+
+    assert snapshot.collection == %{trigger: "poll", interval_ms: 900_000}
+    assert snapshot.sources.linear == %{status: "direct", scope: %{kind: "slug", values: ["project"]}, accepted_issue_count: 1}
+    assert snapshot.sources.github == %{status: "direct", pull_request_count: 1, ci_check_count: 1, missing_ci_count: 0}
+    assert snapshot.sources.runtime == %{status: "gap", event_count: 0, accepted_issue_source_count: 0}
 
     assert %{events: [%{"event_type" => "outcome_proof_snapshot"}]} = Analytics.read_events(path: path, max_events: :all)
 

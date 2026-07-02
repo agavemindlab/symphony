@@ -2168,7 +2168,10 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   defp record_outcome_proof_snapshot do
-    case OutcomeProof.collect() do
+    case OutcomeProof.collect(
+           collection_trigger: "poll",
+           collection_interval_ms: @outcome_proof_collection_interval_ms
+         ) do
       {:ok, _snapshot} ->
         :ok
 

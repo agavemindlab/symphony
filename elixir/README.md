@@ -227,6 +227,9 @@ codex:
   minutes when Linear/GitHub proof is readable. Runtime panels still use the latest 500 events;
   outcome-proof panels independently look for the latest snapshot in the latest 5,000 events and
   fail closed when it is outside that window.
+- Each proof snapshot carries API-visible `collection` and `sources` metadata so reviewers can see
+  which trigger wrote it, which Linear project scope was queried, and how many GitHub/runtime source
+  records backed the non-empty panels.
 - Capacity snapshots are written only when running/retry/blocked counts change, so idle polling does
   not flood the bounded dashboard read window.
 - `server.port` or CLI `--port` enables the optional Phoenix LiveView dashboard and JSON API at

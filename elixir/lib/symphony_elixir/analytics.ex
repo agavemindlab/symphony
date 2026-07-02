@@ -29,7 +29,23 @@ defmodule SymphonyElixir.Analytics do
     "partial" => :partial,
     "gaps" => :gaps,
     "warnings" => :warnings,
-    "reason" => :reason
+    "reason" => :reason,
+    "collection" => :collection,
+    "trigger" => :trigger,
+    "interval_ms" => :interval_ms,
+    "sources" => :sources,
+    "linear" => :linear,
+    "github" => :github,
+    "runtime" => :runtime,
+    "scope" => :scope,
+    "kind" => :kind,
+    "values" => :values,
+    "accepted_issue_count" => :accepted_issue_count,
+    "pull_request_count" => :pull_request_count,
+    "ci_check_count" => :ci_check_count,
+    "missing_ci_count" => :missing_ci_count,
+    "event_count" => :event_count,
+    "accepted_issue_source_count" => :accepted_issue_source_count
   }
 
   @type event :: map()
@@ -303,6 +319,8 @@ defmodule SymphonyElixir.Analytics do
     %{
       status: snapshot_status(snapshot),
       collected_at: Map.get(snapshot, "collected_at"),
+      collection: atomize_known_map(Map.get(snapshot, "collection")),
+      sources: atomize_known_map(Map.get(snapshot, "sources")),
       accepted_issue_count: integer_value(Map.get(snapshot, "accepted_issue_count")),
       cohorts: atomize_known_maps(Map.get(snapshot, "cohorts", [])),
       baseline: atomize_known_map(Map.get(snapshot, "baseline")),

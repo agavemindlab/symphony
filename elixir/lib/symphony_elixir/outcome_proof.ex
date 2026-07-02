@@ -99,7 +99,7 @@ defmodule SymphonyElixir.OutcomeProof do
   """
 
   @spec collect(keyword()) :: {:ok, snapshot()} | {:error, term()}
-  def collect(opts \\ []) when is_list(opts) do
+  def collect(opts) when is_list(opts) do
     path = Keyword.get(opts, :path, Analytics.file_path())
 
     with {:ok, accepted_issues} <- fetch_linear_accepted_issues(opts) do
@@ -117,7 +117,11 @@ defmodule SymphonyElixir.OutcomeProof do
 
       snapshot =
         snapshot(
-          %{accepted_issues: accepted_issues, runtime_events: runtime_events},
+          %{
+            accepted_issues: accepted_issues,
+            runtime_events: runtime_events,
+            linear_scope: configured_linear_scope_for_snapshot()
+          },
           opts
         )
 
@@ -149,6 +153,8 @@ defmodule SymphonyElixir.OutcomeProof do
       event_type: "outcome_proof_snapshot",
       collected_at: collected_at,
       digest: digest(%{accepted_issues: accepted_issues, runtime_events: runtime_events}),
+      collection: collection_metadata(opts),
+      sources: source_summary(source, accepted_issues, runtime_events, metrics, truncated?),
       proof_window: %{
         accepted_weeks: @accepted_weeks,
         issue_cap: @issue_cap,
@@ -223,6 +229,17 @@ defmodule SymphonyElixir.OutcomeProof do
 
   defp project_query(:slug), do: @query_by_project_slug
   defp project_query(:name), do: @query_by_project_name
+
+  defp configured_linear_scope_for_snapshot do
+    {:ok, slugs} = Config.configured_project_slugs()
+    {:ok, names} = Config.configured_project_names()
+
+    if names != [] do
+      %{kind: "name", values: names}
+    else
+      %{kind: "slug", values: slugs}
+    end
+  end
 
   defp normalize_linear_issue(issue) do
     raw_comments = get_in(issue, ["comments", "nodes"]) || []
@@ -743,6 +760,67 @@ defmodule SymphonyElixir.OutcomeProof do
 
   defp maybe_warn(warnings, true, warning), do: [warning | warnings]
   defp maybe_warn(warnings, _condition, _warning), do: warnings
+
+  defp collection_metadata(opts) do
+    trigger = opts |> Keyword.get(:collection_trigger, "manual") |> to_string()
+
+    %{
+      trigger: trigger,
+      interval_ms: Keyword.get(opts, :collection_interval_ms)
+    }
+    |> Enum.reject(fn {_key, value} -> is_nil(value) end)
+    |> Map.new()
+  end
+
+  defp source_summary(source, accepted_issues, runtime_events, metrics, truncated?) do
+    accepted_ids = accepted_issue_ids(accepted_issues)
+    pull_requests = pull_requests(accepted_issues)
+    ci_metric = metric_by_id(metrics, "ci_success_rate")
+    runtime_source_count = runtime_source_issue_count(runtime_events, accepted_ids)
+
+    %{
+      linear: %{
+        status: linear_source_status(length(accepted_issues), truncated?),
+        scope: Map.get(source, :linear_scope, inferred_linear_scope(accepted_issues)),
+        accepted_issue_count: length(accepted_issues)
+      },
+      github: %{
+        status: Map.get(ci_metric || %{}, :status, linked_source_status(length(pull_requests), length(accepted_issues))),
+        pull_request_count: length(pull_requests),
+        ci_check_count: Map.get(ci_metric || %{}, :denominator, 0) || 0,
+        missing_ci_count: missing_ci_count(pull_requests)
+      },
+      runtime: %{
+        status: runtime_source_status(runtime_source_count, length(accepted_issues)),
+        event_count: length(runtime_events),
+        accepted_issue_source_count: runtime_source_count
+      }
+    }
+  end
+
+  defp linear_source_status(0, _truncated?), do: "gap"
+  defp linear_source_status(_accepted_count, true), do: "partial"
+  defp linear_source_status(_accepted_count, _truncated?), do: "direct"
+
+  defp runtime_source_status(0, _accepted_count), do: "gap"
+  defp runtime_source_status(source_count, accepted_count) when source_count == accepted_count, do: "direct"
+  defp runtime_source_status(_source_count, _accepted_count), do: "partial"
+
+  defp inferred_linear_scope(accepted_issues) do
+    values =
+      accepted_issues
+      |> Enum.map(&project_name/1)
+      |> Enum.reject(&(&1 in ["", "unknown"]))
+      |> Enum.uniq()
+
+    %{kind: "inferred_project", values: values}
+  end
+
+  defp metric_by_id(metrics, id), do: Enum.find(metrics, &(Map.get(&1, :id) == id))
+
+  defp missing_ci_count(pull_requests) do
+    Enum.count(pull_requests, &(ci_result(&1) == :missing))
+  end
 
   defp ratio_metric(id, label, numerator, denominator, source) do
     %{

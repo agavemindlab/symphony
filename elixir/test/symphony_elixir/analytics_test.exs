@@ -205,6 +205,10 @@ defmodule SymphonyElixir.AnalyticsTest do
 
     assert summary.event_sample_count == 500
     assert summary.outcome_proof.accepted_issue_count == 2
+    assert summary.outcome_proof.collection.trigger == "poll"
+    assert summary.outcome_proof.sources.linear.accepted_issue_count == 2
+    assert summary.outcome_proof.sources.github.pull_request_count == 2
+    assert summary.outcome_proof.sources.runtime.accepted_issue_source_count == 2
     assert Enum.map(summary.outcome_proof.cohorts, & &1.week) == ["2026-W25", "2026-W26"]
 
     assert %{status: "direct", metrics: autonomy_metrics} = panel(summary, "autonomy_funnel")
@@ -690,6 +694,12 @@ defmodule SymphonyElixir.AnalyticsTest do
       event_type: "outcome_proof_snapshot",
       collected_at: "2026-07-01T00:00:00Z",
       accepted_issue_count: 2,
+      collection: %{trigger: "poll", interval_ms: 900_000},
+      sources: %{
+        linear: %{status: "direct", scope: %{kind: "name", values: ["symphony"]}, accepted_issue_count: 2},
+        github: %{status: "partial", pull_request_count: 2, ci_check_count: 2, missing_ci_count: 1},
+        runtime: %{status: "direct", event_count: 4, accepted_issue_source_count: 2}
+      },
       proof_window: %{accepted_weeks: 9, issue_cap: 200, proof_read_events: 5_000},
       cohorts: [
         %{week: "2026-W25", project: "symphony", sample_count: 1, complete_week?: true, truncated?: false},
