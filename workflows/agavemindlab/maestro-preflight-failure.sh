@@ -177,6 +177,11 @@ def current_artifact(comments):
     return artifacts[0] if artifacts else None
 
 
+def has_maestro_marker(artifact):
+    children = ((artifact.get("children") or {}).get("nodes") or [])
+    return any((child.get("body") or "").startswith("🤖 Maestro 预审核:") for child in children)
+
+
 def record_no_action(issue):
     state = ((issue.get("state") or {}).get("name") or "").strip()
     if state != "Human Review":
@@ -184,6 +189,8 @@ def record_no_action(issue):
 
     artifact = current_artifact(((issue.get("comments") or {}).get("nodes") or []))
     if not artifact:
+        return
+    if has_maestro_marker(artifact):
         return
 
     body = (
