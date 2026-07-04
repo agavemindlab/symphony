@@ -155,14 +155,49 @@ defmodule SymphonyElixir.AnalyticsTest do
 
     assert %{label: "Retry events", value: 1, status: "partial"} in capacity_metrics
     assert %{label: "Blocked events", value: 1, status: "partial"} in capacity_metrics
-    assert %{label: "Maestro skipped", value: 0, status: "direct"} in capacity_metrics
     assert %{label: "Hook failures", value: 0, status: "direct"} in capacity_metrics
     assert %{label: "Effective capacity", value: 12, status: "partial"} in capacity_metrics
 
     assert "GitHub review/CI data is not configured in v1" in summary.data_quality.gaps
   end
 
-  test "counts maestro skips and hook failures in the capacity panel" do
+  test "verdict join skips the reviewer instance's Human Review dispatches" do
+    path = tmp_path("reviewer-dispatch.ndjson")
+
+    [
+      %{
+        event_type: :maestro_review,
+        event_id: "maestro_review:m1",
+        recommendation: "request_changes",
+        phase: "Implementation",
+        issue_id: "issue-1",
+        occurred_at: "2026-06-15T10:00:00Z",
+        recorded_at: "2026-06-15T10:00:00Z"
+      },
+      %{
+        event_type: :run_started,
+        issue_id: "issue-1",
+        state: "Human Review",
+        recorded_at: "2026-06-15T10:01:00Z"
+      },
+      %{
+        event_type: :run_started,
+        issue_id: "issue-1",
+        state: "Rework",
+        recorded_at: "2026-06-15T10:30:00Z"
+      }
+    ]
+    |> Enum.each(&Analytics.record_event(&1, path: path))
+
+    %{metrics: quality_metrics} =
+      [path: path]
+      |> Analytics.summary()
+      |> panel("quality_rework")
+
+    assert %{label: "Maestro agreement rate", value: "100.0%", status: "direct"} in quality_metrics
+  end
+
+  test "counts hook failures and ignores legacy maestro_skipped events" do
     path = tmp_path("silent-failures.ndjson")
 
     [
@@ -196,8 +231,8 @@ defmodule SymphonyElixir.AnalyticsTest do
       |> Analytics.summary()
       |> panel("capacity_reliability")
 
-    assert %{label: "Maestro skipped", value: 2, status: "direct"} in capacity_metrics
     assert %{label: "Hook failures", value: 1, status: "direct"} in capacity_metrics
+    refute Enum.any?(capacity_metrics, &(&1.label == "Maestro skipped"))
   end
 
   test "counts phase events once per event_id and computes autonomy funnel rates" do

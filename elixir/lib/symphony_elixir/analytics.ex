@@ -253,7 +253,6 @@ defmodule SymphonyElixir.Analytics do
       maestro_agreed: maestro_metrics.agreed,
       maestro_overridden: maestro_metrics.overridden,
       maestro_pending: maestro_metrics.pending,
-      maestro_skipped_count: count_events(events, "maestro_skipped"),
       hook_failed_count: count_events(events, "hook_failed"),
       completed_count: count_events(events, "run_completed"),
       retry_count: count_events(events, "retry_scheduled"),
@@ -416,6 +415,9 @@ defmodule SymphonyElixir.Analytics do
   def run_started_entries(events) do
     events
     |> Enum.filter(&(Map.get(&1, "event_type") == "run_started"))
+    # A dispatch in "Human Review" is the Maestro reviewer instance picking the
+    # issue up, not a human verdict — it must not shadow the real next state.
+    |> Enum.reject(&(Map.get(&1, "state") == "Human Review"))
     |> Enum.flat_map(fn event ->
       case parse_datetime(Map.get(event, "recorded_at")) do
         nil -> []
@@ -464,7 +466,6 @@ defmodule SymphonyElixir.Analytics do
     [
       metric("Retry events", metrics.retry_count, "partial"),
       metric("Blocked events", metrics.blocked_count, "partial"),
-      metric("Maestro skipped", metrics.maestro_skipped_count, "direct"),
       metric("Hook failures", metrics.hook_failed_count, "direct"),
       metric("Running count", Map.get(latest_capacity, "running_count", 0), "partial"),
       %{
