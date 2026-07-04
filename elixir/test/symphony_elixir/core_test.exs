@@ -390,6 +390,19 @@ defmodule SymphonyElixir.CoreTest do
     assert design_skill =~ "Skipped UI 原型"
   end
 
+  test "maestro reviewer instance gates dispatch on the review label" do
+    repo_root = Path.expand("..", File.cwd!())
+    maestro_workflow = File.read!(Path.join(repo_root, "workflows/maestro/WORKFLOW.md"))
+    main_workflow = File.read!(Path.join(repo_root, "workflows/agavemindlab/WORKFLOW.md"))
+
+    assert maestro_workflow =~ ~s(required_labels: ["symphony", "maestro:review"])
+    assert maestro_workflow =~ "- Human Review"
+    assert maestro_workflow =~ "{{ routing_brief }}"
+    assert maestro_workflow =~ "🤖 Maestro 预审核"
+    assert maestro_workflow =~ "移除本 issue 的 `maestro:review` label"
+    assert main_workflow =~ "maestro:review"
+  end
+
   test "workflow prompts provide the explicit command fast path" do
     repo_root = Path.expand("..", File.cwd!())
 
