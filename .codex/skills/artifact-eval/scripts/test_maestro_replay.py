@@ -297,3 +297,235 @@ class ParseConfidenceTest(unittest.TestCase):
             maestro_replay.parse_confidence("**Confidence：7.5**\nRECOMMENDATION: approve"), 7.5
         )
         self.assertIsNone(maestro_replay.parse_confidence("RECOMMENDATION: approve"))
+
+
+def routing_case(identifier: str, event_id: str, *, state: str = "In Progress", expected: str = "Design") -> dict:
+    return {
+        "issue_identifier": identifier,
+        "issue_url": f"https://linear.app/grandline/issue/{identifier}",
+        "dispatch_at": "2026-06-15T10:00:00Z",
+        "state": state,
+        "expected_phase": expected,
+        "published_event_id": event_id,
+    }
+
+
+def routing_prediction(identifier: str, event_id: str, predicted: str, **overrides) -> dict:
+    return {**routing_case(identifier, event_id), **overrides, "prediction": predicted, "raw_tail": "", "duration_s": 1.0}
+
+
+WORKFLOW_TEXT = (
+    "# Workflow\n\npreamble to drop\n\n"
+    "## Phase Map\n\nphases table here\n\n"
+    "## Main Flow\n\nsteps 1-6 here\n\n"
+    "## Skill Interaction Protocol\n\nprotocol to drop\n"
+)
+
+
+class ParseTargetPhaseTest(unittest.TestCase):
+    def test_tolerates_markdown_decoration_and_case(self) -> None:
+        self.assertEqual(maestro_replay.parse_target_phase("**TARGET_PHASE: Design**"), "Design")
+        self.assertEqual(maestro_replay.parse_target_phase("> `target_phase: implementation`"), "Implementation")
+        self.assertEqual(maestro_replay.parse_target_phase("TARGET PHASE：Requirements（步骤 5）"), "Requirements")
+        self.assertEqual(maestro_replay.parse_target_phase("- TARGET_PHASE: `Deployment`"), "Deployment")
+
+    def test_last_target_phase_line_wins(self) -> None:
+        output = "TARGET_PHASE: Design\nsome analysis\nTARGET_PHASE: Deployment\ntrailing note"
+        self.assertEqual(maestro_replay.parse_target_phase(output), "Deployment")
+
+    def test_unparsable_output_is_unparsed(self) -> None:
+        self.assertEqual(maestro_replay.parse_target_phase("no verdict here"), "unparsed")
+        self.assertEqual(maestro_replay.parse_target_phase("TARGET_PHASE: 略"), "unparsed")
+        self.assertEqual(maestro_replay.parse_target_phase(""), "unparsed")
+
+
+class RoutingExcerptTest(unittest.TestCase):
+    def test_slices_phase_map_through_main_flow(self) -> None:
+        excerpt = maestro_replay.routing_excerpt(WORKFLOW_TEXT)
+        self.assertTrue(excerpt.startswith("## Phase Map"))
+        self.assertIn("## Main Flow", excerpt)
+        self.assertIn("steps 1-6 here", excerpt)
+        self.assertNotIn("## Skill Interaction Protocol", excerpt)
+        self.assertNotIn("preamble to drop", excerpt)
+
+    def test_missing_markers_raise(self) -> None:
+        with self.assertRaises(maestro_replay.ReplayError):
+            maestro_replay.routing_excerpt("## Phase Map\nno end marker")
+        with self.assertRaises(maestro_replay.ReplayError):
+            maestro_replay.routing_excerpt("## Skill Interaction Protocol\nno start marker")
+
+
+class RoutingSelectCasesTest(unittest.TestCase):
+    CASES = [
+        routing_case("DEV-3", "phase_published:c3"),
+        routing_case("DEV-1", "phase_published:c1"),
+        routing_case("DEV-2", "phase_published:c2", expected="Implementation"),
+    ]
+
+    def test_selects_all_and_filters_by_expected_phase(self) -> None:
+        selected = maestro_replay.select_cases(self.CASES, phase_field="expected_phase")
+        self.assertEqual([c["published_event_id"] for c in selected], ["phase_published:c1", "phase_published:c2", "phase_published:c3"])
+
+        implementation = maestro_replay.select_cases(self.CASES, phase="Implementation", phase_field="expected_phase")
+        self.assertEqual([c["published_event_id"] for c in implementation], ["phase_published:c2"])
+
+
+class RoutingScoreTest(unittest.TestCase):
+    def test_scoring_against_expected_phase_groups_by_state(self) -> None:
+        cases = [
+            routing_case("DEV-1", "phase_published:c1"),
+            routing_case("DEV-2", "phase_published:c2", state="Merging", expected="Deployment"),
+            routing_case("DEV-3", "phase_published:c3", state="Rework", expected="Requirements"),
+        ]
+        predictions = [
+            routing_prediction("DEV-1", "phase_published:c1", "Design"),
+            routing_prediction("DEV-2", "phase_published:c2", "Deployment"),
+            routing_prediction("DEV-3", "phase_published:c3", "Design"),
+        ]
+
+        result = maestro_replay.score_predictions(
+            cases,
+            predictions,
+            expected_fn=lambda case: case.get("expected_phase"),
+            label_fn=lambda case: case.get("state") or "unknown",
+            phase_fn=lambda case: case.get("expected_phase") or "unknown",
+        )
+
+        self.assertEqual(result["overall"], {"total": 3, "agreed": 2, "disagreed": 1, "agreement_rate": 0.6667})
+        self.assertEqual(result["by_label"]["Merging"]["agreed"], 1)
+        self.assertEqual(result["by_label"]["Rework"]["disagreed"], 1)
+        self.assertEqual(result["by_phase"]["Requirements"]["agreement_rate"], 0.0)
+        # Confusion rows are the grouping label — the dispatch state for routing.
+        self.assertEqual(result["confusion"]["Rework"], {"Design": 1})
+        self.assertEqual(result["confusion"]["Merging"], {"Deployment": 1})
+        self.assertEqual(result["excluded"], 0)
+        self.assertEqual(
+            [(item["issue_identifier"], item["label"], item["prediction"]) for item in result["disagreements"]],
+            [("DEV-3", "Rework", "Design")],
+        )
+
+
+class RoutingReplayCommandTest(unittest.TestCase):
+    def setUp(self) -> None:
+        root = Path.cwd() / ".symphony" / "routing-replay-tests"
+        root.mkdir(parents=True, exist_ok=True)
+        self.tmp = root / self.id().rsplit(".", 1)[-1]
+        if self.tmp.exists():
+            shutil.rmtree(self.tmp)
+        self.tmp.mkdir()
+
+        self.cases_path = self.tmp / "cases.jsonl"
+        self.cases_path.write_text(
+            "".join(
+                json.dumps(entry) + "\n"
+                for entry in [
+                    routing_case("DEV-1", "phase_published:c1"),
+                    routing_case("DEV-2", "phase_published:c2", state="Merging", expected="Deployment"),
+                ]
+            ),
+        )
+        self.workflow = self.tmp / "WORKFLOW.md"
+        self.workflow.write_text(WORKFLOW_TEXT)
+        self.output_dir = self.tmp / "replay"
+        self.calls_log = self.tmp / "calls.log"
+
+    def tearDown(self) -> None:
+        if self.tmp.exists():
+            shutil.rmtree(self.tmp)
+
+    def fake_codex(self, body: str) -> str:
+        script = self.tmp / "fake_codex.py"
+        script.write_text(body)
+        return f"{shlex.quote(sys.executable)} {shlex.quote(str(script))}"
+
+    def run_routing_replay(self, codex_cmd: str, *extra: str) -> int:
+        return maestro_replay.main(
+            [
+                "routing-replay",
+                "--cases",
+                str(self.cases_path),
+                "--output",
+                str(self.output_dir),
+                "--codex-cmd",
+                codex_cmd,
+                "--workflow",
+                str(self.workflow),
+                *extra,
+            ],
+        )
+
+    def read_predictions(self) -> list[dict]:
+        return maestro_replay.read_jsonl(self.output_dir / "predictions.jsonl")
+
+    def test_routing_replay_writes_predictions_and_composes_the_prompt(self) -> None:
+        codex_cmd = self.fake_codex(
+            "import sys, pathlib\n"
+            f"log = pathlib.Path({str(self.calls_log)!r})\n"
+            "prompt = sys.stdin.read()\n"
+            "log.open('a').write(prompt + '\\n===\\n')\n"
+            "print('analysis...')\n"
+            "print('**TARGET_PHASE: Implementation**')\n",
+        )
+
+        self.assertEqual(self.run_routing_replay(codex_cmd, "--concurrency", "1"), 0)
+
+        predictions = self.read_predictions()
+        self.assertEqual(len(predictions), 2)
+        by_id = {p["published_event_id"]: p for p in predictions}
+        self.assertEqual(set(by_id), {"phase_published:c1", "phase_published:c2"})
+        self.assertEqual(by_id["phase_published:c1"]["prediction"], "Implementation")
+        self.assertEqual(by_id["phase_published:c1"]["expected_phase"], "Design")
+        self.assertIsNone(by_id["phase_published:c1"]["confidence"])
+        self.assertIn("TARGET_PHASE", by_id["phase_published:c1"]["raw_tail"])
+
+        prompts = self.calls_log.read_text()
+        self.assertIn("## Phase Map", prompts)
+        self.assertIn("## Main Flow", prompts)
+        self.assertNotIn("## Skill Interaction Protocol", prompts)
+        self.assertIn("回放路由决策：issue DEV-1 在 2026-06-15T10:00:00Z 以状态 In Progress 被派发。", prompts)
+        self.assertIn("时间旅行纪律：只考虑 createdAt <= 2026-06-15T10:00:00Z 的 Linear 评论", prompts)
+        self.assertIn("只做步骤 3-5 的路由判断，不执行任何阶段工作、不写入任何东西", prompts)
+        self.assertIn("最后一行输出且仅输出 `TARGET_PHASE: <Requirements|Design|Implementation|Deployment>`", prompts)
+
+    def test_rerun_resumes_by_published_event_id(self) -> None:
+        codex_cmd = self.fake_codex(
+            "import sys, pathlib\n"
+            f"log = pathlib.Path({str(self.calls_log)!r})\n"
+            "sys.stdin.read()\n"
+            "log.open('a').write('call\\n')\n"
+            "print('TARGET_PHASE: Design')\n",
+        )
+
+        self.assertEqual(self.run_routing_replay(codex_cmd, "--sample", "1"), 0)
+        self.assertEqual(len(self.calls_log.read_text().splitlines()), 1)
+        self.assertEqual([p["published_event_id"] for p in self.read_predictions()], ["phase_published:c1"])
+
+        self.assertEqual(self.run_routing_replay(codex_cmd), 0)
+        self.assertEqual(len(self.calls_log.read_text().splitlines()), 2)
+        self.assertEqual({p["published_event_id"] for p in self.read_predictions()}, {"phase_published:c1", "phase_published:c2"})
+
+    def test_score_field_expected_phase_writes_routing_report(self) -> None:
+        predictions_path = self.tmp / "predictions.jsonl"
+        predictions_path.write_text(
+            json.dumps(routing_prediction("DEV-1", "phase_published:c1", "Design"))
+            + "\n"
+            + json.dumps(routing_prediction("DEV-2", "phase_published:c2", "Implementation"))
+            + "\n",
+        )
+
+        exit_code = maestro_replay.main(
+            ["score", "--field", "expected_phase", "--cases", str(self.cases_path), "--predictions", str(predictions_path)],
+        )
+
+        self.assertEqual(exit_code, 0)
+        report = (self.tmp / "report.md").read_text()
+        self.assertIn("# Routing Replay Report", report)
+        self.assertIn("| all cases | 2 | 1 | 1 | 50.0% |", report)
+        self.assertIn("| Merging | 1 | 0 | 1 | 0.0% |", report)
+        self.assertIn("- DEV-2 — Deployment: label Merging, predicted Implementation (artifact phase_published:c2)", report)
+
+    def test_missing_workflow_file_fails_cleanly(self) -> None:
+        exit_code = maestro_replay.main(
+            ["routing-replay", "--cases", str(self.cases_path), "--output", str(self.output_dir), "--workflow", str(self.tmp / "missing.md")],
+        )
+        self.assertEqual(exit_code, 1)

@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
-"""Replay labeled review cases against the maestro-reviewer prompt and score them.
+"""Replay labeled review and routing cases against their prompts and score them.
 
 `replay` runs one non-interactive codex session per case (`codex exec
 --sandbox read-only`, prompt on stdin) with the full maestro-reviewer prompt
 plus a time-travel preamble, and appends predictions incrementally so an
-interrupted run keeps partial results and a rerun resumes. `score` compares
-predictions against the human labels from `mix symphony.eval.reviews`.
+interrupted run keeps partial results and a rerun resumes. `routing-replay`
+does the same for Main Flow steps 3-5 target-phase routing cases from
+`mix symphony.eval.routing`, prompting with the WORKFLOW.md "Phase Map" +
+"Main Flow" excerpt and parsing a final `TARGET_PHASE:` line. `score`
+compares predictions against the labels (`--field expected_phase` scores
+routing predictions against the ground-truth target phase).
 """
 
 from __future__ import annotations
@@ -41,6 +45,12 @@ RECOMMENDATIONS = (
 REVIEWER_PROMPT_RELPATH = Path(".codex/skills/maestro/agents/maestro-reviewer.md")
 RECOMMENDATION_LINE_RE = re.compile(r"recommendation\s*[:：]\s*(.+)", re.IGNORECASE)
 CONFIDENCE_LINE_RE = re.compile(r"confidence\s*[:：]\s*(\d+(?:\.\d+)?)", re.IGNORECASE)
+DEFAULT_ROUTING_OUTPUT_DIR = "eval/routing/replay"
+PHASES = ("Requirements", "Design", "Implementation", "Deployment")
+WORKFLOW_RELPATH = Path("workflows/agavemindlab/WORKFLOW.md")
+ROUTING_EXCERPT_START = "## Phase Map"
+ROUTING_EXCERPT_END = "## Skill Interaction Protocol"
+TARGET_PHASE_LINE_RE = re.compile(r"target[ _]?phase\s*[:：]\s*(.+)", re.IGNORECASE)
 
 
 class ReplayError(RuntimeError):
@@ -66,20 +76,22 @@ def read_jsonl(path: Path) -> list[dict]:
 
 
 def case_id(case: dict) -> str:
-    return str(case.get("artifact_comment_id") or "")
+    """Review cases are keyed by artifact, routing cases by their publish event."""
+    return str(case.get("artifact_comment_id") or case.get("published_event_id") or "")
 
 
 def select_cases(
     cases: list[dict],
     *,
-    labels: set[str],
+    labels: set[str] | None = None,
     phase: str | None = None,
     sample: int | None = None,
+    phase_field: str = "phase",
 ) -> list[dict]:
     """Deterministic selection: filter, then stable-sort by case id, then head."""
-    selected = [case for case in cases if case.get("label") in labels]
+    selected = [case for case in cases if labels is None or case.get("label") in labels]
     if phase:
-        selected = [case for case in selected if case.get("phase") == phase]
+        selected = [case for case in selected if case.get(phase_field) == phase]
     selected = sorted(selected, key=case_id)
     if sample is not None:
         selected = selected[:sample]
@@ -99,6 +111,44 @@ def compose_prompt(reviewer_prompt: str, case: dict) -> str:
         "completion confirmation|no reply yet>`"
     )
     return reviewer_prompt.rstrip() + "\n\n" + preamble + "\n"
+
+
+def routing_excerpt(workflow_text: str) -> str:
+    """The WORKFLOW.md "Phase Map" + "Main Flow" sections, verbatim."""
+    start = workflow_text.find(ROUTING_EXCERPT_START)
+    end = workflow_text.find(ROUTING_EXCERPT_END, start + 1) if start != -1 else -1
+    if start == -1 or end == -1:
+        raise ReplayError(
+            f"Workflow prompt is missing the {ROUTING_EXCERPT_START!r}..{ROUTING_EXCERPT_END!r} routing sections",
+        )
+    return workflow_text[start:end].rstrip()
+
+
+def compose_routing_prompt(workflow_excerpt: str, case: dict) -> str:
+    issue = case.get("issue_identifier") or "unknown"
+    dispatch_at = case.get("dispatch_at") or "unknown"
+    state = case.get("state") or "unknown"
+    preamble = (
+        f"回放路由决策：issue {issue} 在 {dispatch_at} 以状态 {state} 被派发。"
+        f"时间旅行纪律：只考虑 createdAt <= {dispatch_at} 的 Linear 评论。"
+        "只做步骤 3-5 的路由判断，不执行任何阶段工作、不写入任何东西。"
+        "最后一行输出且仅输出 `TARGET_PHASE: <Requirements|Design|Implementation|Deployment>`"
+    )
+    return workflow_excerpt.rstrip() + "\n\n" + preamble + "\n"
+
+
+def parse_target_phase(output: str) -> str:
+    """Parse the LAST `TARGET_PHASE:` line, tolerating markdown decoration."""
+    for line in reversed(output.splitlines()):
+        match = TARGET_PHASE_LINE_RE.search(line)
+        if not match:
+            continue
+        value = match.group(1).lower()
+        for phase in PHASES:
+            if phase.lower() in value:
+                return phase
+        return "unparsed"
+    return "unparsed"
 
 
 def parse_confidence(output: str):
@@ -137,7 +187,7 @@ def _as_text(value: object) -> str:
     return ""
 
 
-def run_case(case: dict, *, codex_argv: list[str], prompt: str, timeout_s: float) -> dict:
+def run_case(case: dict, *, codex_argv: list[str], prompt: str, timeout_s: float, parse_prediction=parse_recommendation) -> dict:
     started = time.monotonic()
     try:
         completed = subprocess.run(
@@ -149,7 +199,7 @@ def run_case(case: dict, *, codex_argv: list[str], prompt: str, timeout_s: float
             check=False,
         )
         output = completed.stdout + ("\n" + completed.stderr if completed.stderr else "")
-        prediction = parse_recommendation(output)
+        prediction = parse_prediction(output)
     except subprocess.TimeoutExpired as exc:
         output = _as_text(exc.stdout) + _as_text(exc.stderr)
         prediction = "timeout"
@@ -179,15 +229,8 @@ def ensure_trailing_newline(path: Path) -> None:
             handle.write(b"\n")
 
 
-def replay(args: argparse.Namespace) -> int:
-    reviewer_prompt_path = Path(args.reviewer_prompt) if args.reviewer_prompt else default_reviewer_prompt_path()
-    if not reviewer_prompt_path.is_file():
-        raise ReplayError(f"Missing reviewer prompt: {reviewer_prompt_path}")
-    reviewer_prompt = reviewer_prompt_path.read_text()
-
-    labels = {label.strip() for label in args.labels.split(",") if label.strip()}
-    cases = select_cases(read_jsonl(Path(args.cases)), labels=labels, phase=args.phase, sample=args.sample)
-
+def execute_replay(cases: list[dict], *, args: argparse.Namespace, prompt_fn, parse_prediction) -> int:
+    """Shared run/resume plumbing: one codex session per not-yet-predicted case."""
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
     predictions_path = output_dir / "predictions.jsonl"
@@ -203,8 +246,9 @@ def replay(args: argparse.Namespace) -> int:
         prediction = run_case(
             case,
             codex_argv=codex_argv,
-            prompt=compose_prompt(reviewer_prompt, case),
+            prompt=prompt_fn(case),
             timeout_s=args.timeout,
+            parse_prediction=parse_prediction,
         )
         with write_lock, predictions_path.open("a") as handle:
             handle.write(json.dumps(prediction, ensure_ascii=False) + "\n")
@@ -222,8 +266,43 @@ def replay(args: argparse.Namespace) -> int:
     return 0
 
 
+def replay(args: argparse.Namespace) -> int:
+    reviewer_prompt_path = Path(args.reviewer_prompt) if args.reviewer_prompt else default_reviewer_prompt_path()
+    if not reviewer_prompt_path.is_file():
+        raise ReplayError(f"Missing reviewer prompt: {reviewer_prompt_path}")
+    reviewer_prompt = reviewer_prompt_path.read_text()
+
+    labels = {label.strip() for label in args.labels.split(",") if label.strip()}
+    cases = select_cases(read_jsonl(Path(args.cases)), labels=labels, phase=args.phase, sample=args.sample)
+    return execute_replay(
+        cases,
+        args=args,
+        prompt_fn=lambda case: compose_prompt(reviewer_prompt, case),
+        parse_prediction=parse_recommendation,
+    )
+
+
+def routing_replay(args: argparse.Namespace) -> int:
+    workflow_path = Path(args.workflow) if args.workflow else default_workflow_path()
+    if not workflow_path.is_file():
+        raise ReplayError(f"Missing workflow prompt: {workflow_path}")
+    excerpt = routing_excerpt(workflow_path.read_text())
+
+    cases = select_cases(read_jsonl(Path(args.cases)), phase=args.phase, sample=args.sample, phase_field="expected_phase")
+    return execute_replay(
+        cases,
+        args=args,
+        prompt_fn=lambda case: compose_routing_prompt(excerpt, case),
+        parse_prediction=parse_target_phase,
+    )
+
+
 def default_reviewer_prompt_path() -> Path:
     return Path(__file__).resolve().parents[4] / REVIEWER_PROMPT_RELPATH
+
+
+def default_workflow_path() -> Path:
+    return Path(__file__).resolve().parents[4] / WORKFLOW_RELPATH
 
 
 def empty_stats() -> dict:
@@ -236,9 +315,24 @@ def finish_stats(stats: dict) -> dict:
     return stats
 
 
-def score_predictions(cases: list[dict], predictions: list[dict]) -> dict:
+def review_expected(case: dict) -> str | None:
+    label = case.get("label")
+    return SCOREABLE_LABELS.get(label) if isinstance(label, str) else None
+
+
+def score_predictions(
+    cases: list[dict],
+    predictions: list[dict],
+    *,
+    expected_fn=review_expected,
+    label_fn=lambda case: case.get("label"),
+    phase_fn=lambda case: case.get("phase") or "unknown",
+) -> dict:
     """Pure scoring: agreement overall/by-phase/by-label, confusion, disagreements.
 
+    `expected_fn` maps a case to its expected prediction string (None excludes
+    the case); `label_fn`/`phase_fn` pick the grouping keys — the defaults are
+    the review-eval shape, routing scoring passes expected/state/expected-phase.
     Predictions are deduplicated by case id (last occurrence wins): concurrent
     replay processes appending to one file must not double-count a case.
     """
@@ -256,13 +350,14 @@ def score_predictions(cases: list[dict], predictions: list[dict]) -> dict:
         if case is None:
             excluded += 1
             continue
-        label = case.get("label")
-        if label not in SCOREABLE_LABELS:
+        expected = expected_fn(case)
+        if expected is None:
             excluded += 1
             continue
-        phase = case.get("phase") or "unknown"
+        label = label_fn(case)
+        phase = phase_fn(case)
         predicted = prediction.get("prediction") or "unparsed"
-        agreed = predicted == SCOREABLE_LABELS[label]
+        agreed = predicted == expected
 
         for stats in (
             overall,
@@ -334,10 +429,10 @@ def disagreement_lines(disagreements: list[dict]) -> str:
     )
 
 
-def render_report(result: dict) -> str:
+def render_report(result: dict, *, title: str = "# Maestro Reviewer Replay Report") -> str:
     return "\n".join(
         [
-            "# Maestro Reviewer Replay Report",
+            title,
             "",
             f"{result['overall']['total']} scored prediction(s); {result['excluded']} excluded "
             "(non-scoreable label or unknown case).",
@@ -368,10 +463,20 @@ def render_report(result: dict) -> str:
 
 def score(args: argparse.Namespace) -> int:
     predictions_path = Path(args.predictions)
-    result = score_predictions(read_jsonl(Path(args.cases)), read_jsonl(predictions_path))
+    if getattr(args, "field", "label") == "expected_phase":
+        scoring = {
+            "expected_fn": lambda case: case.get("expected_phase"),
+            "label_fn": lambda case: case.get("state") or "unknown",
+            "phase_fn": lambda case: case.get("expected_phase") or "unknown",
+        }
+        title = "# Routing Replay Report"
+    else:
+        scoring = {}
+        title = "# Maestro Reviewer Replay Report"
+    result = score_predictions(read_jsonl(Path(args.cases)), read_jsonl(predictions_path), **scoring)
     report_path = Path(args.report) if args.report else predictions_path.parent / "report.md"
     report_path.parent.mkdir(parents=True, exist_ok=True)
-    report_path.write_text(render_report(result))
+    report_path.write_text(render_report(result, title=title))
     print(
         f"Scored {result['overall']['total']} prediction(s), "
         f"agreement {format_rate(result['overall']['agreement_rate'])} -> {report_path}",
@@ -395,10 +500,22 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     replay_parser.add_argument("--reviewer-prompt", help="Override the maestro-reviewer prompt path (tests)")
     replay_parser.set_defaults(func=replay)
 
+    routing_parser = subparsers.add_parser("routing-replay", help="Run one codex session per labeled routing case.")
+    routing_parser.add_argument("--cases", required=True, help="cases.jsonl from mix symphony.eval.routing")
+    routing_parser.add_argument("--sample", type=int, help="Replay only the first N cases (stable sort by case id)")
+    routing_parser.add_argument("--phase", help="Only replay cases with this expected phase")
+    routing_parser.add_argument("--concurrency", type=int, default=DEFAULT_CONCURRENCY)
+    routing_parser.add_argument("--output", default=DEFAULT_ROUTING_OUTPUT_DIR, help=f"Output directory (default: {DEFAULT_ROUTING_OUTPUT_DIR})")
+    routing_parser.add_argument("--codex-cmd", default=DEFAULT_CODEX_CMD, help=f"Codex command; prompt is piped on stdin (default: {DEFAULT_CODEX_CMD!r})")
+    routing_parser.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT_S, help="Per-case timeout in seconds (default: 600)")
+    routing_parser.add_argument("--workflow", help="Override the WORKFLOW.md path (tests)")
+    routing_parser.set_defaults(func=routing_replay)
+
     score_parser = subparsers.add_parser("score", help="Score predictions against labels.")
     score_parser.add_argument("--cases", required=True)
     score_parser.add_argument("--predictions", required=True)
     score_parser.add_argument("--report", help="Report path (default: <predictions dir>/report.md)")
+    score_parser.add_argument("--field", choices=["label", "expected_phase"], default="label", help="Case field holding the expected value: label (reviews) or expected_phase (routing)")
     score_parser.set_defaults(func=score)
     return parser.parse_args(argv)
 

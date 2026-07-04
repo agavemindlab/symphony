@@ -123,3 +123,30 @@ each case is a full codex session; use `--sample N` (stable sort by case id,
 deterministic) and `--phase` for regression subsets. `score` writes
 `report.md` with overall/by-phase/by-label agreement, a confusion matrix,
 and the disagreement list.
+
+## Routing replay
+
+Evaluate WORKFLOW.md Main Flow steps 3–5 target-phase routing against
+history. `mix symphony.eval.routing` (run in `elixir/`) labels every
+active-state `run_started` dispatch (`Todo` / `In Progress` / `Rework` /
+`Merging`; `Human Review` reviewer dispatches are skipped) with the phase of
+the first artifact its session published before the issue's next dispatch —
+the ground-truth target phase — and writes `eval/routing/cases.jsonl` plus
+`labels-report.md` (dispatches that published nothing stay unlabeled).
+
+```bash
+cd elixir && mix symphony.eval.routing          # build the labeled test set
+python3 .codex/skills/artifact-eval/scripts/maestro_replay.py routing-replay \
+  --cases eval/routing/cases.jsonl --sample 20   # one codex session per case
+python3 .codex/skills/artifact-eval/scripts/maestro_replay.py score \
+  --field expected_phase \
+  --cases eval/routing/cases.jsonl \
+  --predictions eval/routing/replay/predictions.jsonl
+```
+
+`routing-replay` prompts each case with the WORKFLOW.md "Phase Map" + "Main
+Flow" sections verbatim plus a time-travel preamble (route only, do no phase
+work, write nothing) and parses the final `TARGET_PHASE:` line;
+resume/sampling/scoring behave exactly like the reviewer replay (same
+time-travel leakage caveat; `--phase` filters on the expected phase, and
+`score --field expected_phase` groups agreement by dispatch state).
