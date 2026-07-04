@@ -1,2 +1,5 @@
 *.env.local
 .gstack/
+
+# Eval corpora carry internal issue content and stay local-only.
+eval/

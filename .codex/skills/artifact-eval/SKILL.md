@@ -84,3 +84,12 @@ python3 .codex/skills/artifact-eval/scripts/artifact_eval.py verify-fixtures
 
 This checks the committed fixture case structure, replay rebuild path, and
 `MISSING_CONTEXT` guard.
+
+## Related: maestro verdict corpus
+
+`mix symphony.eval.maestro` (run in `elixir/`) pairs every `maestro_review`
+analytics event with its human verdict (the next `run_started` state) and
+writes `eval/maestro/corpus.jsonl` plus a `report.md` of agreement rates.
+That corpus is ground truth for future maestro-reviewer replays; capture a
+full artifact-eval case for any overridden pair worth debugging. `eval/` is
+gitignored — corpora carry internal issue content and stay local.
