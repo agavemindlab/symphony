@@ -362,6 +362,27 @@ defmodule SymphonyElixir.CoreTest do
     refute design_skill =~ "opens `phase-implementation` in the same session"
   end
 
+  test "workflow defines the status card as a non-routing digest" do
+    repo_root = Path.expand("..", File.cwd!())
+    workflow = File.read!(Path.join(repo_root, "workflows/agavemindlab/WORKFLOW.md"))
+
+    assert workflow =~ "### Status card"
+    assert workflow =~ "## 📍 状态"
+    assert workflow =~ "as the last Linear write before this agent run ends"
+    assert workflow =~ "name phases bare"
+  end
+
+  test "phase-design requires a UI prototype for UI-facing designs" do
+    repo_root = Path.expand("..", File.cwd!())
+
+    design_skill =
+      File.read!(Path.join(repo_root, "workflows/agavemindlab/skills/phase-design/SKILL.md"))
+
+    assert design_skill =~ "## UI 原型 requirement"
+    assert design_skill =~ ".symphony/prototype/"
+    assert design_skill =~ "Skipped UI 原型"
+  end
+
   test "workflow prompts provide the explicit command fast path" do
     repo_root = Path.expand("..", File.cwd!())
 
@@ -1435,6 +1456,15 @@ defmodule SymphonyElixir.CoreTest do
     assert log =~ "Issue run hook failed"
     assert log =~ "hook=issue_running"
     assert log =~ "status=17"
+
+    %{events: events} = SymphonyElixir.Analytics.read_events()
+
+    assert Enum.any?(events, fn event ->
+             event["event_type"] == "hook_failed" and
+               event["hook"] == "issue_running" and
+               event["issue_id"] == "issue-running-hook-fails" and
+               event["issue_identifier"] == "MT-RUNNING-FAIL"
+           end)
   end
 
   test "dispatch claims issue and starts agent when issue running hook times out" do
@@ -2673,6 +2703,16 @@ defmodule SymphonyElixir.CoreTest do
 
       refute_received {:memory_tracker_comment, "issue-maestro-failure", _body}
       refute_received {:memory_tracker_state_update, "issue-maestro-failure", _state}
+
+      %{events: events} = SymphonyElixir.Analytics.read_events()
+
+      assert Enum.any?(events, fn event ->
+               event["event_type"] == "maestro_skipped" and
+                 event["reason"] == "missing_linear_auth" and
+                 event["issue_id"] == "issue-maestro-failure" and
+                 event["issue_identifier"] == "MT-5318" and
+                 event["issue_url"] == "https://example.org/issues/MT-5318"
+             end)
     after
       File.rm_rf(test_root)
     end
@@ -2706,6 +2746,16 @@ defmodule SymphonyElixir.CoreTest do
 
     refute_received {:memory_tracker_comment, "issue-maestro-invalid-auth", _body}
     refute_received {:memory_tracker_state_update, "issue-maestro-invalid-auth", _state}
+
+    %{events: events} = SymphonyElixir.Analytics.read_events()
+
+    assert Enum.any?(events, fn event ->
+             event["event_type"] == "maestro_skipped" and
+               event["reason"] == "invalid_linear_auth" and
+               event["issue_id"] == "issue-maestro-invalid-auth" and
+               event["issue_identifier"] == "MT-5320" and
+               event["issue_url"] == "https://example.org/issues/MT-5320"
+           end)
   end
 
   test "maestro pre-review does not write Symphony-auth no-action comments after startup failure" do
@@ -2744,6 +2794,15 @@ defmodule SymphonyElixir.CoreTest do
 
       refute_received {:memory_tracker_comment, "issue-maestro-startup-failure", _body}
       refute_received {:memory_tracker_state_update, "issue-maestro-startup-failure", _state}
+
+      %{events: events} = SymphonyElixir.Analytics.read_events()
+
+      assert Enum.any?(events, fn event ->
+               event["event_type"] == "maestro_skipped" and
+                 event["reason"] == "launch_error" and
+                 event["issue_id"] == "issue-maestro-startup-failure" and
+                 event["issue_identifier"] == "MT-5321"
+             end)
     after
       File.rm_rf(test_root)
     end
