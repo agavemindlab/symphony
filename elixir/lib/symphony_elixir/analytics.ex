@@ -253,6 +253,8 @@ defmodule SymphonyElixir.Analytics do
       maestro_agreed: maestro_metrics.agreed,
       maestro_overridden: maestro_metrics.overridden,
       maestro_pending: maestro_metrics.pending,
+      maestro_skipped_count: count_events(events, "maestro_skipped"),
+      hook_failed_count: count_events(events, "hook_failed"),
       completed_count: count_events(events, "run_completed"),
       retry_count: count_events(events, "retry_scheduled"),
       blocked_count: count_events(events, "blocked"),
@@ -458,6 +460,8 @@ defmodule SymphonyElixir.Analytics do
     [
       metric("Retry events", metrics.retry_count, "partial"),
       metric("Blocked events", metrics.blocked_count, "partial"),
+      metric("Maestro skipped", metrics.maestro_skipped_count, "direct"),
+      metric("Hook failures", metrics.hook_failed_count, "direct"),
       metric("Running count", Map.get(latest_capacity, "running_count", 0), "partial"),
       %{
         label: "Effective capacity",

@@ -5,7 +5,7 @@ defmodule SymphonyElixir.IssueRunHook do
 
   require Logger
 
-  alias SymphonyElixir.{Config, Workflow}
+  alias SymphonyElixir.{Analytics, Config, Workflow}
   alias SymphonyElixir.Linear.Issue
 
   @type event :: :running | :stopped
@@ -64,15 +64,29 @@ defmodule SymphonyElixir.IssueRunHook do
       {:ok, {output, status}} ->
         Logger.warning("Issue run hook failed hook=#{hook_name} #{issue_log_context(issue)} status=#{status} output=#{inspect(sanitize_output(output))}")
 
-        :ok
+        record_hook_failed_event(hook_name, issue)
 
       nil ->
         Task.shutdown(task, :brutal_kill)
 
         Logger.warning("Issue run hook timed out hook=#{hook_name} #{issue_log_context(issue)} timeout_ms=#{timeout_ms}")
 
-        :ok
+        record_hook_failed_event(hook_name, issue)
     end
+  end
+
+  defp record_hook_failed_event(hook_name, %Issue{} = issue) do
+    Analytics.record_event(%{
+      event_type: "hook_failed",
+      hook: hook_name,
+      issue_id: issue.id,
+      issue_identifier: issue.identifier,
+      issue_url: issue.url
+    })
+  rescue
+    error ->
+      Logger.warning("Failed to record hook_failed analytics event hook=#{hook_name} #{issue_log_context(issue)}: #{Exception.message(error)}")
+      :ok
   end
 
   defp configured_command?(command) when is_binary(command), do: String.trim(command) != ""

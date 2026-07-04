@@ -4,7 +4,7 @@ defmodule SymphonyElixir.Workspace do
   """
 
   require Logger
-  alias SymphonyElixir.{Config, PathSafety, SSH, Workflow}
+  alias SymphonyElixir.{Analytics, Config, PathSafety, SSH, Workflow}
 
   @remote_workspace_marker "__SYMPHONY_WORKSPACE__"
 
@@ -264,7 +264,7 @@ defmodule SymphonyElixir.Workspace do
 
       command ->
         run_hook(command, workspace, issue_context, "after_run", worker_host)
-        |> ignore_hook_failure()
+        |> ignore_hook_failure("after_run", issue_context)
     end
   end
 
@@ -371,7 +371,7 @@ defmodule SymphonyElixir.Workspace do
               "before_remove",
               nil
             )
-            |> ignore_hook_failure()
+            |> ignore_hook_failure("before_remove", issue_context)
         end
 
       false ->
@@ -414,12 +414,29 @@ defmodule SymphonyElixir.Workspace do
           {:error, reason} ->
             {:error, reason}
         end
-        |> ignore_hook_failure()
+        |> ignore_hook_failure("before_remove", issue_context)
     end
   end
 
-  defp ignore_hook_failure(:ok), do: :ok
-  defp ignore_hook_failure({:error, _reason}), do: :ok
+  defp ignore_hook_failure(:ok, _hook_name, _issue_context), do: :ok
+
+  defp ignore_hook_failure({:error, _reason}, hook_name, issue_context) do
+    record_hook_failed_event(hook_name, issue_context)
+    :ok
+  end
+
+  defp record_hook_failed_event(hook_name, issue_context) do
+    Analytics.record_event(%{
+      event_type: "hook_failed",
+      hook: hook_name,
+      issue_id: Map.get(issue_context, :issue_id),
+      issue_identifier: Map.get(issue_context, :issue_identifier)
+    })
+  rescue
+    error ->
+      Logger.warning("Failed to record hook_failed analytics event hook=#{hook_name} #{issue_log_context(issue_context)}: #{Exception.message(error)}")
+      :ok
+  end
 
   defp run_hook(command, workspace, issue_context, hook_name, nil) do
     timeout_ms = Config.settings!().hooks.timeout_ms

@@ -8,7 +8,7 @@ defmodule SymphonyElixir.MaestroPreReview do
   alias SymphonyElixir.Codex.AppServer
   alias SymphonyElixir.Codex.DynamicTool
   alias SymphonyElixir.Linear.Client
-  alias SymphonyElixir.{Linear.Issue, PhaseEventScanner, SSH, Workspace}
+  alias SymphonyElixir.{Analytics, Linear.Issue, PhaseEventScanner, SSH, Workspace}
 
   @workspace_suffix "-maestro"
   @maestro_linear_api_key_env "MAESTRO_LINEAR_API_KEY"
@@ -208,8 +208,27 @@ defmodule SymphonyElixir.MaestroPreReview do
 
   defp record_no_action_reason(issue, reason) do
     Logger.warning("Maestro pre-review no-action for #{issue_context(issue)}: #{safe_failure_reason(reason)}")
+    record_maestro_skipped_event(issue, reason)
     :ok
   end
+
+  defp record_maestro_skipped_event(%Issue{} = issue, reason) do
+    Analytics.record_event(%{
+      event_type: "maestro_skipped",
+      reason: maestro_skipped_reason(reason),
+      issue_id: issue.id,
+      issue_identifier: issue.identifier,
+      issue_url: issue.url
+    })
+  rescue
+    error ->
+      Logger.warning("Failed to record maestro_skipped analytics event for #{issue_context(issue)}: #{Exception.message(error)}")
+      :ok
+  end
+
+  defp maestro_skipped_reason(:missing_maestro_linear_api_key), do: "missing_linear_auth"
+  defp maestro_skipped_reason(:invalid_maestro_linear_api_key), do: "invalid_linear_auth"
+  defp maestro_skipped_reason(_reason), do: "launch_error"
 
   defp resolve_maestro_linear_api_key(opts) do
     opts

@@ -1076,6 +1076,14 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       assert {:ok, workspace} = Workspace.create_for_issue("MT-HOOKS-FAIL")
       assert :ok = Workspace.remove_issue_workspaces("MT-HOOKS-FAIL")
       refute File.exists?(workspace)
+
+      %{events: events} = SymphonyElixir.Analytics.read_events()
+
+      assert Enum.any?(events, fn event ->
+               event["event_type"] == "hook_failed" and
+                 event["hook"] == "before_remove" and
+                 event["issue_identifier"] == "MT-HOOKS-FAIL"
+             end)
     after
       File.rm_rf(test_root)
     end

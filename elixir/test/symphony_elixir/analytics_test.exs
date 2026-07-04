@@ -155,9 +155,49 @@ defmodule SymphonyElixir.AnalyticsTest do
 
     assert %{label: "Retry events", value: 1, status: "partial"} in capacity_metrics
     assert %{label: "Blocked events", value: 1, status: "partial"} in capacity_metrics
+    assert %{label: "Maestro skipped", value: 0, status: "direct"} in capacity_metrics
+    assert %{label: "Hook failures", value: 0, status: "direct"} in capacity_metrics
     assert %{label: "Effective capacity", value: 12, status: "partial"} in capacity_metrics
 
     assert "GitHub review/CI data is not configured in v1" in summary.data_quality.gaps
+  end
+
+  test "counts maestro skips and hook failures in the capacity panel" do
+    path = tmp_path("silent-failures.ndjson")
+
+    [
+      %{
+        event_type: :maestro_skipped,
+        reason: "missing_linear_auth",
+        issue_id: "issue-1",
+        issue_identifier: "DEV-1",
+        issue_url: "https://linear.app/DEV-1",
+        recorded_at: "2026-06-15T10:00:00Z"
+      },
+      %{
+        event_type: :maestro_skipped,
+        reason: "launch_error",
+        issue_id: "issue-2",
+        issue_identifier: "DEV-2",
+        recorded_at: "2026-06-15T10:01:00Z"
+      },
+      %{
+        event_type: :hook_failed,
+        hook: "issue_stopped",
+        issue_id: "issue-1",
+        issue_identifier: "DEV-1",
+        recorded_at: "2026-06-15T10:02:00Z"
+      }
+    ]
+    |> Enum.each(&Analytics.record_event(&1, path: path))
+
+    %{status: "direct", metrics: capacity_metrics} =
+      [path: path]
+      |> Analytics.summary()
+      |> panel("capacity_reliability")
+
+    assert %{label: "Maestro skipped", value: 2, status: "direct"} in capacity_metrics
+    assert %{label: "Hook failures", value: 1, status: "direct"} in capacity_metrics
   end
 
   test "counts phase events once per event_id and computes autonomy funnel rates" do
