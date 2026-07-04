@@ -136,7 +136,7 @@ yet>` and, when a confidence score exists, `置信度：<N>/10`.
   `0-10` confidence score plus short rationale. Only when ALL hold — env
   `MAESTRO_AUTO_APPROVE` is `true`/`1`; the awaiting phase is Requirements or
   Design (never Implementation, Deployment, or Spike findings); confidence >=
-  `MAESTRO_AUTO_APPROVE_MIN_CONFIDENCE` (default 8) out of 10; and the
+  `MAESTRO_AUTO_APPROVE_MIN_CONFIDENCE` (default 9) out of 10; and the
   artifact has no unresolved `[NEEDS CLARIFICATION]` marker and no 🔴
   high-impact open question — end the reply with the line
   `🤖 auto: 已自动批准，置为 In Progress` and move the issue to `In Progress`.

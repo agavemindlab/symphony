@@ -73,7 +73,7 @@ reason). Setting the operator env `MAESTRO_AUTO_REWORK=false` downgrades the
 session to recommendation-only. With the operator env `MAESTRO_AUTO_APPROVE=true`
 (default off), a pre-review approve verdict on a Requirements or Design artifact
 also moves the issue to `In Progress` the same reversible way, gated on
-confidence reaching `MAESTRO_AUTO_APPROVE_MIN_CONFIDENCE` (default 8).
+confidence reaching `MAESTRO_AUTO_APPROVE_MIN_CONFIDENCE` (default 9).
 `Merging` and `Done` are always the human's call.
 
 ## Subagent Task

@@ -193,7 +193,7 @@ Notes:
   normal Symphony profile. The session-level env gates it honors: `MAESTRO_AUTO_REWORK` (default
   on — request-changes verdicts move the issue to `Rework` with a `🤖 auto` reply line; `false`/`0`
   for recommendation-only) and `MAESTRO_AUTO_APPROVE` / `MAESTRO_AUTO_APPROVE_MIN_CONFIDENCE`
-  (default off / 8 — confidence-gated auto-approve for Requirements/Design only; `Merging` and
+  (default off / 9 — confidence-gated auto-approve for Requirements/Design only; `Merging` and
   `Done` always stay with the human).
 - `tracker.project_slug` can read from an environment variable such as
   `$SYMPHONY_PROJECT_SLUG`.
