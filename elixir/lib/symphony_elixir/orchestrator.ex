@@ -28,6 +28,8 @@ defmodule SymphonyElixir.Orchestrator do
     input_tokens: 0,
     output_tokens: 0,
     total_tokens: 0,
+    cached_input_tokens: 0,
+    reasoning_output_tokens: 0,
     seconds_running: 0
   }
 
@@ -1131,9 +1133,13 @@ defmodule SymphonyElixir.Orchestrator do
           codex_input_tokens: 0,
           codex_output_tokens: 0,
           codex_total_tokens: 0,
+          codex_cached_input_tokens: 0,
+          codex_reasoning_output_tokens: 0,
           codex_last_reported_input_tokens: 0,
           codex_last_reported_output_tokens: 0,
           codex_last_reported_total_tokens: 0,
+          codex_last_reported_cached_input_tokens: 0,
+          codex_last_reported_reasoning_output_tokens: 0,
           turn_count: 0,
           retry_attempt: normalize_retry_attempt(attempt),
           started_at: DateTime.utc_now()
@@ -1848,10 +1854,14 @@ defmodule SymphonyElixir.Orchestrator do
     codex_input_tokens = Map.get(running_entry, :codex_input_tokens, 0)
     codex_output_tokens = Map.get(running_entry, :codex_output_tokens, 0)
     codex_total_tokens = Map.get(running_entry, :codex_total_tokens, 0)
+    codex_cached_input_tokens = Map.get(running_entry, :codex_cached_input_tokens, 0)
+    codex_reasoning_output_tokens = Map.get(running_entry, :codex_reasoning_output_tokens, 0)
     codex_app_server_pid = Map.get(running_entry, :codex_app_server_pid)
     last_reported_input = Map.get(running_entry, :codex_last_reported_input_tokens, 0)
     last_reported_output = Map.get(running_entry, :codex_last_reported_output_tokens, 0)
     last_reported_total = Map.get(running_entry, :codex_last_reported_total_tokens, 0)
+    last_reported_cached_input = Map.get(running_entry, :codex_last_reported_cached_input_tokens, 0)
+    last_reported_reasoning_output = Map.get(running_entry, :codex_last_reported_reasoning_output_tokens, 0)
     turn_count = Map.get(running_entry, :turn_count, 0)
 
     {
@@ -1864,9 +1874,13 @@ defmodule SymphonyElixir.Orchestrator do
         codex_input_tokens: codex_input_tokens + token_delta.input_tokens,
         codex_output_tokens: codex_output_tokens + token_delta.output_tokens,
         codex_total_tokens: codex_total_tokens + token_delta.total_tokens,
+        codex_cached_input_tokens: codex_cached_input_tokens + token_delta.cached_input_tokens,
+        codex_reasoning_output_tokens: codex_reasoning_output_tokens + token_delta.reasoning_output_tokens,
         codex_last_reported_input_tokens: max(last_reported_input, token_delta.input_reported),
         codex_last_reported_output_tokens: max(last_reported_output, token_delta.output_reported),
         codex_last_reported_total_tokens: max(last_reported_total, token_delta.total_reported),
+        codex_last_reported_cached_input_tokens: max(last_reported_cached_input, token_delta.cached_input_reported),
+        codex_last_reported_reasoning_output_tokens: max(last_reported_reasoning_output, token_delta.reasoning_output_reported),
         turn_count: turn_count_for_update(turn_count, running_entry.session_id, update)
       }),
       token_delta
@@ -2008,12 +2022,16 @@ defmodule SymphonyElixir.Orchestrator do
           tokens: %{
             input_tokens: Map.get(running_entry, :codex_input_tokens, 0),
             output_tokens: Map.get(running_entry, :codex_output_tokens, 0),
-            total_tokens: Map.get(running_entry, :codex_total_tokens, 0)
+            total_tokens: Map.get(running_entry, :codex_total_tokens, 0),
+            cached_input_tokens: Map.get(running_entry, :codex_cached_input_tokens, 0),
+            reasoning_output_tokens: Map.get(running_entry, :codex_reasoning_output_tokens, 0)
           },
           token_delta: %{
             input_tokens: Map.get(token_delta, :input_tokens, 0),
             output_tokens: Map.get(token_delta, :output_tokens, 0),
-            total_tokens: Map.get(token_delta, :total_tokens, 0)
+            total_tokens: Map.get(token_delta, :total_tokens, 0),
+            cached_input_tokens: Map.get(token_delta, :cached_input_tokens, 0),
+            reasoning_output_tokens: Map.get(token_delta, :reasoning_output_tokens, 0)
           }
         },
         recorded_at: Map.get(update, :timestamp)
@@ -2038,7 +2056,9 @@ defmodule SymphonyElixir.Orchestrator do
       tokens: %{
         input_tokens: Map.get(running_entry, :codex_input_tokens, 0),
         output_tokens: Map.get(running_entry, :codex_output_tokens, 0),
-        total_tokens: Map.get(running_entry, :codex_total_tokens, 0)
+        total_tokens: Map.get(running_entry, :codex_total_tokens, 0),
+        cached_input_tokens: Map.get(running_entry, :codex_cached_input_tokens, 0),
+        reasoning_output_tokens: Map.get(running_entry, :codex_reasoning_output_tokens, 0)
       }
     })
   end
@@ -2163,6 +2183,12 @@ defmodule SymphonyElixir.Orchestrator do
     output_tokens = Map.get(codex_totals, :output_tokens, 0) + token_delta.output_tokens
     total_tokens = Map.get(codex_totals, :total_tokens, 0) + token_delta.total_tokens
 
+    cached_input_tokens =
+      Map.get(codex_totals, :cached_input_tokens, 0) + Map.get(token_delta, :cached_input_tokens, 0)
+
+    reasoning_output_tokens =
+      Map.get(codex_totals, :reasoning_output_tokens, 0) + Map.get(token_delta, :reasoning_output_tokens, 0)
+
     seconds_running =
       Map.get(codex_totals, :seconds_running, 0) + Map.get(token_delta, :seconds_running, 0)
 
@@ -2170,6 +2196,8 @@ defmodule SymphonyElixir.Orchestrator do
       input_tokens: max(0, input_tokens),
       output_tokens: max(0, output_tokens),
       total_tokens: max(0, total_tokens),
+      cached_input_tokens: max(0, cached_input_tokens),
+      reasoning_output_tokens: max(0, reasoning_output_tokens),
       seconds_running: max(0, seconds_running)
     }
   end
@@ -2196,17 +2224,33 @@ defmodule SymphonyElixir.Orchestrator do
         :total,
         usage,
         :codex_last_reported_total_tokens
+      ),
+      compute_token_delta(
+        running_entry,
+        :cached_input,
+        usage,
+        :codex_last_reported_cached_input_tokens
+      ),
+      compute_token_delta(
+        running_entry,
+        :reasoning_output,
+        usage,
+        :codex_last_reported_reasoning_output_tokens
       )
     }
     |> Tuple.to_list()
-    |> then(fn [input, output, total] ->
+    |> then(fn [input, output, total, cached_input, reasoning_output] ->
       %{
         input_tokens: input.delta,
         output_tokens: output.delta,
         total_tokens: total.delta,
+        cached_input_tokens: cached_input.delta,
+        reasoning_output_tokens: reasoning_output.delta,
         input_reported: input.reported,
         output_reported: output.reported,
-        total_reported: total.reported
+        total_reported: total.reported,
+        cached_input_reported: cached_input.reported,
+        reasoning_output_reported: reasoning_output.reported
       }
     end)
   end
@@ -2444,6 +2488,40 @@ defmodule SymphonyElixir.Orchestrator do
         "totalTokens",
         :totalTokens
       ])
+
+  defp get_token_usage(usage, :cached_input),
+    do:
+      payload_get(usage, [
+        "cached_input_tokens",
+        :cached_input_tokens,
+        "cachedInputTokens",
+        :cachedInputTokens
+      ]) ||
+        nested_token_usage(usage, [
+          ["input_tokens_details", "cached_tokens"],
+          [:input_tokens_details, :cached_tokens],
+          ["inputTokensDetails", "cachedTokens"],
+          [:inputTokensDetails, :cachedTokens]
+        ])
+
+  defp get_token_usage(usage, :reasoning_output),
+    do:
+      payload_get(usage, [
+        "reasoning_output_tokens",
+        :reasoning_output_tokens,
+        "reasoningOutputTokens",
+        :reasoningOutputTokens
+      ]) ||
+        nested_token_usage(usage, [
+          ["output_tokens_details", "reasoning_tokens"],
+          [:output_tokens_details, :reasoning_tokens],
+          ["outputTokensDetails", "reasoningTokens"],
+          [:outputTokensDetails, :reasoningTokens]
+        ])
+
+  defp nested_token_usage(usage, paths) when is_list(paths) do
+    Enum.find_value(paths, fn path -> integer_like(map_at_path(usage, path)) end)
+  end
 
   defp payload_get(payload, fields) when is_list(fields) do
     Enum.find_value(fields, fn field -> map_integer_value(payload, field) end)

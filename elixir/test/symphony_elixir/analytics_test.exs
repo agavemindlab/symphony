@@ -54,7 +54,7 @@ defmodule SymphonyElixir.AnalyticsTest do
         event_type: :cost_snapshot,
         issue_id: "issue-1",
         issue_identifier: "DEV-1",
-        tokens: %{input_tokens: 10, output_tokens: 4, total_tokens: 14},
+        tokens: %{input_tokens: 10, output_tokens: 4, total_tokens: 14, cached_input_tokens: 4, reasoning_output_tokens: 2},
         recorded_at: "2026-06-15T10:00:05Z"
       },
       %{
@@ -126,6 +126,8 @@ defmodule SymphonyElixir.AnalyticsTest do
 
     assert %{label: "Runtime seconds", value: 42, status: "partial"} in cost_metrics
     assert %{label: "Total tokens", value: 14, status: "partial"} in cost_metrics
+    assert %{label: "Cached input tokens", value: 4, status: "partial"} in cost_metrics
+    assert %{label: "Cache hit share", value: "40.0%", status: "partial"} in cost_metrics
 
     assert %{status: "partial", metrics: autonomy_metrics} =
              panel(summary, "autonomy_funnel")
@@ -155,14 +157,14 @@ defmodule SymphonyElixir.AnalyticsTest do
         event_type: :cost_snapshot,
         issue_id: "issue-1",
         run_id: "run-1",
-        tokens: %{input_tokens: 3, output_tokens: 2, total_tokens: 5},
+        tokens: %{input_tokens: 3, output_tokens: 2, total_tokens: 5, cached_input_tokens: 2},
         recorded_at: "2026-06-15T10:00:05Z"
       },
       %{
         event_type: :cost_snapshot,
         issue_id: "issue-1",
         run_id: "run-1",
-        tokens: %{input_tokens: 6, output_tokens: 3, total_tokens: 9},
+        tokens: %{input_tokens: 6, output_tokens: 3, total_tokens: 9, cached_input_tokens: 4},
         recorded_at: "2026-06-15T10:00:10Z"
       },
       %{
@@ -170,7 +172,7 @@ defmodule SymphonyElixir.AnalyticsTest do
         issue_id: "issue-1",
         run_id: "run-1",
         runtime_seconds: 21,
-        tokens: %{input_tokens: 6, output_tokens: 3, total_tokens: 9},
+        tokens: %{input_tokens: 6, output_tokens: 3, total_tokens: 9, cached_input_tokens: 4},
         recorded_at: "2026-06-15T10:00:21Z"
       }
     ]
@@ -184,6 +186,8 @@ defmodule SymphonyElixir.AnalyticsTest do
     assert %{label: "Total tokens", value: 9, status: "partial"} in cost_metrics
     assert %{label: "Input tokens", value: 6, status: "partial"} in cost_metrics
     assert %{label: "Output tokens", value: 3, status: "partial"} in cost_metrics
+    assert %{label: "Cached input tokens", value: 4, status: "partial"} in cost_metrics
+    assert %{label: "Cache hit share", value: "66.7%", status: "partial"} in cost_metrics
   end
 
   test "handles best-effort write and timestamp edge cases" do
@@ -261,6 +265,8 @@ defmodule SymphonyElixir.AnalyticsTest do
 
     assert %{label: "Runtime seconds", value: 4, status: "partial"} in cost_metrics
     assert %{label: "Total tokens", value: 1, status: "partial"} in cost_metrics
+    assert %{label: "Cached input tokens", value: 0, status: "partial"} in cost_metrics
+    assert %{label: "Cache hit share", value: "n/a", status: "partial"} in cost_metrics
 
     unreadable_path = tmp_path("unreadable.ndjson")
     File.write!(unreadable_path, "{}\n")

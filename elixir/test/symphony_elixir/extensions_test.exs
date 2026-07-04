@@ -408,6 +408,8 @@ defmodule SymphonyElixir.ExtensionsTest do
                "input_tokens" => 4,
                "output_tokens" => 8,
                "total_tokens" => 12,
+               "cached_input_tokens" => 2,
+               "reasoning_output_tokens" => 3,
                "seconds_running" => 42.5
              },
              "rate_limits" => %{"primary" => %{"remaining" => 11}}
@@ -934,7 +936,14 @@ defmodule SymphonyElixir.ExtensionsTest do
           last_codex_timestamp: DateTime.utc_now()
         }
       ],
-      codex_totals: %{input_tokens: 4, output_tokens: 8, total_tokens: 12, seconds_running: 42.5},
+      codex_totals: %{
+        input_tokens: 4,
+        output_tokens: 8,
+        total_tokens: 12,
+        cached_input_tokens: 2,
+        reasoning_output_tokens: 3,
+        seconds_running: 42.5
+      },
       rate_limits: %{"primary" => %{"remaining" => 11}}
     }
   end

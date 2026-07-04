@@ -249,6 +249,7 @@ defmodule SymphonyElixir.Analytics do
       total_tokens: token_totals.total_tokens,
       input_tokens: token_totals.input_tokens,
       output_tokens: token_totals.output_tokens,
+      cached_input_tokens: token_totals.cached_input_tokens,
       runtime_seconds: sum_integer(events, "runtime_seconds"),
       latest_capacity: latest_event(events, "capacity_snapshot")
     }
@@ -296,7 +297,9 @@ defmodule SymphonyElixir.Analytics do
           metric("Runtime seconds", metrics.runtime_seconds, "partial"),
           metric("Total tokens", metrics.total_tokens, "partial"),
           metric("Input tokens", metrics.input_tokens, "partial"),
-          metric("Output tokens", metrics.output_tokens, "partial")
+          metric("Output tokens", metrics.output_tokens, "partial"),
+          metric("Cached input tokens", metrics.cached_input_tokens, "partial"),
+          metric("Cache hit share", cache_hit_share(metrics.cached_input_tokens, metrics.input_tokens), "partial")
         ]
       },
       %{
@@ -321,6 +324,12 @@ defmodule SymphonyElixir.Analytics do
   end
 
   defp metric(label, value, status), do: %{label: label, value: value, status: status}
+
+  defp cache_hit_share(_cached_input_tokens, input_tokens) when input_tokens <= 0, do: "n/a"
+
+  defp cache_hit_share(cached_input_tokens, input_tokens) do
+    "#{Float.round(cached_input_tokens / input_tokens * 100, 1)}%"
+  end
 
   defp capacity_metrics(%{latest_capacity: latest_capacity} = metrics) do
     latest_capacity = latest_capacity || %{}
@@ -371,11 +380,12 @@ defmodule SymphonyElixir.Analytics do
       end
     end)
     |> Map.values()
-    |> Enum.reduce(%{input_tokens: 0, output_tokens: 0, total_tokens: 0}, fn snapshot, totals ->
+    |> Enum.reduce(%{input_tokens: 0, output_tokens: 0, total_tokens: 0, cached_input_tokens: 0}, fn snapshot, totals ->
       %{
         input_tokens: totals.input_tokens + snapshot.input_tokens,
         output_tokens: totals.output_tokens + snapshot.output_tokens,
-        total_tokens: totals.total_tokens + snapshot.total_tokens
+        total_tokens: totals.total_tokens + snapshot.total_tokens,
+        cached_input_tokens: totals.cached_input_tokens + snapshot.cached_input_tokens
       }
     end)
   end
@@ -384,7 +394,8 @@ defmodule SymphonyElixir.Analytics do
     %{
       input_tokens: integer_value(Map.get(tokens, "input_tokens")),
       output_tokens: integer_value(Map.get(tokens, "output_tokens")),
-      total_tokens: integer_value(Map.get(tokens, "total_tokens"))
+      total_tokens: integer_value(Map.get(tokens, "total_tokens")),
+      cached_input_tokens: integer_value(Map.get(tokens, "cached_input_tokens"))
     }
   end
 
