@@ -27,7 +27,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-DEFAULT_CODEX_CMD = "codex exec --sandbox read-only"
+DEFAULT_CODEX_CMD = "codex exec --sandbox read-only --skip-git-repo-check"
 DEFAULT_OUTPUT_DIR = "eval/reviews/replay"
 DEFAULT_LABELS = "approve,request_changes"
 DEFAULT_CONCURRENCY = 2
