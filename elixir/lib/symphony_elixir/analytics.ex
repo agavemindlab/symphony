@@ -240,6 +240,7 @@ defmodule SymphonyElixir.Analytics do
   defp runtime_metrics(events) do
     events = dedupe_events_by_event_id(events)
     token_totals = token_totals(events)
+    maestro_metrics = maestro_metrics(events)
 
     %{
       run_count: count_events(events, "run_started"),
@@ -248,6 +249,10 @@ defmodule SymphonyElixir.Analytics do
       phase_auto_advanced_count: count_events(events, "phase_auto_advanced"),
       phase_reworked_count: count_events(events, "phase_reworked"),
       phase_rollback_count: count_events(events, "phase_rollback"),
+      maestro_review_count: maestro_metrics.review_count,
+      maestro_agreed: maestro_metrics.agreed,
+      maestro_overridden: maestro_metrics.overridden,
+      maestro_pending: maestro_metrics.pending,
       completed_count: count_events(events, "run_completed"),
       retry_count: count_events(events, "retry_scheduled"),
       blocked_count: count_events(events, "blocked"),
@@ -290,9 +295,12 @@ defmodule SymphonyElixir.Analytics do
         id: "quality_rework",
         title: "Quality / Rework",
         question: "How much accepted work comes back as rework or PR/CI failure?",
-        status: "gap",
+        status: "partial",
         metrics: [
           metric("Rework rate", rework_rate(metrics), "partial"),
+          metric("Maestro reviews", metrics.maestro_review_count, "direct"),
+          metric("Maestro agreement rate", maestro_agreement_rate(metrics), "direct"),
+          metric("Maestro overridden", metrics.maestro_overridden, "direct"),
           metric("PR review quality", "GitHub review/CI data gap", "gap")
         ]
       },
@@ -350,6 +358,93 @@ defmodule SymphonyElixir.Analytics do
   defp rework_rate(metrics) do
     percent_share(rework_rounds(metrics), metrics.phase_published_count)
   end
+
+  defp maestro_agreement_rate(metrics) do
+    percent_share(metrics.maestro_agreed, metrics.maestro_agreed + metrics.maestro_overridden)
+  end
+
+  defp maestro_metrics(events) do
+    run_starts = run_started_entries(events)
+
+    events
+    |> Enum.filter(&(Map.get(&1, "event_type") == "maestro_review"))
+    |> Enum.reduce(%{review_count: 0, agreed: 0, overridden: 0, pending: 0}, fn review, acc ->
+      acc
+      |> Map.update!(:review_count, &(&1 + 1))
+      |> tally_maestro_verdict(maestro_verdict(review, next_run_state(review, run_starts)))
+    end)
+  end
+
+  defp tally_maestro_verdict(acc, :excluded), do: acc
+  defp tally_maestro_verdict(acc, verdict), do: Map.update!(acc, verdict, &(&1 + 1))
+
+  @doc """
+  Classifies whether the human verdict (the state of the next `run_started`
+  dispatch for the issue, or `nil` when none exists yet) agreed with a
+  `maestro_review` event's recommendation.
+  """
+  @spec maestro_verdict(map(), String.t() | nil) :: :agreed | :overridden | :pending | :excluded
+  def maestro_verdict(review, next_state) when is_map(review) do
+    classify_maestro_verdict(Map.get(review, "recommendation"), Map.get(review, "phase"), next_state)
+  end
+
+  defp classify_maestro_verdict("request_changes", _phase, "Rework"), do: :agreed
+  defp classify_maestro_verdict("request_changes", _phase, next_state) when next_state in ["In Progress", "Merging"], do: :overridden
+  defp classify_maestro_verdict("request_changes", _phase, _next_state), do: :pending
+
+  defp classify_maestro_verdict("approve", phase, next_state) when phase in ["Requirements", "Design"] do
+    case next_state do
+      "In Progress" -> :agreed
+      "Rework" -> :overridden
+      _next_state -> :pending
+    end
+  end
+
+  defp classify_maestro_verdict("approve", "Implementation", next_state), do: merge_expectation_verdict(next_state)
+  defp classify_maestro_verdict("merge_nudge", _phase, next_state), do: merge_expectation_verdict(next_state)
+  defp classify_maestro_verdict(_recommendation, _phase, _next_state), do: :excluded
+
+  defp merge_expectation_verdict("Merging"), do: :agreed
+  defp merge_expectation_verdict("Rework"), do: :overridden
+  # "In Progress" is ambiguous: the issue may still be awaiting the Merging flip.
+  defp merge_expectation_verdict(_next_state), do: :pending
+
+  defp run_started_entries(events) do
+    events
+    |> Enum.filter(&(Map.get(&1, "event_type") == "run_started"))
+    |> Enum.flat_map(fn event ->
+      case parse_datetime(Map.get(event, "recorded_at")) do
+        nil -> []
+        recorded_at -> [%{issue_id: Map.get(event, "issue_id"), recorded_at: recorded_at, state: Map.get(event, "state")}]
+      end
+    end)
+  end
+
+  defp next_run_state(review, run_starts) do
+    with issue_id when not is_nil(issue_id) <- Map.get(review, "issue_id"),
+         %DateTime{} = reviewed_at <- maestro_reviewed_at(review),
+         %{state: state} <-
+           run_starts
+           |> Enum.filter(&(&1.issue_id == issue_id and DateTime.compare(&1.recorded_at, reviewed_at) == :gt))
+           |> Enum.min_by(& &1.recorded_at, DateTime, fn -> nil end) do
+      state
+    else
+      _ -> nil
+    end
+  end
+
+  defp maestro_reviewed_at(review) do
+    parse_datetime(Map.get(review, "occurred_at") || Map.get(review, "recorded_at"))
+  end
+
+  defp parse_datetime(value) when is_binary(value) do
+    case DateTime.from_iso8601(value) do
+      {:ok, datetime, _utc_offset} -> datetime
+      {:error, _reason} -> nil
+    end
+  end
+
+  defp parse_datetime(_value), do: nil
 
   defp percent_share(_numerator, denominator) when denominator <= 0, do: "n/a"
 

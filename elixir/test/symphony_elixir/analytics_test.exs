@@ -141,10 +141,13 @@ defmodule SymphonyElixir.AnalyticsTest do
     assert %{label: "Rework rounds", value: 0, status: "direct"} in autonomy_metrics
     assert %{label: "Human touch count", value: "Linear comments required", status: "gap"} in autonomy_metrics
 
-    assert %{status: "gap", metrics: quality_metrics} =
+    assert %{status: "partial", metrics: quality_metrics} =
              panel(summary, "quality_rework")
 
     assert %{label: "Rework rate", value: "0.0%", status: "partial"} in quality_metrics
+    assert %{label: "Maestro reviews", value: 0, status: "direct"} in quality_metrics
+    assert %{label: "Maestro agreement rate", value: "n/a", status: "direct"} in quality_metrics
+    assert %{label: "Maestro overridden", value: 0, status: "direct"} in quality_metrics
     assert %{label: "PR review quality", value: "GitHub review/CI data gap", status: "gap"} in quality_metrics
 
     assert %{status: "direct", metrics: capacity_metrics} =
@@ -240,6 +243,150 @@ defmodule SymphonyElixir.AnalyticsTest do
     # Events without an event_id are not deduplicated.
     %{metrics: delivery_metrics} = panel(summary, "delivery_cycle")
     assert %{label: "Runtime-backed runs", value: 2, status: "partial"} in delivery_metrics
+  end
+
+  test "joins maestro reviews to the next run_started dispatch and scores agreement" do
+    path = tmp_path("maestro-agreement.ndjson")
+
+    rc_agree_review = %{
+      event_type: :maestro_review,
+      event_id: "maestro:rc-agree",
+      issue_id: "issue-rc-agree",
+      issue_identifier: "DEV-10",
+      phase: "Implementation",
+      recommendation: "request_changes",
+      confidence: 0.9,
+      auto: false,
+      occurred_at: "2026-06-15T10:00:00Z",
+      recorded_at: "2026-06-15T10:00:01Z"
+    }
+
+    [
+      # Agreed request_changes: only the FIRST subsequent dispatch (Rework) counts,
+      # not the later In Progress one; the duplicated review is deduplicated by event_id.
+      rc_agree_review,
+      rc_agree_review,
+      %{event_type: :run_started, issue_id: "issue-rc-agree", state: "Rework", recorded_at: "2026-06-15T10:05:00Z"},
+      %{event_type: :run_started, issue_id: "issue-rc-agree", state: "In Progress", recorded_at: "2026-06-15T10:20:00Z"},
+      # Overridden request_changes: the human dispatched In Progress instead of Rework.
+      %{
+        event_type: :maestro_review,
+        event_id: "maestro:rc-override",
+        issue_id: "issue-rc-override",
+        phase: "Design",
+        recommendation: "request_changes",
+        occurred_at: "2026-06-15T10:00:00Z",
+        recorded_at: "2026-06-15T10:00:01Z"
+      },
+      %{event_type: :run_started, issue_id: "issue-rc-override", state: "In Progress", recorded_at: "2026-06-15T10:05:00Z"},
+      # Agreed approve on Design. The occurred_at offset (12:00+02:00 == 10:00Z) sorts AFTER
+      # the 10:05Z dispatch lexically, so only DateTime comparison joins them.
+      %{
+        event_type: :maestro_review,
+        event_id: "maestro:design-agree",
+        issue_id: "issue-design-agree",
+        phase: "Design",
+        recommendation: "approve",
+        occurred_at: "2026-06-15T12:00:00+02:00",
+        recorded_at: "2026-06-15T10:00:01Z"
+      },
+      %{event_type: :run_started, issue_id: "issue-design-agree", state: "In Progress", recorded_at: "2026-06-15T10:05:00Z"},
+      # Agreed approve on Implementation followed by a Merging dispatch.
+      %{
+        event_type: :maestro_review,
+        event_id: "maestro:impl-agree",
+        issue_id: "issue-impl-agree",
+        phase: "Implementation",
+        recommendation: "approve",
+        occurred_at: "2026-06-15T10:00:00Z",
+        recorded_at: "2026-06-15T10:00:01Z"
+      },
+      %{event_type: :run_started, issue_id: "issue-impl-agree", state: "Merging", recorded_at: "2026-06-15T10:05:00Z"},
+      # Pending: no subsequent run_started for the issue.
+      %{
+        event_type: :maestro_review,
+        event_id: "maestro:pending",
+        issue_id: "issue-pending",
+        phase: "Requirements",
+        recommendation: "request_changes",
+        occurred_at: "2026-06-15T10:00:00Z",
+        recorded_at: "2026-06-15T10:00:01Z"
+      },
+      # Excluded: ask_clarification never enters the agreement buckets, dispatch or not.
+      %{
+        event_type: :maestro_review,
+        event_id: "maestro:clarify",
+        issue_id: "issue-clarify",
+        phase: "Requirements",
+        recommendation: "ask_clarification",
+        occurred_at: "2026-06-15T10:00:00Z",
+        recorded_at: "2026-06-15T10:00:01Z"
+      },
+      %{event_type: :run_started, issue_id: "issue-clarify", state: "In Progress", recorded_at: "2026-06-15T10:05:00Z"},
+      # Nil occurred_at falls back to the review's recorded_at (10:10), so the earlier
+      # In Progress dispatch is skipped and the later Rework dispatch scores agreement.
+      %{event_type: :run_started, issue_id: "issue-fallback", state: "In Progress", recorded_at: "2026-06-15T10:05:00Z"},
+      %{
+        event_type: :maestro_review,
+        event_id: "maestro:fallback",
+        issue_id: "issue-fallback",
+        phase: "Implementation",
+        recommendation: "request_changes",
+        occurred_at: nil,
+        recorded_at: "2026-06-15T10:10:00Z"
+      },
+      %{event_type: :run_started, issue_id: "issue-fallback", state: "Rework", recorded_at: "2026-06-15T10:15:00Z"},
+      # Unparseable occurred_at: no verdict can be joined, so the review stays pending
+      # even though a Rework dispatch follows.
+      %{
+        event_type: :maestro_review,
+        event_id: "maestro:unparseable",
+        issue_id: "issue-unparseable",
+        phase: "Implementation",
+        recommendation: "request_changes",
+        occurred_at: "not-a-timestamp",
+        recorded_at: "2026-06-15T10:00:01Z"
+      },
+      %{event_type: :run_started, issue_id: "issue-unparseable", state: "Rework", recorded_at: "2026-06-15T10:05:00Z"}
+    ]
+    |> Enum.each(&Analytics.record_event(&1, path: path))
+
+    summary = Analytics.summary(path: path)
+
+    assert %{status: "partial", metrics: quality_metrics} = panel(summary, "quality_rework")
+
+    # 8 unique reviews; agreed = rc-agree + design-agree + impl-agree + fallback (4),
+    # overridden = rc-override (1), pending = pending + unparseable (2), excluded = clarify.
+    assert %{label: "Maestro reviews", value: 8, status: "direct"} in quality_metrics
+    assert %{label: "Maestro agreement rate", value: "80.0%", status: "direct"} in quality_metrics
+    assert %{label: "Maestro overridden", value: 1, status: "direct"} in quality_metrics
+  end
+
+  test "classifies maestro verdicts against the next dispatch state" do
+    review = fn recommendation, phase -> %{"recommendation" => recommendation, "phase" => phase} end
+
+    assert Analytics.maestro_verdict(review.("request_changes", nil), "Rework") == :agreed
+    assert Analytics.maestro_verdict(review.("request_changes", "Design"), "In Progress") == :overridden
+    assert Analytics.maestro_verdict(review.("request_changes", "Design"), "Merging") == :overridden
+    assert Analytics.maestro_verdict(review.("request_changes", "Design"), nil) == :pending
+
+    assert Analytics.maestro_verdict(review.("approve", "Requirements"), "In Progress") == :agreed
+    assert Analytics.maestro_verdict(review.("approve", "Design"), "Rework") == :overridden
+    assert Analytics.maestro_verdict(review.("approve", "Design"), "Merging") == :pending
+
+    assert Analytics.maestro_verdict(review.("approve", "Implementation"), "Merging") == :agreed
+    assert Analytics.maestro_verdict(review.("approve", "Implementation"), "Rework") == :overridden
+    assert Analytics.maestro_verdict(review.("approve", "Implementation"), "In Progress") == :pending
+    assert Analytics.maestro_verdict(review.("merge_nudge", nil), "Merging") == :agreed
+    assert Analytics.maestro_verdict(review.("merge_nudge", "Implementation"), "Rework") == :overridden
+    assert Analytics.maestro_verdict(review.("merge_nudge", "Implementation"), "In Progress") == :pending
+
+    assert Analytics.maestro_verdict(review.("approve", nil), "In Progress") == :excluded
+    assert Analytics.maestro_verdict(review.("approve", "Deployment"), "Merging") == :excluded
+    assert Analytics.maestro_verdict(review.("ask_clarification", "Requirements"), "Rework") == :excluded
+    assert Analytics.maestro_verdict(review.("no_reply_yet", "Design"), "In Progress") == :excluded
+    assert Analytics.maestro_verdict(review.("completion_confirmation", "Deployment"), "Merging") == :excluded
+    assert Analytics.maestro_verdict(review.("unknown", "Design"), "Rework") == :excluded
   end
 
   test "summarizes latest token totals per run without double-counting snapshots" do
