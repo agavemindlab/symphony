@@ -43,12 +43,119 @@ defmodule SymphonyElixir.MaestroEvalTest do
              reviewed_at: "2026-06-15T10:00:00Z",
              verdict_state: "In Progress",
              verdict_at: "2026-06-15T11:00:00Z",
+             verdict_source: "dispatch",
+             signal_event_id: nil,
              agreement: :agreed
            }
 
     assert %{agreement: :overridden, verdict_state: "Merging", verdict_at: "2026-06-15T12:00:00Z"} = overridden
-    assert %{agreement: :pending, verdict_state: nil, verdict_at: nil} = pending
-    assert %{agreement: :excluded, issue_identifier: "DEV-4"} = excluded
+    assert %{agreement: :pending, verdict_state: nil, verdict_at: nil, verdict_source: nil} = pending
+    assert %{agreement: :excluded, issue_identifier: "DEV-4", verdict_source: nil, signal_event_id: nil} = excluded
+  end
+
+  test "pairs derives thread verdicts for approve and request_changes recommendations" do
+    events = [
+      review_event(%{"event_id" => "t1", "issue_id" => "i1", "issue_identifier" => "DEV-11", "artifact_comment_id" => "a1"}),
+      phase_event("phase_approved", %{"event_id" => "close-a1", "issue_id" => "i1", "artifact_comment_id" => "a1"}),
+      review_event(%{"event_id" => "t2", "issue_id" => "i2", "issue_identifier" => "DEV-12", "artifact_comment_id" => "a2"}),
+      phase_event("phase_reworked", %{"event_id" => "rework-a2", "issue_id" => "i2", "artifact_comment_id" => "a2"}),
+      review_event(%{
+        "event_id" => "t3",
+        "issue_id" => "i3",
+        "issue_identifier" => "DEV-13",
+        "recommendation" => "request_changes",
+        "artifact_comment_id" => "a3"
+      }),
+      # Different artifact, but the review phase of the same issue: still a rework signal.
+      phase_event("phase_reworked", %{"event_id" => "rework-i3", "issue_id" => "i3", "artifact_comment_id" => "a3-other"}),
+      review_event(%{
+        "event_id" => "t4",
+        "issue_id" => "i4",
+        "issue_identifier" => "DEV-14",
+        "recommendation" => "request_changes",
+        "artifact_comment_id" => "a4"
+      }),
+      phase_event("phase_approved", %{"event_id" => "close-a4", "issue_id" => "i4", "artifact_comment_id" => "a4"})
+    ]
+
+    assert [approve_agreed, approve_overridden, changes_agreed, changes_overridden] = MaestroEval.pairs(events)
+
+    assert %{agreement: :agreed, verdict_source: "thread", signal_event_id: "close-a1", verdict_state: nil} = approve_agreed
+    assert %{agreement: :overridden, verdict_source: "thread", signal_event_id: "rework-a2"} = approve_overridden
+    assert %{agreement: :agreed, verdict_source: "thread", signal_event_id: "rework-i3"} = changes_agreed
+    assert %{agreement: :overridden, verdict_source: "thread", signal_event_id: "close-a4"} = changes_overridden
+  end
+
+  test "pairs derives merge_nudge thread verdicts, including rollback out of the review phase" do
+    events = [
+      review_event(%{
+        "event_id" => "m1",
+        "issue_id" => "i1",
+        "recommendation" => "merge_nudge",
+        "phase" => "Implementation",
+        "artifact_comment_id" => "a1"
+      }),
+      phase_event("phase_approved", %{"event_id" => "close-a1", "issue_id" => "i1", "artifact_comment_id" => "a1"}),
+      review_event(%{
+        "event_id" => "m2",
+        "issue_id" => "i2",
+        "recommendation" => "merge_nudge",
+        "phase" => "Implementation",
+        "artifact_comment_id" => "a2"
+      }),
+      %{
+        "event_type" => "phase_rollback",
+        "event_id" => "rollback-i2",
+        "issue_id" => "i2",
+        "from_phase" => "Implementation",
+        "target_phase" => "Design",
+        "occurred_at" => "2026-06-15T10:30:00Z"
+      }
+    ]
+
+    assert [nudge_agreed, nudge_overridden] = MaestroEval.pairs(events)
+    assert %{agreement: :agreed, verdict_source: "thread", signal_event_id: "close-a1"} = nudge_agreed
+    assert %{agreement: :overridden, verdict_source: "thread", signal_event_id: "rollback-i2"} = nudge_overridden
+  end
+
+  test "thread signals take precedence over the dispatch join" do
+    events = [
+      review_event(%{
+        "event_id" => "p1",
+        "issue_id" => "i1",
+        "recommendation" => "request_changes",
+        "artifact_comment_id" => "a1"
+      }),
+      # The dispatch join alone would classify request_changes -> Merging as overridden.
+      run_started_event(%{"issue_id" => "i1", "state" => "Merging", "recorded_at" => "2026-06-15T12:00:00Z"}),
+      phase_event("phase_reworked", %{"event_id" => "rework-a1", "issue_id" => "i1", "artifact_comment_id" => "a1"})
+    ]
+
+    assert [pair] = MaestroEval.pairs(events)
+    assert pair.agreement == :agreed
+    assert pair.verdict_source == "thread"
+    assert pair.signal_event_id == "rework-a1"
+    # Dispatch context stays on the pair for inspection.
+    assert pair.verdict_state == "Merging"
+  end
+
+  test "pairs falls back to the dispatch join and stays pending without any signal" do
+    events = [
+      review_event(%{"event_id" => "d1", "issue_id" => "i1", "artifact_comment_id" => "a1"}),
+      run_started_event(%{"issue_id" => "i1"}),
+      review_event(%{"event_id" => "d2", "issue_id" => "i2", "artifact_comment_id" => "a2"}),
+      # An approval BEFORE the review is not a subsequent signal.
+      phase_event("phase_approved", %{
+        "event_id" => "early-a2",
+        "issue_id" => "i2",
+        "artifact_comment_id" => "a2",
+        "occurred_at" => "2026-06-15T09:00:00Z"
+      })
+    ]
+
+    assert [dispatch_pair, pending_pair] = MaestroEval.pairs(events)
+    assert %{agreement: :agreed, verdict_source: "dispatch", signal_event_id: nil} = dispatch_pair
+    assert %{agreement: :pending, verdict_source: nil, signal_event_id: nil, verdict_state: nil} = pending_pair
   end
 
   test "pairs joins on parsed timestamps with recorded_at fallback and event_id dedup" do
@@ -171,6 +278,8 @@ defmodule SymphonyElixir.MaestroEvalTest do
                "reviewed_at" => "2026-06-15T10:00:00Z",
                "verdict_state" => "In Progress",
                "verdict_at" => "2026-06-15T11:00:00Z",
+               "verdict_source" => "dispatch",
+               "signal_event_id" => nil,
                "agreement" => "agreed"
              },
              %{"issue_identifier" => "DEV-2", "auto" => true, "verdict_state" => "Rework", "agreement" => "overridden"}
@@ -179,6 +288,7 @@ defmodule SymphonyElixir.MaestroEvalTest do
     report = File.read!(Path.join(output_dir, "report.md"))
     assert report =~ "# Maestro Verdict Eval Report"
     assert report =~ "| all reviews | 2 | 1 | 1 | 0 | 0 | 50.0% |"
+    assert report =~ "Verdict sources: thread 0 / dispatch 2 / none 0."
     assert report =~ "## Agreement by phase"
     assert report =~ "| Phase | Total | Agreed | Overridden | Pending | Excluded | Agreement rate |"
     assert report =~ "| Design | 1 | 1 | 0 | 0 | 0 | 100.0% |"
@@ -232,6 +342,20 @@ defmodule SymphonyElixir.MaestroEvalTest do
         "confidence" => 8.5,
         "auto" => false,
         "occurred_at" => "2026-06-15T10:00:00Z"
+      },
+      overrides
+    )
+  end
+
+  defp phase_event(event_type, overrides) do
+    Map.merge(
+      %{
+        "event_type" => event_type,
+        "event_id" => "#{event_type}:#{System.unique_integer([:positive])}",
+        "issue_id" => "issue-1",
+        "phase" => "Design",
+        "artifact_comment_id" => "artifact-1",
+        "occurred_at" => "2026-06-15T10:30:00Z"
       },
       overrides
     )

@@ -190,6 +190,7 @@ defmodule SymphonyElixir.PhaseEventsTest do
              event_type: "maestro_review",
              event_id: "maestro_review:maestro-reply",
              phase: "Implementation",
+             artifact_comment_id: "impl-1",
              recommendation: "approve",
              confidence: 8.0,
              auto: false,

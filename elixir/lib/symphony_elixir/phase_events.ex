@@ -177,6 +177,7 @@ defmodule SymphonyElixir.PhaseEvents do
       event_type: "maestro_review",
       event_id: "maestro_review:" <> comment.id,
       phase: phase,
+      artifact_comment_id: comment.parent_id,
       recommendation: maestro_recommendation(comment.body),
       confidence: maestro_confidence(comment.body),
       auto: String.contains?(comment.body, "🤖 auto"),

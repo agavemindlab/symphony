@@ -2,13 +2,23 @@ defmodule SymphonyElixir.MaestroEval do
   @moduledoc """
   Local eval corpus builder for Maestro pre-review verdicts.
 
-  `pairs/1` joins each `maestro_review` analytics event with the first
-  subsequent `run_started` dispatch for the same issue; the state of that
-  dispatch is the human verdict (ground truth). Classification reuses the
-  public `SymphonyElixir.Analytics.maestro_verdict/2`, so corpus labels agree
-  with the dashboard agreement metrics. `summarize/1` and `report/1` are pure;
-  `read_all_events/1` and `write_corpus!/2` are the thin IO layer used by
-  `mix symphony.eval.maestro`.
+  `pairs/1` resolves the human verdict (ground truth) for each
+  `maestro_review` analytics event from two sources, thread signal first:
+
+    * **thread** — the first subsequent `phase_approved` reply on the reviewed
+      artifact (`artifact_comment_id`) is an approval signal; the first
+      subsequent `phase_reworked` on the same artifact (or on the review phase
+      of the same issue) or `phase_rollback` out of the review phase is a
+      rework signal. Thread signals are more precise than the dispatch join
+      and also cover issues without `run_started` coverage (e.g. backfilled
+      history).
+    * **dispatch** — when no thread signal exists, the review is joined with
+      the first subsequent `run_started` dispatch for the same issue and
+      classified via the public `SymphonyElixir.Analytics.maestro_verdict/2`,
+      so labels agree with the dashboard agreement metrics.
+
+  `summarize/1` and `report/1` are pure; `read_all_events/1` and
+  `write_corpus!/2` are the thin IO layer used by `mix symphony.eval.maestro`.
   """
 
   alias SymphonyElixir.Analytics
@@ -24,6 +34,8 @@ defmodule SymphonyElixir.MaestroEval do
           reviewed_at: String.t() | nil,
           verdict_state: String.t() | nil,
           verdict_at: String.t() | nil,
+          verdict_source: String.t() | nil,
+          signal_event_id: String.t() | nil,
           agreement: agreement()
         }
 
@@ -46,18 +58,19 @@ defmodule SymphonyElixir.MaestroEval do
   Builds review/verdict pairs from a full analytics event list.
 
   Events are deduplicated by `event_id` first (events without an `event_id`
-  are always kept). Timestamps are compared as parsed `DateTime`s — the
-  review side uses `occurred_at` falling back to `recorded_at` — never
-  lexically. Reviews without a subsequent dispatch keep a `nil` verdict.
+  are always kept). Timestamps are compared as parsed `DateTime`s — both
+  sides use `occurred_at` falling back to `recorded_at` — never lexically.
+  Reviews without a thread signal or subsequent dispatch keep a `nil` verdict.
   """
   @spec pairs([map()]) :: [pair()]
   def pairs(events) when is_list(events) do
     events = dedup_events(events)
     run_starts = run_started_entries(events)
+    signals = signal_candidates(events)
 
     events
     |> Enum.filter(&(Map.get(&1, "event_type") == "maestro_review"))
-    |> Enum.map(&build_pair(&1, run_starts))
+    |> Enum.map(&build_pair(&1, run_starts, signals))
   end
 
   @doc """
@@ -85,12 +98,15 @@ defmodule SymphonyElixir.MaestroEval do
     """
     # Maestro Verdict Eval Report
 
-    Corpus of #{summary.overall.total} maestro review pair(s); ground truth is the state of the
+    Corpus of #{summary.overall.total} maestro review pair(s); ground truth prefers the thread
+    outcome signal on the reviewed artifact and falls back to the state of the
     first subsequent `run_started` dispatch for the reviewed issue.
 
     ## Overall agreement
 
     #{stats_table("Scope", [{"all reviews", summary.overall}])}
+
+    #{verdict_source_line(pairs)}
 
     ## Agreement by phase
 
@@ -164,10 +180,12 @@ defmodule SymphonyElixir.MaestroEval do
     end
   end
 
-  defp build_pair(review, run_starts) do
+  defp build_pair(review, run_starts, signals) do
     reviewed_at = parse_datetime(Map.get(review, "occurred_at") || Map.get(review, "recorded_at"))
     verdict = next_run_start(review, reviewed_at, run_starts)
     verdict_state = verdict && verdict.state
+    signal = thread_signal(review, reviewed_at, signals)
+    {agreement, verdict_source, signal_event_id} = resolve_verdict(review, signal, verdict_state)
 
     %{
       issue_identifier: Map.get(review, "issue_identifier"),
@@ -178,8 +196,86 @@ defmodule SymphonyElixir.MaestroEval do
       reviewed_at: reviewed_at && DateTime.to_iso8601(reviewed_at),
       verdict_state: verdict_state,
       verdict_at: verdict && DateTime.to_iso8601(verdict.recorded_at),
-      agreement: Analytics.maestro_verdict(review, verdict_state)
+      verdict_source: verdict_source,
+      signal_event_id: signal_event_id,
+      agreement: agreement
     }
+  end
+
+  @signal_event_types ["phase_approved", "phase_reworked", "phase_rollback"]
+
+  defp signal_candidates(events) do
+    events
+    |> Enum.filter(&(Map.get(&1, "event_type") in @signal_event_types))
+    |> Enum.flat_map(fn event ->
+      case parse_datetime(Map.get(event, "occurred_at") || Map.get(event, "recorded_at")) do
+        nil -> []
+        at -> [%{event: event, at: at}]
+      end
+    end)
+  end
+
+  defp thread_signal(_review, nil, _signals), do: nil
+
+  defp thread_signal(review, reviewed_at, signals) do
+    signals
+    |> Enum.filter(fn %{event: event, at: at} ->
+      DateTime.compare(at, reviewed_at) == :gt and signal_matches?(event, review)
+    end)
+    |> Enum.min_by(& &1.at, DateTime, fn -> nil end)
+    |> case do
+      nil -> nil
+      %{event: event} -> %{verdict: signal_verdict(event), event_id: Map.get(event, "event_id")}
+    end
+  end
+
+  defp signal_matches?(event, review) do
+    case Map.get(event, "event_type") do
+      "phase_approved" -> same_artifact?(event, review)
+      "phase_reworked" -> same_artifact?(event, review) or same_issue_phase?(event, "phase", review)
+      "phase_rollback" -> same_issue_phase?(event, "from_phase", review)
+      _event_type -> false
+    end
+  end
+
+  defp same_artifact?(event, review) do
+    case Map.get(review, "artifact_comment_id") do
+      artifact_id when is_binary(artifact_id) -> Map.get(event, "artifact_comment_id") == artifact_id
+      _missing -> false
+    end
+  end
+
+  defp same_issue_phase?(event, phase_key, review) do
+    issue_id = Map.get(review, "issue_id")
+    phase = Map.get(review, "phase")
+
+    not is_nil(issue_id) and not is_nil(phase) and
+      Map.get(event, "issue_id") == issue_id and Map.get(event, phase_key) == phase
+  end
+
+  defp signal_verdict(%{"event_type" => "phase_approved"}), do: :approved_signal
+  defp signal_verdict(_event), do: :rework_signal
+
+  defp resolve_verdict(review, signal, verdict_state) do
+    case thread_agreement(Map.get(review, "recommendation"), signal && signal.verdict) do
+      nil -> dispatch_verdict(review, verdict_state)
+      agreement -> {agreement, "thread", signal.event_id}
+    end
+  end
+
+  defp thread_agreement("approve", :approved_signal), do: :agreed
+  defp thread_agreement("approve", :rework_signal), do: :overridden
+  defp thread_agreement("request_changes", :rework_signal), do: :agreed
+  defp thread_agreement("request_changes", :approved_signal), do: :overridden
+  defp thread_agreement("merge_nudge", :approved_signal), do: :agreed
+  defp thread_agreement("merge_nudge", :rework_signal), do: :overridden
+  defp thread_agreement(_recommendation, _signal_verdict), do: nil
+
+  defp dispatch_verdict(review, verdict_state) do
+    case Analytics.maestro_verdict(review, verdict_state) do
+      agreement when agreement in [:agreed, :overridden] -> {agreement, "dispatch", nil}
+      agreement -> {agreement, nil, nil}
+    end
   end
 
   defp next_run_start(_review, nil, _run_starts), do: nil
@@ -233,6 +329,13 @@ defmodule SymphonyElixir.MaestroEval do
 
   defp format_rate(nil), do: "n/a"
   defp format_rate(rate), do: "#{Float.round(rate * 100, 1)}%"
+
+  defp verdict_source_line(pairs) do
+    counts = Enum.frequencies_by(pairs, &(Map.get(&1, :verdict_source) || "none"))
+
+    "Verdict sources: thread #{Map.get(counts, "thread", 0)} / dispatch #{Map.get(counts, "dispatch", 0)} / " <>
+      "none #{Map.get(counts, "none", 0)}."
+  end
 
   defp overridden_section(pairs) do
     case Enum.filter(pairs, &(&1.agreement == :overridden)) do
