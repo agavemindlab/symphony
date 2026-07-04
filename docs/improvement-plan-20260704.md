@@ -138,9 +138,11 @@ flowchart LR
 3. 凭据失效改为**显式告警**：analytics 记 `maestro_skipped` 事件 + 面板红字（现在是 debug 日志级别的静默）。
 4. P1 再考虑高风险 Implementation 的双视角审核（正确性 lens + 部署风险 lens 各一个子 agent，结论合并）。
 
-### 目标 11 — Maestro 建议打回直接打回、低风险直批 🔴（未实现）
+### 目标 11 — Maestro 建议打回直接打回、低风险直批 🟡（勘误：打回已存在）
 
-**现状**：Maestro 只发建议回复，一切状态切换等人。
+**现状**（2026-07-04 勘误）：预审 session prompt 的 rule 3 一直指示 request
+changes 时直接置 `Rework`——"只建议不执行"仅对 approve 成立。缺的是审计标记、
+关闭开关和低风险直批。前两者已随 MAESTRO_AUTO_REWORK 落地。
 **建议**（本报告最高价值单项，分三步走）：
 1. **第一步（低风险，先行）：自动执行"打回"**。request changes 建议 → Maestro 直接置 `Rework` 并把回复稿发出。打回完全可逆（人不同意可改回），且打回本来就是让 agent 返工、不需要人的判断增值。设 `MAESTRO_AUTO_REWORK=true` 开关灰度。
 2. **第二步：低风险直批 Requirements/Design**。这两个阶段的批准也可逆（后续阶段还有多道门）。批准条件 = 建议 approve + 置信分 ≥ 阈值 + 无高影响 🔴 未决项 + 该 issue 无人类否决 Maestro 的历史。相当于把 agent 侧已有的 auto-advance 信心门升级为"独立第二 agent 复核后放行"，比现状（agent 自评 ⏩）更严而非更松。
