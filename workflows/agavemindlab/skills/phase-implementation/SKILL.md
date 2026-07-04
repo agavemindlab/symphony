@@ -67,8 +67,13 @@ same-phase Rework cycle in your workflow instructions when re-posting the artifa
 ## Skills to invoke
 
 - `writing-plans` (superpowers) — produce the hierarchical plan.
-- `subagent-driven-development` (superpowers, when tasks are parallelizable) —
-  delegate independent plan items to subagents.
+- `subagent-driven-development` (superpowers) — the **default execution mode**
+  when the plan has more than a couple of independent items: delegate plan
+  items to subagents and keep this session's context for the plan, integration,
+  and acceptance evidence (long single-session implementations are the main
+  context-bloat source). Implement directly only when the change is small
+  enough that delegation overhead exceeds the work; then record
+  `Skipped subagent-driven-development: <reason>` in workpad notes.
 - `test-driven-development` (superpowers) — write failing tests first for any
   new behavior.
 - `systematic-debugging` (superpowers) — when a test fails or behavior
@@ -133,8 +138,9 @@ Markdown sections:
 
 1. **Plan** — invoke `writing-plans` to produce the hierarchical plan; write
    it to the workpad. Mirror `S<N>` IDs in `acceptance_criteria`.
-2. **Delegate** — if the plan has independent subtasks, invoke
-   `subagent-driven-development`.
+2. **Delegate** — invoke `subagent-driven-development` by default for a
+   multi-item plan (see Skills to invoke); implement directly only with a
+   recorded skip reason.
 3. **Implement with TDD** — for new behavior: failing test → minimal code
    → green → refactor.
 4. **Commit** — invoke `symphony-commit` skill for each logical change.
