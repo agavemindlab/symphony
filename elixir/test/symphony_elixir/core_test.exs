@@ -1,6 +1,13 @@
 defmodule SymphonyElixir.CoreTest do
   use SymphonyElixir.TestSupport
 
+  defmodule RoutingBriefProbeClient do
+    def fetch_issue_comments(issue_id) do
+      send(self(), {:routing_brief_fetch, issue_id})
+      {:ok, []}
+    end
+  end
+
   test "config defaults and validation checks" do
     write_workflow_file!(Workflow.workflow_file_path(),
       tracker_api_token: nil,
@@ -394,6 +401,20 @@ defmodule SymphonyElixir.CoreTest do
 
       assert workflow =~ "/approve"
       assert workflow =~ "/rework"
+    end
+  end
+
+  test "workflow prompts inject the engine-precomputed routing brief" do
+    repo_root = Path.expand("..", File.cwd!())
+
+    for workflow_path <- [
+          "workflows/agavemindlab/WORKFLOW.md",
+          "workflows/agavemindlab-lite/WORKFLOW.md"
+        ] do
+      workflow = File.read!(Path.join(repo_root, workflow_path))
+
+      assert workflow =~ "{{ routing_brief }}"
+      assert workflow =~ "引擎预计算"
     end
   end
 
@@ -2152,6 +2173,71 @@ defmodule SymphonyElixir.CoreTest do
     assert prompt =~ "attempt=3"
   end
 
+  test "prompt builder renders the engine routing brief when the template references it" do
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_kind: "memory",
+      prompt: "Ticket {{ issue.identifier }}\n\n## 引擎预计算的路由事实\n\n{{ routing_brief }}"
+    )
+
+    Application.put_env(:symphony_elixir, :memory_tracker_comments, %{
+      "issue-brief" => [
+        %{
+          id: "req-1",
+          body: "## Requirements\n\n目标",
+          created_at: ~U[2026-07-01 10:00:00Z],
+          resolved_at: nil,
+          parent_id: nil,
+          author_name: "symphony-agent",
+          author_is_bot: true
+        }
+      ]
+    })
+
+    issue = %Issue{
+      id: "issue-brief",
+      identifier: "MT-90",
+      title: "Routing brief",
+      description: "Inject precomputed routing facts",
+      state: "In Progress",
+      url: "https://example.org/issues/MT-90",
+      labels: []
+    }
+
+    prompt = PromptBuilder.build_prompt(issue)
+
+    assert prompt =~ "## 引擎预计算的路由事实"
+    assert prompt =~ "- 待审阶段：Requirements（artifact `req-1`，发布于 2026-07-01T10:00:00Z）"
+    assert prompt =~ "| Requirements | `req-1` | awaiting | 2026-07-01T10:00:00Z | — | 1 |"
+  end
+
+  test "prompt builder skips the routing brief for templates that do not reference it" do
+    previous_client = Application.get_env(:symphony_elixir, :linear_client_module)
+    Application.put_env(:symphony_elixir, :linear_client_module, RoutingBriefProbeClient)
+
+    on_exit(fn ->
+      if is_nil(previous_client) do
+        Application.delete_env(:symphony_elixir, :linear_client_module)
+      else
+        Application.put_env(:symphony_elixir, :linear_client_module, previous_client)
+      end
+    end)
+
+    write_workflow_file!(Workflow.workflow_file_path(), prompt: "Ticket {{ issue.identifier }}")
+
+    issue = %Issue{
+      id: "issue-no-brief",
+      identifier: "MT-91",
+      title: "No routing brief",
+      description: "Template does not reference the brief",
+      state: "In Progress",
+      url: "https://example.org/issues/MT-91",
+      labels: []
+    }
+
+    assert PromptBuilder.build_prompt(issue) == "Ticket MT-91"
+    refute_received {:routing_brief_fetch, _issue_id}
+  end
+
   test "prompt builder renders Linear project context" do
     write_workflow_file!(Workflow.workflow_file_path(),
       prompt: "Project {{ issue.project.slug_id }} id={{ issue.project.id }} name={{ issue.project.name }}"
@@ -2349,6 +2435,8 @@ defmodule SymphonyElixir.CoreTest do
     assert prompt =~ "Current status: In Progress"
     assert prompt =~ "https://example.org/issues/MT-616/use-rich-templates-for-workflowmd"
     assert prompt =~ "This is an unattended Symphony orchestration session."
+    assert prompt =~ "## 引擎预计算的路由事实"
+    assert prompt =~ "（引擎未能获取 Linear 评论，请按原流程自行读取与判断。）"
     assert prompt =~ "Stop early only for a true blocker"
     assert prompt =~ "Do not include generic \"next steps for user\""
     assert prompt =~ "unresolved Phase artifacts"

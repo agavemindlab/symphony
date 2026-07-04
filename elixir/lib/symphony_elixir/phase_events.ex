@@ -53,6 +53,24 @@ defmodule SymphonyElixir.PhaseEvents do
 
   def phase_of_artifact(_body), do: nil
 
+  @doc false
+  @spec reply_marker(String.t() | nil) ::
+          :maestro_review | :approved | :auto_advanced | :reworked | :rollback | nil
+  def reply_marker(body) when is_binary(body) do
+    marker_body = String.replace(body, @marker_decoration_regex, "")
+
+    cond do
+      String.starts_with?(marker_body, "🤖 Maestro 预审核") -> :maestro_review
+      String.starts_with?(marker_body, "✅ 已批准") -> :approved
+      String.starts_with?(marker_body, "⏩ 自动进入") -> :auto_advanced
+      String.starts_with?(marker_body, "🔧 本轮修改") -> :reworked
+      String.starts_with?(marker_body, "🔄 反馈要求回到") -> :rollback
+      true -> nil
+    end
+  end
+
+  def reply_marker(_body), do: nil
+
   defp comment_sort_key(%{created_at: %DateTime{} = created_at}),
     do: DateTime.to_unix(created_at, :microsecond)
 
@@ -91,15 +109,13 @@ defmodule SymphonyElixir.PhaseEvents do
   end
 
   defp reply_events(comment, phase) do
-    marker_body = String.replace(comment.body, @marker_decoration_regex, "")
-
-    cond do
-      String.starts_with?(marker_body, "🤖 Maestro 预审核") -> [maestro_review_event(comment, phase)]
-      String.starts_with?(marker_body, "✅ 已批准") -> [closing_event(comment, phase, "phase_approved")]
-      String.starts_with?(marker_body, "⏩ 自动进入") -> [closing_event(comment, phase, "phase_auto_advanced")]
-      String.starts_with?(marker_body, "🔧 本轮修改") -> [rework_event(comment, phase)]
-      String.starts_with?(marker_body, "🔄 反馈要求回到") -> [rollback_event(comment, phase, marker_body)]
-      true -> []
+    case reply_marker(comment.body) do
+      :maestro_review -> [maestro_review_event(comment, phase)]
+      :approved -> [closing_event(comment, phase, "phase_approved")]
+      :auto_advanced -> [closing_event(comment, phase, "phase_auto_advanced")]
+      :reworked -> [rework_event(comment, phase)]
+      :rollback -> [rollback_event(comment, phase)]
+      nil -> []
     end
   end
 
@@ -138,12 +154,12 @@ defmodule SymphonyElixir.PhaseEvents do
     }
   end
 
-  defp rollback_event(comment, from_phase, marker_body) do
+  defp rollback_event(comment, from_phase) do
     %{
       event_type: "phase_rollback",
       event_id: "phase_rollback:" <> comment.id,
       from_phase: from_phase,
-      target_phase: rollback_target(marker_body),
+      target_phase: rollback_target(comment.body),
       comment_id: comment.id,
       occurred_at: occurred_at(comment.created_at)
     }

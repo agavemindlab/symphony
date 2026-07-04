@@ -123,12 +123,16 @@ codex:
 无描述。
 {% endif %}
 
+## 引擎预计算的路由事实
+
+{{ routing_brief }}
+
 ## 工作方式
 
 1. 用 `.agents/skills/symphony-linear/SKILL.md` 读取 issue、评论、附件、状态和历史 artifact。
 2. 确认当前分支是 issue 对应分支；需要时从 `origin` 或 `upstream/${SYMPHONY_BASE_BRANCH:-main}` 恢复。
 3. 如有最新 `Symphony agent state` 附件，恢复到 `.symphony/`，并确保 `.symphony/` 在 `.git/info/exclude`。
-4. 根据 issue 状态和最新人类反馈决定本轮动作：
+4. 根据 issue 状态和最新人类反馈决定本轮动作。上方「引擎预计算的路由事实」可用时，直接采信其中的 artifact 状态、待审阶段和新回复列表，不要重新推导，摘录不够时再取完整评论原文；标记为不可用时自行读取评论判断：
    - `Todo`: 移到 `In Progress` 后开始。
    - `In Progress`: 继续需求、设计、实现或回答问题。
    - `Rework`: 找到最新具体反馈并修改；如果没有具体反馈，回复请人说明。
