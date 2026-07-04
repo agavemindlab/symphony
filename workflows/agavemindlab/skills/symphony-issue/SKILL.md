@@ -57,10 +57,18 @@ work was discovered:
 
 ## Safety invariants (every spawned issue)
 
-1. **State = the team's intake state, resolved by `type` (never by name).**
-   Pick `type: "triage"` if the team has one, else `type: "backlog"` (see
-   symphony-linear "Spawn a Linear issue"). A spawned issue lands outside
-   `active_states`, so Symphony never auto-works it.
+1. **State + label decide schedulability, by tier.**
+   - *Tier A (autonomous create)*: state = the team's intake state, resolved
+     by `type` (never by name) — `type: "triage"` if the team has one, else
+     `type: "backlog"` (see symphony-linear "Spawn a Linear issue"). No
+     `symphony` label. The issue lands outside `active_states`, so Symphony
+     never auto-works it; a human promotes it when ready.
+   - *Tier B (fulfilled on consent)*: the human's consent reply **is** the
+     scheduling authorization. Create it directly schedulable: state = the
+     team's `Todo` state (`type: "unstarted"`, matching a workflow
+     `active_states` entry) and `labelIds` = `Type:Xxx` **plus** the
+     workflow's `symphony` label. Execution order is enforced by the blocking
+     relations, not by parking the issue.
 2. **`assignee` = the current issue's `creator`.** Never assign a spawned
    issue to Symphony's own account.
 3. **`team` = current issue's team; `project` = the routed target project.**
@@ -122,7 +130,7 @@ thread is a dedicated consent channel:
 - **关系**: 阻塞当前 issue（裸 identifier，如 ENG-123）/ 当前 issue 的子任务
 - **理由**: <为什么需要、为什么不能并进当前 issue>
 
-> 👉 回复本条评论「同意 / 建吧」即由 symphony 代建；回复「不用了」则放弃。
+> 👉 回复本条评论「同意 / 建吧」即由 symphony 代建并**直接排期**（加 `symphony` label、置 `Todo`，依阻塞关系自动排序执行）；回复「不用了」则放弃。
 ```
 
 Record it in workpad `## Spawned Issues` as `待同意` with the proposal comment
@@ -140,9 +148,10 @@ Flow impact by kind:
   ```
   Move the issue to `Human Review` and stop (no `Blocked` state exists). This
   is a **hard stop**, like a phase's "When blocked" path: it short-circuits
-  the phase skill's normal advance/stop handback to Main Flow. Even after the
-  blocker is created on consent, the current issue stays `blocked-by` it and
-  remains in `Human Review` — creation ≠ unblocking.
+  the phase skill's normal advance/stop handback to Main Flow. Once the
+  blocker is created on consent, fulfill mode re-parks the current issue at
+  `Todo`: Symphony's blocked-by gate holds it there and auto-dispatches it
+  when the blocker reaches a terminal state — no human nudge needed.
 - **sub-issue** — a proposal, **not** blocking. Finish the current phase
   artifact normally and attach the proposal comment. (If you genuinely cannot
   continue without the split, it is really a blocker — take the blocking
@@ -154,9 +163,17 @@ Main Flow scans unresolved `## 建议新建 issue` comments for a new reply, the
 interprets the reply's **intent** (not a fixed keyword list):
 
 - **Consent** (e.g. `同意 / 建吧 / 可以 / 👍`) → create the recorded item with
-  the Tier A create/link/record/persist steps (intake state, assignee =
-  creator, relation or `parentId`), reply `已创建 ENG-123` in the proposal thread,
-  resolve the proposal comment, flip the workpad entry `待同意 → 已创建`.
+  the Tier A create/link/record/persist steps, except consent makes it
+  **schedulable** (invariant 1, Tier B): state = the team's `Todo`, labels =
+  `Type:Xxx` + `symphony`, assignee = creator. Relations by kind:
+  - *blocking* → new issue `blocks` the current issue; after creating it,
+    move the current issue to `Todo` and end the session — the blocked-by
+    gate resumes it automatically once the blocker is terminal.
+  - *sub-issue* → `parentId` = current issue **and** each child `blocks` the
+    current issue, so Symphony runs the children first and auto-resumes the
+    parent for integration and acceptance once every child is terminal.
+  Then reply `已创建 ENG-123` in the proposal thread, resolve the proposal
+  comment, flip the workpad entry `待同意 → 已创建`.
 - **Rejection** (e.g. `不用了 / 先不建`) → resolve the proposal comment, flip
   to `已放弃`; never re-propose.
 - **Unclear** → treat as ordinary discussion; create nothing.
@@ -184,8 +201,13 @@ record it and move on. Both paths coexist.
   link them by the dependency that actually blocks execution.
 - **blocking dependency found** → proposal comment + blocker callout on the
   artifact + `Human Review`; nothing created until consent.
-- **consent reply in a proposal thread** → issue created, `已创建 ENG-123`
-  replied, proposal comment resolved, workpad `待同意 → 已创建`.
+- **consent reply in a proposal thread** → issue created schedulable
+  (`symphony` label + `Todo`), relation set, `已创建 ENG-123` replied, proposal
+  comment resolved, workpad `待同意 → 已创建`; a blocking fulfill additionally
+  re-parks the current issue at `Todo` for auto-resume.
+- **sub-issue decomposition consented** → children created schedulable, each
+  `parentId` + `blocks` the parent; the parent stays put and is auto-resumed
+  by the blocked-by gate after the last child completes.
 - **rejection reply** → proposal comment resolved, workpad `已放弃`.
 - **resume with the item already recorded** → skipped, not recreated.
 - **soft-search hit** → no duplicate; relation added to the existing issue,

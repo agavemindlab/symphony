@@ -221,7 +221,7 @@ Symphony only starts the agent when the issue is in an active state (`Todo`, `In
    - `In Progress`, `Rework` → determine the target phase via steps 4–5.
 
 4. Gather the signals:
-   - **Proposal-consent channel (run first, orthogonal to phase intent).** Scan unresolved `## 建议新建 issue` proposal comments for a new human reply in *their* thread, and fulfill via the `symphony-issue` skill's fulfill mode (consent → create the proposed issue + reply `已创建 ENG-123` + resolve the proposal comment; rejection → resolve as `已放弃`). This lives in a different comment thread than the phase artifacts, so it never collides with phase approval; fulfilling spawns here first keeps a single "approve phase + consent to a sub-issue" reply pair well-ordered. See the Spawning related issues section.
+   - **Proposal-consent channel (run first, orthogonal to phase intent).** Scan unresolved `## 建议新建 issue` proposal comments for a new human reply in *their* thread, and fulfill via the `symphony-issue` skill's fulfill mode (consent → create the proposed issue schedulable + reply `已创建 ENG-123` + resolve the proposal comment — a fulfilled `blocking` proposal then re-parks this issue at `Todo` and ends the session; rejection → resolve as `已放弃`). This lives in a different comment thread than the phase artifacts, so it never collides with phase approval; fulfilling spawns here first keeps a single "approve phase + consent to a sub-issue" reply pair well-ordered. See the Spawning related issues section.
    - Identify the phase awaiting review = the most recent unresolved artifact with no closing reply (neither `✅` human approval nor `⏩` auto-advance). A closing reply closes the artifact for routing but does not by itself make it expired; do not resolve it unless the rework protocols below say to. The workpad `current_phase` should already name the awaiting phase; if the workpad is absent (brand-new branch), infer it as the most recent unresolved phase artifact without a closing reply. No artifacts at all → target phase is Requirements, go to step 6.
    - Gather new human feedback from two places: (a) replies in each unresolved Phase artifact's thread, including phase-closed artifacts in the current chain; inspect each artifact's `children` / thread replies first, and (b) standalone top-level **human** comments on the issue that are not replies to any artifact. When reading Linear comments, retain each comment's `parent { id }`; Linear may also return replies in `comments.nodes`, so never treat a parented reply node as standalone top-level feedback. A reply's feedback keeps the phase intent of that artifact. Exclude agent-authored `## 建议新建 issue` proposal comments — those are the consent channel handled by the first bullet, not feedback. Scan **every** unresolved artifact, not just the awaiting-review one — humans request cross-phase rework by commenting on the artifact they want changed (e.g. feedback on `## Design` while `## Implementation` awaits review). "New" = newer than the agent's last closing reply on that artifact (or, for standalone comments, newer than the agent's last action). Attribute each standalone comment to the phase it discusses; if unclear, assume the awaiting-review phase. If a comment refers back to an earlier round ("上次"/"之前提到的"), pull the specific resolved comment it points to per the `symphony-linear` skill's back-reference exception.
    - When the awaiting-review phase is Implementation, the **PR is also a feedback channel** — but only for **human** reviewers. Humans often leave change requests as GitHub PR review comments instead of repeating them on Linear; gather new human PR review comments / inline threads / review states and treat them as feedback targeting Implementation. Bot / automated reviews (e.g. the configured `AUTOMATED_REVIEWER`) are **not** human intent: a bot approval never counts as a human approval, and a bot's comments are addressed by the Implementation PR feedback sweep, not by this intent check. Identify the author of each PR review/comment and drop bot ones before judging intent.
@@ -365,13 +365,22 @@ issues and link the dependencies that express the real block. If the registry
 does not make the route clear, do not create a likely misrouted issue; ask for
 human routing clarification in the current phase artifact.
 
-Safety invariants for every spawned issue: it lands in the team's **intake
-state** (resolved by `type` — `triage` else `backlog`, never by name), is
-**assigned to the current issue's `creator`**, never to Symphony, and is
-therefore **never auto-worked** (the intake state is outside `active_states`).
-A `blocking` discovery additionally parks the current issue at `Human Review`
-with a 🚧 callout — creating the blocker does not unblock it. Full mechanics,
-dedup, and the workpad record live in `symphony-issue`.
+Safety invariants for every spawned issue: it is **assigned to the current
+issue's `creator`**, never to Symphony. An **autonomously created** issue
+(Tier A) lands in the team's **intake state** (resolved by `type` — `triage`
+else `backlog`, never by name) without the `symphony` label, so it is never
+auto-worked; a human promotes it when ready. A **consent-fulfilled** issue
+(Tier B: `blocking` / `sub-issue`) is created **schedulable** — `symphony`
+label + the team's `Todo` state — because the consent reply is the scheduling
+authorization; execution order is enforced by its blocking relations, not by
+parking. A `blocking` discovery parks the current issue at `Human Review`
+with a 🚧 callout until consent; once the blocker is created, fulfill mode
+re-parks the current issue at `Todo`, where the blocked-by dispatch gate
+auto-resumes it after the blocker completes. A consented `sub-issue`
+decomposition additionally links each child as blocking the parent, so the
+parent auto-resumes for integration and acceptance once all children are
+terminal. Full mechanics, dedup, and the workpad record live in
+`symphony-issue`.
 
 ## Workpad
 
@@ -434,4 +443,4 @@ the state index.
 - **Agent never moves to `Done`**: only humans close the issue. After Deployment concludes, the agent posts a completion summary in the `## Deployment` artifact thread and returns the issue to `Human Review`.
 - **No phase advances without its artifact**: each phase must publish its artifact before moving to `Human Review`.
 - **`Human Review` is not an agent state**: Symphony does not start the agent there. Do not design any phase skill to act while the issue is in `Human Review`.
-- **Out-of-scope improvements**: do not expand the current issue — spin off a separate ticket via the `symphony-issue` skill (see Spawning related issues). Every spawned issue lands in the team intake state, is assigned to the current issue's `creator` (never Symphony), and is never auto-worked. Flow-changing kinds (`blocking`, `sub-issue`) are only proposed and wait for human consent.
+- **Out-of-scope improvements**: do not expand the current issue — spin off a separate ticket via the `symphony-issue` skill (see Spawning related issues). Every spawned issue is assigned to the current issue's `creator` (never Symphony). Autonomous kinds land in the team intake state and are never auto-worked; flow-changing kinds (`blocking`, `sub-issue`) are only proposed, and on human consent are created schedulable (`symphony` label + `Todo`) with blocking relations sequencing execution.

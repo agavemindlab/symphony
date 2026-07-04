@@ -198,11 +198,18 @@ Reply locations:
   relation plus terminal cleanup state. If any field is wrong or missing,
   request changes. For true prerequisite blockers, require the blocker priority
   to be at least the highest priority of the issue it blocks unless current
-  human feedback explicitly accepts lower priority. If all fields are correct
-  but the issue lacks the `symphony` label or `To Do` state, request changes to
-  set both so automatic scheduling can start.
-  If that issue already blocks the reviewed issue, keep the reviewed issue
-  unchanged/blocked and tell the human to schedule the blocker instead.
+  human feedback explicitly accepts lower priority. Schedulability is judged
+  by tier: a consent-created issue (a `blocking` / `sub-issue` fulfilled from
+  a `## 建议新建 issue` proposal) must be schedulable — `symphony` label, the
+  team's `Todo` state, and its blocking relation — because the consent reply
+  was the scheduling authorization; request changes when it is not. An
+  autonomously spawned issue (follow-up / related / downstream) correctly
+  lands in the intake state without the `symphony` label; do not request
+  changes for that — name it so the human can promote it when ready.
+  If a consent-created blocker already blocks the reviewed issue, the
+  workflow re-parks the reviewed issue at `Todo` so the blocked-by gate
+  auto-resumes it; recommend that parking when it is missing instead of
+  telling the human to schedule the blocker manually.
 - For spawned or related issues, classify by useful value before relation
   direction. Operational work needed before write-capable acceptance or real use
   -- infra, secrets, protected environments, test users, data reset/seed, or

@@ -374,7 +374,13 @@ doubles as the rationale. There is **no cap** on questions per round — surface
 every material fork the walk reached; that one complete batch is the efficient
 ask. If the material set comes out so large that the issue is clearly
 mis-scoped, that is a signal to propose a `sub-issue` split via `symphony-issue`
-— split because the work is too big, never to hit a question quota.
+— split because the work is too big, never to hit a question quota. The same
+signal applies while shaping the approach: propose a split when the design
+genuinely needs more than one PR to land safely, spans more than one
+repository (route each child by the WORKFLOW project registry), or contains
+independently deliverable streams that could run in parallel. A consented
+split creates schedulable children that block the parent, so Symphony runs
+them first and auto-resumes the parent for integration.
 
 ## When blocked
 
