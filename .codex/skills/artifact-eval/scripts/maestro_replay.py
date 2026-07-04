@@ -21,6 +21,7 @@ import re
 import shlex
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -105,7 +106,10 @@ def compose_prompt(reviewer_prompt: str, case: dict) -> str:
     preamble = (
         f"回放评审 {issue} 的 artifact {artifact}（发布于 {published_at}）。"
         f"时间旅行纪律：只考虑 createdAt <= {published_at} 的 Linear 评论与当时已存在的 PR 状态；"
-        "忽略之后发生的一切。不得写入任何东西。最后两行输出且仅输出："
+        "忽略之后发生的一切。不得写入任何东西。"
+        "禁止读取任何本地日志或会话记录（elixir/log、.symphony、.codex/sessions、~/.codex 等）——"
+        "那里可能包含事后信息；只允许 linear / gh 只读工具与 Linear/GitHub 内容本身。"
+        "最后两行输出且仅输出："
         "`CONFIDENCE: <0-10>`（你的置信分）与 "
         "`RECOMMENDATION: <approve|request changes|ask clarification|merge nudge|"
         "completion confirmation|no reply yet>`"
@@ -132,6 +136,8 @@ def compose_routing_prompt(workflow_excerpt: str, case: dict) -> str:
         f"回放路由决策：issue {issue} 在 {dispatch_at} 以状态 {state} 被派发。"
         f"时间旅行纪律：只考虑 createdAt <= {dispatch_at} 的 Linear 评论。"
         "只做步骤 3-5 的路由判断，不执行任何阶段工作、不写入任何东西。"
+        "禁止读取任何本地日志或会话记录（elixir/log、.symphony、.codex/sessions、~/.codex 等）——"
+        "那里包含派发之后的事后信息；只允许 linear / gh 只读工具。"
         "最后一行输出且仅输出 `TARGET_PHASE: <Requirements|Design|Implementation|Deployment>`"
     )
     return workflow_excerpt.rstrip() + "\n\n" + preamble + "\n"
@@ -187,6 +193,17 @@ def _as_text(value: object) -> str:
     return ""
 
 
+_REPLAY_WORKDIR: list[str] = []
+
+
+def _replay_workdir() -> str:
+    """Empty scratch cwd for replay sessions: relative repo/log paths must not
+    resolve — post-hoc engine logs contain the answers (anti-leakage)."""
+    if not _REPLAY_WORKDIR:
+        _REPLAY_WORKDIR.append(tempfile.mkdtemp(prefix="maestro-replay-cwd-"))
+    return _REPLAY_WORKDIR[0]
+
+
 def run_case(case: dict, *, codex_argv: list[str], prompt: str, timeout_s: float, parse_prediction=parse_recommendation) -> dict:
     started = time.monotonic()
     try:
@@ -197,6 +214,7 @@ def run_case(case: dict, *, codex_argv: list[str], prompt: str, timeout_s: float
             text=True,
             timeout=timeout_s,
             check=False,
+            cwd=_replay_workdir(),
         )
         output = completed.stdout + ("\n" + completed.stderr if completed.stderr else "")
         prediction = parse_prediction(output)
