@@ -37,9 +37,10 @@ Linear issue can become a dispatch candidate again after restart.
    [Harness engineering](https://openai.com/index/harness-engineering/).
 2. Get a new personal token in Linear via Settings → Security & access → Personal API keys, and
    set it as the `LINEAR_API_KEY` environment variable.
-3. To enable Maestro pre-review after `Human Review` handoff, set `MAESTRO_LINEAR_API_KEY`
-   to a dedicated Maestro Linear OAuth app token. Do not reuse `LINEAR_API_KEY`; missing or invalid
-   Maestro auth safely skips the pre-review.
+3. To enable Maestro pre-review after `Human Review` handoff, create a Maestro
+   profile env file whose `LINEAR_API_KEY` is the dedicated Maestro OAuth app
+   token, then run the shared `MAESTRO_WORKFLOW.md` with
+   `SYMPHONY_PROFILE=maestro SYMPHONY_WORKFLOW_FILE=MAESTRO_WORKFLOW.md`.
 4. Use a project workflow under [`../workflows/`](../workflows/). The shared
    `workflows/agavemindlab/WORKFLOW.md` and `skills/` entries are inherited by
    project directories through symlinks; replace a symlink with a real file or
@@ -187,19 +188,13 @@ Notes:
 - If a hook needs `mise exec` inside a freshly cloned workspace, trust the repo config and fetch
   the project dependencies in `hooks.after_create` before invoking `mise` later from other hooks.
 - `tracker.api_key` reads from `LINEAR_API_KEY` when unset or when value is `$LINEAR_API_KEY`.
-- `MAESTRO_LINEAR_API_KEY` is separate from `tracker.api_key`; Maestro pre-review uses it for
-  `linear_graphql` and never falls back to `LINEAR_API_KEY`.
-- `MAESTRO_AUTO_REWORK` is on by default (matching the pre-review prompt's long-standing rule 3):
-  Maestro executes its own request-changes verdicts by moving the issue to `Rework`, reversible and
-  marked with a `🤖 auto` line in the reply. Set it to `false` or `0` for recommendation-only
-  pre-reviews.
-- `MAESTRO_AUTO_APPROVE` is off by default: set it to `true` or `1` to let a pre-review `approve`
-  verdict on a Requirements or Design artifact (never Implementation, Deployment, or Spike
-  findings) move the issue to `In Progress`, marked with a `🤖 auto` line — only when confidence
-  reaches `MAESTRO_AUTO_APPROVE_MIN_CONFIDENCE` (0-10, default 8) and the artifact has no
-  unresolved `[NEEDS CLARIFICATION` marker or 🔴 high-impact open question. Reversible: a human
-  who disagrees can set the issue to `Rework` afterwards. `Merging` and `Done` always stay with
-  the human.
+- Maestro pre-review runs as a separate workflow (`MAESTRO_WORKFLOW.md`). Its profile's
+  `LINEAR_API_KEY` is the Maestro OAuth app identity; do not run `MAESTRO_WORKFLOW.md` with the
+  normal Symphony profile. The session-level env gates it honors: `MAESTRO_AUTO_REWORK` (default
+  on — request-changes verdicts move the issue to `Rework` with a `🤖 auto` reply line; `false`/`0`
+  for recommendation-only) and `MAESTRO_AUTO_APPROVE` / `MAESTRO_AUTO_APPROVE_MIN_CONFIDENCE`
+  (default off / 8 — confidence-gated auto-approve for Requirements/Design only; `Merging` and
+  `Done` always stay with the human).
 - `tracker.project_slug` can read from an environment variable such as
   `$SYMPHONY_PROJECT_SLUG`.
 - `tracker.project_slugs` can read from a YAML list or from a comma-separated

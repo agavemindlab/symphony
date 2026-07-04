@@ -3,3 +3,7 @@
 
 # Eval corpora carry internal issue content and stay local-only.
 eval/
+
+# Local artifact-eval run outputs and python bytecode.
+.symphony/
+__pycache__/
