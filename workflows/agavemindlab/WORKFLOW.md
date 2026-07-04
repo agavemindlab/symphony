@@ -273,6 +273,19 @@ Each phase artifact version is a top-level Linear comment identified by its head
 
 When content conflicts, precedence is: human reply in artifact thread > current artifact body > previous artifact > original issue description. Reconcile by writing the revised content into the next artifact version, not by rewriting the old artifact body.
 
+### Status card
+
+Each issue keeps **exactly one** top-level comment whose body starts with the heading `## 📍 状态` — deliberately distinct from the four phase headings, so it never participates in phase routing. It is a non-review artifact: the sanctioned exception both to the no-other-comments rule and to the Persistence rule against state-pointer comments (the card is a human-facing digest, not the state index). It is never resolved and is maintained in place with `commentUpdate` (a non-phase comment, per the rule above). Create it when publishing the first phase artifact if absent. **Refresh it as the last Linear write before this agent run ends — whatever path ends the run** (advance, stop for review, blocked, question answered, verification wait). Body (Chinese, scannable, ≤ 8 lines) — lead with the one thing the human must do, if any. Never reproduce a phase artifact heading inside the card body; name phases bare (`Design`, not `## Design`):
+
+```md
+## 📍 状态
+> 👉 <人工需要做的一件事；无则省略此行>
+- 当前阶段：<Phase> · <等待人工审核 | agent 推进中 | 被阻塞（裸 identifier，如 ENG-123）| 待观察>
+- 最新 artifact：[<Phase> vN](<comment-url>)
+- 验收进度：<done>/<total> S<N>（来自 workpad Acceptance Criteria）
+- 更新时间：<timestamp>
+```
+
 ### Skills-activated footer
 
 Every phase artifact ends with a collapsible footer listing the current Codex session id and the skills this phase run actually activated, so a human can audit what drove the work. Read the session id from `CODEX_THREAD_ID` when available; if unavailable, write `n/a`. Use the workflow's own skills (the phase skill's `Skills to invoke`, `office-hours`, `plan-eng-review`, `brainstorming`, `symphony-*`, etc.) — not Linear/git mechanics. On a rework re-post, list the session id and skills of that run, not the original. The exact block (keep the heading verbatim; omit any line that does not apply):
