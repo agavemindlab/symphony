@@ -80,6 +80,50 @@ defmodule SymphonyElixir.SymphonyRunTest do
     assert capture["SYMPHONY_MAESTRO_WORKSPACE_ROOT"] == capture["SYMPHONY_WORKSPACE_ROOT"] <> "-maestro"
   end
 
+  test "--maestro selects the Maestro workflow, profile, and its own port" do
+    capture =
+      run_launcher!("symphony",
+        launcher_args: ["--maestro"],
+        profile: "maestro",
+        caller_profile: nil,
+        workflow_file: "MAESTRO_WORKFLOW.md",
+        caller_workflow_file: nil,
+        project_env: """
+        SYMPHONY_PROJECT_SLUGS="project-a"
+        SYMPHONY_PORT="4000"
+        """,
+        profile_env: """
+        LINEAR_API_KEY="maestro-token"
+        SYMPHONY_MAESTRO_PORT="4001"
+        """
+      )
+
+    assert capture["SYMPHONY_PROFILE"] == "maestro"
+    assert capture["WORKFLOW"] =~ "/workflows/symphony/MAESTRO_WORKFLOW.md"
+    assert capture["ARGS"] =~ " --port 4001 "
+    refute capture["ARGS"] =~ "--port 4000"
+  end
+
+  test "--maestro without SYMPHONY_MAESTRO_PORT disables the dashboard" do
+    capture =
+      run_launcher!("symphony",
+        launcher_args: ["--maestro"],
+        profile: "maestro",
+        caller_profile: nil,
+        workflow_file: "MAESTRO_WORKFLOW.md",
+        caller_workflow_file: nil,
+        project_env: """
+        SYMPHONY_PROJECT_SLUGS="project-a"
+        SYMPHONY_PORT="4000"
+        """,
+        profile_env: """
+        LINEAR_API_KEY="maestro-token"
+        """
+      )
+
+    refute capture["ARGS"] =~ "--port"
+  end
+
   test "Agavemindlab Linear project slugs use Linear slugId values" do
     expected_slugs = %{
       "gl-infra" => "02773795419d",
@@ -135,6 +179,7 @@ defmodule SymphonyElixir.SymphonyRunTest do
     project_env = project_env_fixture(project, opts)
     File.write!(Path.join(fake_repo_root, "workflows/#{project}/project.env"), project_env)
 
+    launcher_args = Keyword.get(opts, :launcher_args, [])
     profile = Keyword.get(opts, :profile, "grandline")
     profile_env = Keyword.get(opts, :profile_env, "LINEAR_API_KEY=\"test-token\"\n")
 
@@ -154,8 +199,16 @@ defmodule SymphonyElixir.SymphonyRunTest do
       {"SYMPHONY_REPO_ROOT", fake_repo_root},
       {"SYMPHONY_RUN_CAPTURE", capture_path},
       {"SYMPHONY_RUN_CALLS", calls_path},
-      {"SYMPHONY_PROFILE", if(profile == "grandline", do: nil, else: profile)},
-      {"SYMPHONY_WORKFLOW_FILE", if(workflow_name == "WORKFLOW.md", do: nil, else: workflow_name)},
+      {"SYMPHONY_PROFILE",
+       case Keyword.fetch(opts, :caller_profile) do
+         {:ok, value} -> value
+         :error -> if(profile == "grandline", do: nil, else: profile)
+       end},
+      {"SYMPHONY_WORKFLOW_FILE",
+       case Keyword.fetch(opts, :caller_workflow_file) do
+         {:ok, value} -> value
+         :error -> if(workflow_name == "WORKFLOW.md", do: nil, else: workflow_name)
+       end},
       {"SYMPHONY_PROJECT_SLUG", nil},
       {"SYMPHONY_PROJECT_SLUGS", nil},
       {"SYMPHONY_PROJECT_NAME", nil},
@@ -164,12 +217,15 @@ defmodule SymphonyElixir.SymphonyRunTest do
       {"SYMPHONY_BASE_BRANCH", nil},
       {"SYMPHONY_PROJECT_DIR", nil},
       {"SYMPHONY_PORT", nil},
+      {"SYMPHONY_MAESTRO_PORT", nil},
       {"SYMPHONY_MAESTRO_WORKSPACE_ROOT", nil},
       {"AUTOMATED_REVIEWER", nil}
     ]
 
     try do
-      assert {output, 0} = System.cmd(@launcher, [project], env: env, stderr_to_stdout: true)
+      assert {output, 0} =
+               System.cmd(@launcher, [project | launcher_args], env: env, stderr_to_stdout: true)
+
       assert output =~ "symphony-run: starting project=#{project} profile=#{profile}"
 
       capture_path
