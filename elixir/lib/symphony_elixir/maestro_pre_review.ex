@@ -12,6 +12,7 @@ defmodule SymphonyElixir.MaestroPreReview do
 
   @workspace_suffix "-maestro"
   @maestro_linear_api_key_env "MAESTRO_LINEAR_API_KEY"
+  @maestro_auto_rework_env "MAESTRO_AUTO_REWORK"
   @handoff_claims_key {__MODULE__, :handoff_claims}
   @handoff_claim_lock {__MODULE__, :handoff_claim_lock}
   @viewer_query """
@@ -143,6 +144,10 @@ defmodule SymphonyElixir.MaestroPreReview do
   end
 
   defp build_prompt(%Issue{} = issue) do
+    build_prompt(issue, auto_rework_enabled?())
+  end
+
+  defp build_prompt(%Issue{} = issue, auto_rework?) do
     identifier = issue.identifier || issue.id || "unknown"
 
     """
@@ -157,13 +162,35 @@ defmodule SymphonyElixir.MaestroPreReview do
 
     1. Before mutating anything, re-read the issue. If it is no longer in `Human Review`, stop without commenting or changing state.
     2. Identify the current awaiting-review phase artifact. If that artifact thread already contains a Maestro pre-review reply for the same current artifact/head, stop without adding another reply.
-    3. If Maestro recommends `request changes`, `request changes / rework`, or equivalent rework, reply in the awaiting artifact thread with the Maestro review and move the issue to `Rework`. Do not write any phase-closing approval reply.
+    3. #{rework_rule(auto_rework?)}
     4. If Maestro recommends `approve`, reply in the awaiting artifact thread with the Maestro review plus a confidence score in `0-10` format and a short text description. Keep the issue in `Human Review`. Do not move it to `In Progress`, `Merging`, `Done`, or any other state.
     5. If Maestro recommends clarification, no reply yet, merge nudge, completion confirmation, or if the pre-review evidence is unavailable, record a short no-action reason in the awaiting artifact thread when safe, keep the issue in `Human Review`, and do not advance or rework.
 
     The reply must start with `🤖 Maestro 预审核:` so future sessions can detect that this handoff was already reviewed.
     """
   end
+
+  defp rework_rule(true = _auto_rework?) do
+    "If Maestro recommends `request changes`, `request changes / rework`, or equivalent rework, reply in the awaiting artifact thread with the Maestro review, end that reply with the line `🤖 auto: 已自动将 issue 置为 Rework`, and move the issue to the team's `Rework` state (resolve it via a `workflowStates` query matching the name `Rework` exactly; if no such state exists, do not change state and note that in the reply). This action is reversible: a human who disagrees can move the issue back and reply with the reason. Do not write any phase-closing approval reply."
+  end
+
+  defp rework_rule(false = _auto_rework?) do
+    "If Maestro recommends `request changes`, `request changes / rework`, or equivalent rework, reply in the awaiting artifact thread with the Maestro review and keep the issue in `Human Review` — the operator disabled auto-rework (`MAESTRO_AUTO_REWORK`), so state changes are left to the human. Do not write any phase-closing approval reply."
+  end
+
+  defp auto_rework_enabled? do
+    @maestro_auto_rework_env
+    |> System.get_env()
+    |> auto_rework_flag_enabled?()
+  end
+
+  # Default ON: rule 3 has always moved request-changes issues to Rework.
+  # Only an explicit false/0 downgrades the session to recommendation-only.
+  defp auto_rework_flag_enabled?(value) when is_binary(value) do
+    String.downcase(String.trim(value)) not in ["false", "0"]
+  end
+
+  defp auto_rework_flag_enabled?(_value), do: true
 
   defp workspace_identifier(%Issue{identifier: identifier}) when is_binary(identifier) and identifier != "" do
     identifier <> @workspace_suffix

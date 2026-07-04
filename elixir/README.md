@@ -189,6 +189,10 @@ Notes:
 - `tracker.api_key` reads from `LINEAR_API_KEY` when unset or when value is `$LINEAR_API_KEY`.
 - `MAESTRO_LINEAR_API_KEY` is separate from `tracker.api_key`; Maestro pre-review uses it for
   `linear_graphql` and never falls back to `LINEAR_API_KEY`.
+- `MAESTRO_AUTO_REWORK` is on by default (matching the pre-review prompt's long-standing rule 3):
+  Maestro executes its own request-changes verdicts by moving the issue to `Rework`, reversible and
+  marked with a `🤖 auto` line in the reply. Set it to `false` or `0` for recommendation-only
+  pre-reviews. Approve, `Merging`, and `Done` always stay with the human.
 - `tracker.project_slug` can read from an environment variable such as
   `$SYMPHONY_PROJECT_SLUG`.
 - `tracker.project_slugs` can read from a YAML list or from a comma-separated

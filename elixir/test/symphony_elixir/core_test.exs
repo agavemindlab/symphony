@@ -513,6 +513,17 @@ defmodule SymphonyElixir.CoreTest do
     end
   end
 
+  test "maestro reviewer stays read-only; execution semantics live in the launcher docs" do
+    reviewer =
+      File.read!(Path.expand("../.codex/skills/maestro/agents/maestro-reviewer.md", File.cwd!()))
+
+    skill = File.read!(Path.expand("../.codex/skills/maestro/SKILL.md", File.cwd!()))
+
+    assert reviewer =~ "mutate Linear, GitHub, files, or issue state"
+    refute reviewer =~ "MAESTRO_AUTO_REWORK"
+    assert skill =~ "MAESTRO_AUTO_REWORK"
+  end
+
   test "linear api token resolves from LINEAR_API_KEY env var" do
     previous_linear_api_key = System.get_env("LINEAR_API_KEY")
     env_api_key = "test-linear-api-key"
@@ -2560,6 +2571,64 @@ defmodule SymphonyElixir.CoreTest do
 
     assert SymphonyElixir.MaestroPreReview.workspace_identifier_for_test(issue) == "MT-5316-maestro"
     assert SymphonyElixir.MaestroPreReview.prepare_main_branch_command_for_test() =~ "upstream/$base_branch"
+  end
+
+  test "maestro pre-review prompt executes rework with the auto marker by default" do
+    previous_auto_rework = System.get_env("MAESTRO_AUTO_REWORK")
+    on_exit(fn -> restore_env("MAESTRO_AUTO_REWORK", previous_auto_rework) end)
+
+    issue = %Issue{
+      id: "issue-maestro-auto-rework",
+      identifier: "MT-5322",
+      title: "Gray-release Maestro auto rework",
+      description: "Request changes executes Rework unless disabled",
+      state: "Human Review",
+      url: "https://example.org/issues/MT-5322",
+      labels: ["symphony"]
+    }
+
+    System.delete_env("MAESTRO_AUTO_REWORK")
+    baseline_prompt = SymphonyElixir.MaestroPreReview.build_prompt_for_test(issue)
+
+    assert baseline_prompt =~ "🤖 auto: 已自动将 issue 置为 Rework"
+    assert baseline_prompt =~ "workflowStates"
+    assert baseline_prompt =~ "matching the name `Rework` exactly"
+    assert baseline_prompt =~ "do not change state and note that in the reply"
+    assert baseline_prompt =~ "reversible"
+
+    for enabled_value <- ["true", "1", " TRUE ", "yes", ""] do
+      System.put_env("MAESTRO_AUTO_REWORK", enabled_value)
+      assert SymphonyElixir.MaestroPreReview.build_prompt_for_test(issue) == baseline_prompt
+    end
+  end
+
+  test "maestro pre-review prompt downgrades to recommendation-only when MAESTRO_AUTO_REWORK is off" do
+    previous_auto_rework = System.get_env("MAESTRO_AUTO_REWORK")
+    on_exit(fn -> restore_env("MAESTRO_AUTO_REWORK", previous_auto_rework) end)
+
+    issue = %Issue{
+      id: "issue-maestro-auto-rework-off",
+      identifier: "MT-5323",
+      title: "Recommendation-only Maestro pre-review",
+      description: "Operator disabled auto-rework",
+      state: "Human Review",
+      url: "https://example.org/issues/MT-5323",
+      labels: ["symphony"]
+    }
+
+    System.put_env("MAESTRO_AUTO_REWORK", "false")
+    disabled_prompt = SymphonyElixir.MaestroPreReview.build_prompt_for_test(issue)
+
+    refute disabled_prompt =~ "🤖 auto"
+    refute disabled_prompt =~ "move the issue to the team's `Rework` state"
+    assert disabled_prompt =~ "keep the issue in `Human Review`"
+    assert disabled_prompt =~ "MAESTRO_AUTO_REWORK"
+    assert disabled_prompt =~ "state changes are left to the human"
+
+    for disabled_value <- ["0", " FALSE "] do
+      System.put_env("MAESTRO_AUTO_REWORK", disabled_value)
+      assert SymphonyElixir.MaestroPreReview.build_prompt_for_test(issue) == disabled_prompt
+    end
   end
 
   test "maestro pre-review fails closed without dedicated Linear auth" do
