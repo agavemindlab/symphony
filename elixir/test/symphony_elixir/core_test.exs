@@ -362,6 +362,20 @@ defmodule SymphonyElixir.CoreTest do
     refute design_skill =~ "opens `phase-implementation` in the same session"
   end
 
+  test "workflow prompts provide the explicit command fast path" do
+    repo_root = Path.expand("..", File.cwd!())
+
+    for workflow_path <- [
+          "workflows/agavemindlab/WORKFLOW.md",
+          "workflows/agavemindlab-lite/WORKFLOW.md"
+        ] do
+      workflow = File.read!(Path.join(repo_root, workflow_path))
+
+      assert workflow =~ "/approve"
+      assert workflow =~ "/rework"
+    end
+  end
+
   test "implementation artifact template is readable and preserves Maestro evidence" do
     phase_skill =
       File.read!(Path.expand("../workflows/agavemindlab/skills/phase-implementation/SKILL.md", File.cwd!()))
