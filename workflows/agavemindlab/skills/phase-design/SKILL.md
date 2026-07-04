@@ -25,6 +25,7 @@ Produce **two paired outputs** — they serve different readers (see
    - Chosen approach direction and rationale
    - Key trade-offs and alternatives considered
    - Diagram (for non-trivial designs — see Diagram requirement below)
+   - Prototype 截屏 previews (for UI-facing designs — see UI 原型 requirement below)
    - Verification plan (`验收方案`)
    - Intentionally uncovered scope with follow-up issue IDs
    - Any newly-discovered risks
@@ -125,6 +126,23 @@ The `## Design` artifact must include a diagram inline when the design has
 - Security boundary changes (auth, trust zones, secret movement)
 
 Format: mermaid block (preferred) or ASCII art.
+
+## UI 原型 requirement
+
+When the chosen design introduces or materially changes user-facing UI (any
+issue type, most often `Type:Feature`), build a static, self-contained
+HTML/CSS prototype of the key screens / flows under `.symphony/prototype/` —
+no build step, openable by double-click, fake data inline. Cover the main
+flow plus the edge-case-matrix states (empty / loading / error) where they
+change the UI. Capture 截屏 of the key prototype states (the 交互 / UI 行为
+visual-capture rules in `验收方案设计` below apply), upload them via the
+`symphony-linear` skill's `fileUpload`, and embed the previews in the
+`## Design` artifact, with a one-line pointer for opening the prototype
+locally (its path is in the persisted agent state) — the design approval
+object is something the human can **see**, not prose alone.
+`.symphony/prototype/` follows the `.symphony/design.md` lifecycle (see
+`## 设计文档` below). When there is no UI surface, record
+`Skipped UI 原型: <reason>` in the workpad notes.
 
 ## Approach writing rules
 
@@ -269,10 +287,11 @@ Design emits **two paired records with different readers**, kept in sync:
   agent-only state and must not enter the PR branch.
   Approving this artifact approves the design it represents.
 
-Lifecycle: `.symphony/design.md` lives in the workspace, is listed in the
-workpad `cleanup` field, and is persisted through the `Symphony agent state`
-Linear issue attachment — it is a dev-cycle spec, not durable repo
-documentation. Keep the two in sync; the human only reviewed the artifact, so
+Lifecycle: `.symphony/design.md` — and `.symphony/prototype/` when present —
+lives in the workspace, is listed in the workpad `cleanup` field, and is
+persisted through the `Symphony agent state` Linear issue attachment — it is a
+dev-cycle spec, not durable repo documentation, and never enters the PR
+branch. Keep the two in sync; the human only reviewed the artifact, so
 on any conflict the
 **approved artifact and its thread govern** and the doc is reconciled toward
 them.
@@ -299,6 +318,9 @@ input, key steps, output, and blocking point（触发者 / 输入 / 关键步骤
 ```mermaid
 <diagram>
 ```
+
+### 原型预览（UI-facing designs only; omit otherwise）
+<embedded 截屏 previews of key prototype states> · 本地打开: `.symphony/prototype/`（见 agent state）
 
 ### 验收方案（每个 S<N> 两道关；指定证据形式，长文本用列表）
 - **S1: <criterion>**
@@ -448,6 +470,8 @@ about form, not correctness:
   （关键步骤）, output（输出）, and blocking point（阻断点）.
 - `方案（approach）` is complete (no placeholder text).
 - Diagram included for non-trivial designs.
+- UI 原型 built with its 截屏 previews embedded for UI-facing designs, or the
+  `Skipped UI 原型: <reason>` workpad note recorded.
 - `验收方案` covers every `S<N>` with both gates (pre-PR 本地 + post-merge 最终)
   and names each evidence form — visual capture for any interactive `S<N>` — or
   states why a gate does not apply.
