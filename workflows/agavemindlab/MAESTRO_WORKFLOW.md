@@ -64,19 +64,14 @@ hooks:
         fi
       done
     fi
-  issue_running: |
-    set -e
-    : "${SYMPHONY_WORKFLOW_DIR:?SYMPHONY_WORKFLOW_DIR is not set}"
-    sh "$SYMPHONY_WORKFLOW_DIR/mark-running-issue.sh" running
-  issue_stopped: |
-    set -e
-    : "${SYMPHONY_WORKFLOW_DIR:?SYMPHONY_WORKFLOW_DIR is not set}"
-    sh "$SYMPHONY_WORKFLOW_DIR/mark-running-issue.sh" stopped
 agent:
   max_concurrent_agents: 5
   max_turns: 1
 codex:
   command: codex --config shell_environment_policy.inherit=all --config 'model="gpt-5.5"' --config model_reasoning_effort=xhigh app-server
+  # The session blocks silently on the $maestro reviewer subagent for 10-20
+  # minutes; the default 5m stall detector would kill every review mid-wait.
+  stall_timeout_ms: 1800000
   approval_policy: never
   thread_sandbox: workspace-write
   turn_sandbox_policy:
