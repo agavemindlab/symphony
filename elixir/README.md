@@ -192,7 +192,14 @@ Notes:
 - `MAESTRO_AUTO_REWORK` is on by default (matching the pre-review prompt's long-standing rule 3):
   Maestro executes its own request-changes verdicts by moving the issue to `Rework`, reversible and
   marked with a `🤖 auto` line in the reply. Set it to `false` or `0` for recommendation-only
-  pre-reviews. Approve, `Merging`, and `Done` always stay with the human.
+  pre-reviews.
+- `MAESTRO_AUTO_APPROVE` is off by default: set it to `true` or `1` to let a pre-review `approve`
+  verdict on a Requirements or Design artifact (never Implementation, Deployment, or Spike
+  findings) move the issue to `In Progress`, marked with a `🤖 auto` line — only when confidence
+  reaches `MAESTRO_AUTO_APPROVE_MIN_CONFIDENCE` (0-10, default 8) and the artifact has no
+  unresolved `[NEEDS CLARIFICATION` marker or 🔴 high-impact open question. Reversible: a human
+  who disagrees can set the issue to `Rework` afterwards. `Merging` and `Done` always stay with
+  the human.
 - `tracker.project_slug` can read from an environment variable such as
   `$SYMPHONY_PROJECT_SLUG`.
 - `tracker.project_slugs` can read from a YAML list or from a comma-separated

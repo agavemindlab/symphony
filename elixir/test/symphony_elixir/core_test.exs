@@ -2661,6 +2661,93 @@ defmodule SymphonyElixir.CoreTest do
     end
   end
 
+  test "maestro pre-review prompt keeps approve recommendation-only by default" do
+    previous_auto_approve = System.get_env("MAESTRO_AUTO_APPROVE")
+    previous_min_confidence = System.get_env("MAESTRO_AUTO_APPROVE_MIN_CONFIDENCE")
+
+    on_exit(fn ->
+      restore_env("MAESTRO_AUTO_APPROVE", previous_auto_approve)
+      restore_env("MAESTRO_AUTO_APPROVE_MIN_CONFIDENCE", previous_min_confidence)
+    end)
+
+    issue = %Issue{
+      id: "issue-maestro-auto-approve-off",
+      identifier: "MT-5330",
+      title: "Recommendation-only approve by default",
+      description: "Auto-approve requires explicit opt-in",
+      state: "Human Review",
+      url: "https://example.org/issues/MT-5330",
+      labels: ["symphony"]
+    }
+
+    System.delete_env("MAESTRO_AUTO_APPROVE")
+    System.delete_env("MAESTRO_AUTO_APPROVE_MIN_CONFIDENCE")
+    baseline_prompt = SymphonyElixir.MaestroPreReview.build_prompt_for_test(issue)
+
+    refute baseline_prompt =~ "🤖 auto: 已自动批准"
+    refute baseline_prompt =~ "move the issue to the team's `In Progress` state"
+
+    assert baseline_prompt =~
+             "Keep the issue in `Human Review`. Do not move it to `In Progress`, `Merging`, `Done`, or any other state."
+
+    for disabled_value <- ["false", "0", " FALSE ", "yes", ""] do
+      System.put_env("MAESTRO_AUTO_APPROVE", disabled_value)
+      assert SymphonyElixir.MaestroPreReview.build_prompt_for_test(issue) == baseline_prompt
+    end
+  end
+
+  test "maestro pre-review prompt auto-approves Requirements/Design when MAESTRO_AUTO_APPROVE is on" do
+    previous_auto_approve = System.get_env("MAESTRO_AUTO_APPROVE")
+    previous_min_confidence = System.get_env("MAESTRO_AUTO_APPROVE_MIN_CONFIDENCE")
+
+    on_exit(fn ->
+      restore_env("MAESTRO_AUTO_APPROVE", previous_auto_approve)
+      restore_env("MAESTRO_AUTO_APPROVE_MIN_CONFIDENCE", previous_min_confidence)
+    end)
+
+    issue = %Issue{
+      id: "issue-maestro-auto-approve-on",
+      identifier: "MT-5331",
+      title: "Low-risk auto-approve for early phases",
+      description: "Requirements/Design approve executes when confidence clears the bar",
+      state: "Human Review",
+      url: "https://example.org/issues/MT-5331",
+      labels: ["symphony"]
+    }
+
+    System.delete_env("MAESTRO_AUTO_APPROVE_MIN_CONFIDENCE")
+    System.put_env("MAESTRO_AUTO_APPROVE", "true")
+    enabled_prompt = SymphonyElixir.MaestroPreReview.build_prompt_for_test(issue)
+
+    assert enabled_prompt =~ "Requirements or Design"
+    assert enabled_prompt =~ "never Implementation, Deployment, or Spike findings"
+    assert enabled_prompt =~ "confidence >= 8/10"
+    assert enabled_prompt =~ "[NEEDS CLARIFICATION"
+    assert enabled_prompt =~ "🔴 high-impact open question"
+    assert enabled_prompt =~ "🤖 auto: 已自动批准，置为 In Progress"
+    assert enabled_prompt =~ "matching the name `In Progress` exactly"
+    assert enabled_prompt =~ "keep the issue in `Human Review` and note that in the reply"
+    assert enabled_prompt =~ "If any condition fails, keep the issue in `Human Review`"
+    assert enabled_prompt =~ "`Merging` and `Done` are always the human's; never move the issue to them."
+
+    System.put_env("MAESTRO_AUTO_APPROVE", " 1 ")
+    assert SymphonyElixir.MaestroPreReview.build_prompt_for_test(issue) == enabled_prompt
+
+    System.put_env("MAESTRO_AUTO_APPROVE_MIN_CONFIDENCE", "9")
+    custom_prompt = SymphonyElixir.MaestroPreReview.build_prompt_for_test(issue)
+    assert custom_prompt =~ "confidence >= 9/10"
+    refute custom_prompt =~ "confidence >= 8/10"
+
+    System.put_env("MAESTRO_AUTO_APPROVE_MIN_CONFIDENCE", "not-a-number")
+    assert SymphonyElixir.MaestroPreReview.build_prompt_for_test(issue) == enabled_prompt
+
+    System.put_env("MAESTRO_AUTO_APPROVE_MIN_CONFIDENCE", "42")
+    assert SymphonyElixir.MaestroPreReview.build_prompt_for_test(issue) =~ "confidence >= 10/10"
+
+    System.put_env("MAESTRO_AUTO_APPROVE_MIN_CONFIDENCE", "-3")
+    assert SymphonyElixir.MaestroPreReview.build_prompt_for_test(issue) =~ "confidence >= 0/10"
+  end
+
   test "maestro pre-review fails closed without dedicated Linear auth" do
     test_root =
       Path.join(

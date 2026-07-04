@@ -13,6 +13,9 @@ defmodule SymphonyElixir.MaestroPreReview do
   @workspace_suffix "-maestro"
   @maestro_linear_api_key_env "MAESTRO_LINEAR_API_KEY"
   @maestro_auto_rework_env "MAESTRO_AUTO_REWORK"
+  @maestro_auto_approve_env "MAESTRO_AUTO_APPROVE"
+  @maestro_auto_approve_min_confidence_env "MAESTRO_AUTO_APPROVE_MIN_CONFIDENCE"
+  @default_auto_approve_min_confidence 8
   @handoff_claims_key {__MODULE__, :handoff_claims}
   @handoff_claim_lock {__MODULE__, :handoff_claim_lock}
   @viewer_query """
@@ -144,10 +147,10 @@ defmodule SymphonyElixir.MaestroPreReview do
   end
 
   defp build_prompt(%Issue{} = issue) do
-    build_prompt(issue, auto_rework_enabled?())
+    build_prompt(issue, auto_rework_enabled?(), auto_approve_config())
   end
 
-  defp build_prompt(%Issue{} = issue, auto_rework?) do
+  defp build_prompt(%Issue{} = issue, auto_rework?, auto_approve_config) do
     identifier = issue.identifier || issue.id || "unknown"
 
     """
@@ -163,7 +166,7 @@ defmodule SymphonyElixir.MaestroPreReview do
     1. Before mutating anything, re-read the issue. If it is no longer in `Human Review`, stop without commenting or changing state.
     2. Identify the current awaiting-review phase artifact. If that artifact thread already contains a Maestro pre-review reply for the same current artifact/head, stop without adding another reply.
     3. #{rework_rule(auto_rework?)}
-    4. If Maestro recommends `approve`, reply in the awaiting artifact thread with the Maestro review plus a confidence score in `0-10` format and a short text description. Keep the issue in `Human Review`. Do not move it to `In Progress`, `Merging`, `Done`, or any other state.
+    4. #{approve_rule(auto_approve_config)}
     5. If Maestro recommends clarification, no reply yet, merge nudge, completion confirmation, or if the pre-review evidence is unavailable, record a short no-action reason in the awaiting artifact thread when safe, keep the issue in `Human Review`, and do not advance or rework.
 
     The reply must start with `🤖 Maestro 预审核:` so future sessions can detect that this handoff was already reviewed.
@@ -176,6 +179,41 @@ defmodule SymphonyElixir.MaestroPreReview do
 
   defp rework_rule(false = _auto_rework?) do
     "If Maestro recommends `request changes`, `request changes / rework`, or equivalent rework, reply in the awaiting artifact thread with the Maestro review and keep the issue in `Human Review` — the operator disabled auto-rework (`MAESTRO_AUTO_REWORK`), so state changes are left to the human. Do not write any phase-closing approval reply."
+  end
+
+  defp approve_rule(%{enabled?: true, min_confidence: min_confidence}) do
+    "If Maestro recommends `approve`, reply in the awaiting artifact thread with the Maestro review plus a confidence score in `0-10` format and a short text description. Then, only when ALL of these hold — the awaiting-review phase is Requirements or Design (never Implementation, Deployment, or Spike findings), the recommendation is `approve` with confidence >= #{min_confidence}/10, and the artifact body contains no unresolved `[NEEDS CLARIFICATION` marker and no 🔴 high-impact open question — end that reply with the line `🤖 auto: 已自动批准，置为 In Progress` and move the issue to the team's `In Progress` state (resolve it via a `workflowStates` query matching the name `In Progress` exactly; if no such state exists, keep the issue in `Human Review` and note that in the reply). If any condition fails, keep the issue in `Human Review` exactly as when auto-approve is off. This action is reversible: a human who disagrees can set the issue to `Rework` with the reason. `Merging` and `Done` are always the human's; never move the issue to them."
+  end
+
+  defp approve_rule(%{enabled?: false}) do
+    "If Maestro recommends `approve`, reply in the awaiting artifact thread with the Maestro review plus a confidence score in `0-10` format and a short text description. Keep the issue in `Human Review`. Do not move it to `In Progress`, `Merging`, `Done`, or any other state."
+  end
+
+  defp auto_approve_config do
+    %{enabled?: auto_approve_enabled?(), min_confidence: auto_approve_min_confidence()}
+  end
+
+  defp auto_approve_enabled? do
+    @maestro_auto_approve_env
+    |> System.get_env()
+    |> auto_approve_flag_enabled?()
+  end
+
+  # Default OFF: rule 4 grants a new power (advancing the issue), so it needs an
+  # explicit true/1 opt-in — the opposite default to auto-rework.
+  defp auto_approve_flag_enabled?(value) when is_binary(value) do
+    String.downcase(String.trim(value)) in ["true", "1"]
+  end
+
+  defp auto_approve_flag_enabled?(_value), do: false
+
+  defp auto_approve_min_confidence do
+    with value when is_binary(value) <- System.get_env(@maestro_auto_approve_min_confidence_env),
+         {confidence, ""} <- Integer.parse(String.trim(value)) do
+      confidence |> max(0) |> min(10)
+    else
+      _ -> @default_auto_approve_min_confidence
+    end
   end
 
   defp auto_rework_enabled? do
