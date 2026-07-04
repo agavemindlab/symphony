@@ -282,6 +282,13 @@ comfort.
 Status conventions: `✅ 通过`, `⚠️ 部分通过`, `➖ N/A`, `❌ 失败`.
 `❌ 失败` means the criterion is still unmet at handoff time.
 
+In `Acceptance mapping` / `验证结论`, a `✅ 通过` line for a commandable check
+cites its **可重跑命令 + 通过判据** — the exact rerun command plus
+observed-vs-expected result — in the folded `>>> 🔎 审计证据` block, so a
+reviewer (or a future machine spot-check) can re-execute it verbatim.
+Evidence a reviewer cannot re-run must say why (interactive capture,
+credentialed env).
+
 For any `S<N>` classified `延迟验收` in Requirements' `关键假设`, `Merge 后验证`
 must carry a **self-contained, runnable** spec — the exact query, the pass/fail
 predicate, and the window length — not a vague "monitor the dashboard" note.

@@ -184,7 +184,12 @@ evidence. Plan both gates for every `S<N>`, keyed to its Requirements
 verifiability class (`当场可验` / `延迟验收` / `需人工判定`):
 
 - **Pre-PR 本地验收** — how the change is exercised on the running service /
-  locally before the PR, and the evidence form it will produce. This is the
+  locally before the PR, and the evidence form it will produce. Where the
+  check is commandable (a test, query, API call, or measurement), name the
+  **可重跑命令 + 通过判据** — the exact command plus the expected assertion /
+  observable — not only the evidence form; visual-capture checks (截屏 / 录屏)
+  keep their evidence-form spec. This is the same runnable-spec bar `延迟验收`
+  already sets post-merge (query + predicate). This is the
   reviewer's proof the change works *before* merge. Executed at Implementation
   (its `Local runtime acceptance` step), evidence lands on `## Implementation`.
 - **Post-Merge 最终验收** — how the criterion is confirmed in production *after*
@@ -324,7 +329,7 @@ input, key steps, output, and blocking point（触发者 / 输入 / 关键步骤
 
 ### 验收方案（每个 S<N> 两道关；指定证据形式，长文本用列表）
 - **S1: <criterion>**
-  - Pre-PR 本地验收: <如何本地验> → <截屏 / 录屏 / 命令输出 / 日志片段>
+  - Pre-PR 本地验收: <如何本地验> → <可重跑命令 + 通过判据；视觉类为 截屏 / 录屏>
   - Post-Merge 最终验收: <如何线上验> → <即时信号 / 查询+判据+窗口 / 人工判定>
 
 ### 风险/注意（risks; omit if none）
@@ -473,7 +478,8 @@ about form, not correctness:
 - UI 原型 built with its 截屏 previews embedded for UI-facing designs, or the
   `Skipped UI 原型: <reason>` workpad note recorded.
 - `验收方案` covers every `S<N>` with both gates (pre-PR 本地 + post-merge 最终)
-  and names each evidence form — visual capture for any interactive `S<N>` — or
+  and names each evidence form — 可重跑命令 + 通过判据 for commandable checks,
+  visual capture for any interactive `S<N>` — or
   states why a gate does not apply.
 - Type-specific approach emphasis satisfied for `Primary:`.
 - No unresolved `[NEEDS CLARIFICATION]` markers.

@@ -513,6 +513,20 @@ defmodule SymphonyElixir.CoreTest do
     end
   end
 
+  test "phase skills require rerunnable commands for commandable acceptance evidence" do
+    repo_root = Path.expand("..", File.cwd!())
+
+    design_skill =
+      File.read!(Path.join(repo_root, "workflows/agavemindlab/skills/phase-design/SKILL.md"))
+
+    implementation_skill =
+      File.read!(Path.join(repo_root, "workflows/agavemindlab/skills/phase-implementation/SKILL.md"))
+
+    assert design_skill =~ "可重跑命令"
+    assert implementation_skill =~ "可重跑命令"
+    assert implementation_skill =~ "Evidence a reviewer cannot re-run must say why"
+  end
+
   test "maestro reviewer requests changes for missing or stale merge risk judgment" do
     reviewer =
       File.read!(Path.expand("../.codex/skills/maestro/agents/maestro-reviewer.md", File.cwd!()))
