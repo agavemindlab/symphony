@@ -13,6 +13,7 @@ defmodule SymphonyElixir.Orchestrator do
     Config,
     IssueRunHook,
     MaestroPreReview,
+    PhaseEventScanner,
     StatusDashboard,
     Tracker,
     Workspace
@@ -1151,6 +1152,7 @@ defmodule SymphonyElixir.Orchestrator do
           Map.put(state.running, issue.id, running_entry)
 
         record_run_started_event(issue.id, Map.fetch!(running, issue.id))
+        PhaseEventScanner.scan(issue)
 
         %{
           state
@@ -1984,8 +1986,15 @@ defmodule SymphonyElixir.Orchestrator do
   defp complete_running_entry(state, issue_id, running_entry, reason) do
     state = record_session_completion_totals(state, running_entry)
     record_run_completed_event(issue_id, running_entry, reason)
+    scan_phase_events(running_entry)
     state
   end
+
+  defp scan_phase_events(running_entry) when is_map(running_entry) do
+    PhaseEventScanner.scan(Map.get(running_entry, :issue))
+  end
+
+  defp scan_phase_events(_running_entry), do: :ok
 
   defp record_run_started_event(issue_id, running_entry) when is_map(running_entry) do
     Analytics.record_event(

@@ -8,7 +8,7 @@ defmodule SymphonyElixir.MaestroPreReview do
   alias SymphonyElixir.Codex.AppServer
   alias SymphonyElixir.Codex.DynamicTool
   alias SymphonyElixir.Linear.Client
-  alias SymphonyElixir.{Linear.Issue, SSH, Workspace}
+  alias SymphonyElixir.{Linear.Issue, PhaseEventScanner, SSH, Workspace}
 
   @workspace_suffix "-maestro"
   @maestro_linear_api_key_env "MAESTRO_LINEAR_API_KEY"
@@ -49,6 +49,7 @@ defmodule SymphonyElixir.MaestroPreReview do
               end
             after
               Workspace.remove(workspace, worker_host, workspace_issue)
+              PhaseEventScanner.scan(issue)
             end
 
           {:error, reason} ->

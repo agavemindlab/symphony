@@ -238,11 +238,16 @@ defmodule SymphonyElixir.Analytics do
   end
 
   defp runtime_metrics(events) do
+    events = dedupe_events_by_event_id(events)
     token_totals = token_totals(events)
 
     %{
       run_count: count_events(events, "run_started"),
-      phase_event_count: count_events(events, "phase_event"),
+      phase_published_count: count_events(events, "phase_published"),
+      phase_approved_count: count_events(events, "phase_approved"),
+      phase_auto_advanced_count: count_events(events, "phase_auto_advanced"),
+      phase_reworked_count: count_events(events, "phase_reworked"),
+      phase_rollback_count: count_events(events, "phase_rollback"),
       completed_count: count_events(events, "run_completed"),
       retry_count: count_events(events, "retry_scheduled"),
       blocked_count: count_events(events, "blocked"),
@@ -273,8 +278,11 @@ defmodule SymphonyElixir.Analytics do
         question: "How often does Symphony advance without human intervention?",
         status: "partial",
         metrics: [
-          metric("Phase events", metrics.phase_event_count, "direct"),
-          metric("Auto-advance rate", "Linear phase comments required", "gap"),
+          metric("Phases published", metrics.phase_published_count, "direct"),
+          metric("Human approvals", metrics.phase_approved_count, "direct"),
+          metric("Auto-advances", metrics.phase_auto_advanced_count, "direct"),
+          metric("Auto-advance rate", auto_advance_rate(metrics), "direct"),
+          metric("Rework rounds", rework_rounds(metrics), "direct"),
           metric("Human touch count", "Linear comments required", "gap")
         ]
       },
@@ -284,7 +292,7 @@ defmodule SymphonyElixir.Analytics do
         question: "How much accepted work comes back as rework or PR/CI failure?",
         status: "gap",
         metrics: [
-          metric("Rework rate", "Linear state history required", "gap"),
+          metric("Rework rate", rework_rate(metrics), "partial"),
           metric("PR review quality", "GitHub review/CI data gap", "gap")
         ]
       },
@@ -331,6 +339,24 @@ defmodule SymphonyElixir.Analytics do
     "#{Float.round(cached_input_tokens / input_tokens * 100, 1)}%"
   end
 
+  defp auto_advance_rate(metrics) do
+    percent_share(metrics.phase_auto_advanced_count, metrics.phase_approved_count + metrics.phase_auto_advanced_count)
+  end
+
+  defp rework_rounds(metrics) do
+    metrics.phase_reworked_count + metrics.phase_rollback_count
+  end
+
+  defp rework_rate(metrics) do
+    percent_share(rework_rounds(metrics), metrics.phase_published_count)
+  end
+
+  defp percent_share(_numerator, denominator) when denominator <= 0, do: "n/a"
+
+  defp percent_share(numerator, denominator) do
+    "#{Float.round(numerator / denominator * 100, 1)}%"
+  end
+
   defp capacity_metrics(%{latest_capacity: latest_capacity} = metrics) do
     latest_capacity = latest_capacity || %{}
 
@@ -363,6 +389,25 @@ defmodule SymphonyElixir.Analytics do
 
   defp count_events(events, event_type) do
     Enum.count(events, &(Map.get(&1, "event_type") == event_type))
+  end
+
+  defp dedupe_events_by_event_id(events) do
+    {deduped, _seen} = Enum.reduce(events, {[], MapSet.new()}, &dedupe_event_by_event_id/2)
+    Enum.reverse(deduped)
+  end
+
+  defp dedupe_event_by_event_id(event, {events, seen_event_ids}) do
+    case Map.get(event, "event_id") do
+      nil ->
+        {[event | events], seen_event_ids}
+
+      event_id ->
+        if MapSet.member?(seen_event_ids, event_id) do
+          {events, seen_event_ids}
+        else
+          {[event | events], MapSet.put(seen_event_ids, event_id)}
+        end
+    end
   end
 
   defp latest_event(events, event_type) do

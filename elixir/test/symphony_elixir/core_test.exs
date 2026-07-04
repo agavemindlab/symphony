@@ -1315,6 +1315,66 @@ defmodule SymphonyElixir.CoreTest do
     assert File.read!(marker) == "running|dispatch|MT-RUNNING|"
   end
 
+  test "dispatch triggers a phase event scan that lands derived events in the analytics file" do
+    write_workflow_file!(Workflow.workflow_file_path(), tracker_kind: "memory")
+
+    issue = %Issue{
+      id: "issue-dispatch-scan",
+      identifier: "MT-SCAN",
+      title: "Dispatch scan",
+      state: "In Progress",
+      url: "https://linear.example/MT-SCAN"
+    }
+
+    Application.put_env(:symphony_elixir, :memory_tracker_comments, %{
+      "issue-dispatch-scan" => [
+        %{
+          id: "dispatch-scan-req-1",
+          body: "## Requirements\n\n目标",
+          created_at: "2026-07-01T10:00:00Z",
+          parent_id: nil,
+          author_name: "symphony-agent",
+          author_is_bot: true,
+          resolved_at: nil
+        }
+      ]
+    })
+
+    start_child = fn _fun ->
+      {:ok,
+       spawn(fn ->
+         receive do
+           :stop -> :ok
+         end
+       end)}
+    end
+
+    state = %Orchestrator.State{
+      running: %{},
+      claimed: MapSet.new(),
+      blocked: %{},
+      retry_attempts: %{},
+      codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
+      max_concurrent_agents: 10
+    }
+
+    updated_state = Orchestrator.dispatch_issue_for_test(state, issue, start_child)
+    assert Map.has_key?(updated_state.running, "issue-dispatch-scan")
+
+    assert_eventually(fn ->
+      %{events: events} = SymphonyElixir.Analytics.read_events()
+
+      Enum.any?(events, fn event ->
+        event["event_type"] == "phase_published" and
+          event["event_id"] == "phase_published:dispatch-scan-req-1" and
+          event["issue_id"] == "issue-dispatch-scan" and
+          event["issue_identifier"] == "MT-SCAN" and
+          event["issue_url"] == "https://linear.example/MT-SCAN" and
+          event["source"] == "phase_scan"
+      end)
+    end)
+  end
+
   test "dispatch claims issue and starts agent when issue running hook fails" do
     write_workflow_file!(Workflow.workflow_file_path(),
       hook_issue_running: "printf 'marker failed' && exit 17"
@@ -1895,6 +1955,19 @@ defmodule SymphonyElixir.CoreTest do
 
   defp restore_app_env(key, nil), do: Application.delete_env(:symphony_elixir, key)
   defp restore_app_env(key, value), do: Application.put_env(:symphony_elixir, key, value)
+
+  defp assert_eventually(fun, attempts \\ 50)
+
+  defp assert_eventually(fun, attempts) when attempts > 0 do
+    if fun.() do
+      :ok
+    else
+      Process.sleep(20)
+      assert_eventually(fun, attempts - 1)
+    end
+  end
+
+  defp assert_eventually(_fun, 0), do: flunk("condition not met in time")
 
   test "fetch issues by states with empty state set is a no-op" do
     assert {:ok, []} = Client.fetch_issues_by_states([])

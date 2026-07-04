@@ -58,11 +58,13 @@ defmodule SymphonyElixir.AnalyticsTest do
         recorded_at: "2026-06-15T10:00:05Z"
       },
       %{
-        event_type: :phase_event,
+        event_type: :phase_published,
+        event_id: "phase_published:comment-1",
         issue_id: "issue-1",
         issue_identifier: "DEV-1",
         phase: "Implementation",
-        transition: "posted_artifact",
+        comment_id: "comment-1",
+        source: "phase_scan",
         recorded_at: "2026-06-15T10:00:06Z"
       },
       %{
@@ -132,11 +134,17 @@ defmodule SymphonyElixir.AnalyticsTest do
     assert %{status: "partial", metrics: autonomy_metrics} =
              panel(summary, "autonomy_funnel")
 
-    assert %{label: "Phase events", value: 1, status: "direct"} in autonomy_metrics
+    assert %{label: "Phases published", value: 1, status: "direct"} in autonomy_metrics
+    assert %{label: "Human approvals", value: 0, status: "direct"} in autonomy_metrics
+    assert %{label: "Auto-advances", value: 0, status: "direct"} in autonomy_metrics
+    assert %{label: "Auto-advance rate", value: "n/a", status: "direct"} in autonomy_metrics
+    assert %{label: "Rework rounds", value: 0, status: "direct"} in autonomy_metrics
+    assert %{label: "Human touch count", value: "Linear comments required", status: "gap"} in autonomy_metrics
 
     assert %{status: "gap", metrics: quality_metrics} =
              panel(summary, "quality_rework")
 
+    assert %{label: "Rework rate", value: "0.0%", status: "partial"} in quality_metrics
     assert %{label: "PR review quality", value: "GitHub review/CI data gap", status: "gap"} in quality_metrics
 
     assert %{status: "direct", metrics: capacity_metrics} =
@@ -147,6 +155,91 @@ defmodule SymphonyElixir.AnalyticsTest do
     assert %{label: "Effective capacity", value: 12, status: "partial"} in capacity_metrics
 
     assert "GitHub review/CI data is not configured in v1" in summary.data_quality.gaps
+  end
+
+  test "counts phase events once per event_id and computes autonomy funnel rates" do
+    path = tmp_path("phase-funnel.ndjson")
+
+    duplicated_published = %{
+      event_type: :phase_published,
+      event_id: "phase_published:pub-1",
+      issue_id: "issue-1",
+      phase: "Requirements",
+      comment_id: "pub-1",
+      source: "phase_scan",
+      recorded_at: "2026-06-15T10:00:00Z"
+    }
+
+    [
+      duplicated_published,
+      duplicated_published,
+      %{
+        event_type: :phase_published,
+        event_id: "phase_published:pub-2",
+        issue_id: "issue-1",
+        phase: "Design",
+        comment_id: "pub-2",
+        source: "phase_scan",
+        recorded_at: "2026-06-15T10:05:00Z"
+      },
+      %{
+        event_type: :phase_approved,
+        event_id: "phase_approved:appr-1",
+        issue_id: "issue-1",
+        phase: "Requirements",
+        comment_id: "appr-1",
+        source: "phase_scan",
+        recorded_at: "2026-06-15T10:10:00Z"
+      },
+      %{
+        event_type: :phase_auto_advanced,
+        event_id: "phase_auto_advanced:adv-1",
+        issue_id: "issue-1",
+        phase: "Design",
+        comment_id: "adv-1",
+        source: "phase_scan",
+        recorded_at: "2026-06-15T10:15:00Z"
+      },
+      %{
+        event_type: :phase_reworked,
+        event_id: "phase_reworked:rw-1",
+        issue_id: "issue-1",
+        phase: "Design",
+        comment_id: "rw-1",
+        source: "phase_scan",
+        recorded_at: "2026-06-15T10:20:00Z"
+      },
+      %{
+        event_type: :phase_rollback,
+        event_id: "phase_rollback:rb-1",
+        issue_id: "issue-1",
+        from_phase: "Design",
+        target_phase: "Requirements",
+        comment_id: "rb-1",
+        source: "phase_scan",
+        recorded_at: "2026-06-15T10:25:00Z"
+      },
+      %{event_type: :run_started, issue_id: "issue-1", recorded_at: "2026-06-15T10:30:00Z"},
+      %{event_type: :run_started, issue_id: "issue-1", recorded_at: "2026-06-15T10:30:00Z"}
+    ]
+    |> Enum.each(&Analytics.record_event(&1, path: path))
+
+    summary = Analytics.summary(path: path)
+
+    %{metrics: autonomy_metrics} = panel(summary, "autonomy_funnel")
+
+    assert %{label: "Phases published", value: 2, status: "direct"} in autonomy_metrics
+    assert %{label: "Human approvals", value: 1, status: "direct"} in autonomy_metrics
+    assert %{label: "Auto-advances", value: 1, status: "direct"} in autonomy_metrics
+    assert %{label: "Auto-advance rate", value: "50.0%", status: "direct"} in autonomy_metrics
+    assert %{label: "Rework rounds", value: 2, status: "direct"} in autonomy_metrics
+
+    %{metrics: quality_metrics} = panel(summary, "quality_rework")
+    assert %{label: "Rework rate", value: "100.0%", status: "partial"} in quality_metrics
+
+    # Events without an event_id are not deduplicated.
+    %{metrics: delivery_metrics} = panel(summary, "delivery_cycle")
+    assert %{label: "Runtime-backed runs", value: 2, status: "partial"} in delivery_metrics
   end
 
   test "summarizes latest token totals per run without double-counting snapshots" do
