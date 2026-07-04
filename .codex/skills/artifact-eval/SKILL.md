@@ -93,3 +93,33 @@ writes `eval/maestro/corpus.jsonl` plus a `report.md` of agreement rates.
 That corpus is ground truth for future maestro-reviewer replays; capture a
 full artifact-eval case for any overridden pair worth debugging. `eval/` is
 gitignored — corpora carry internal issue content and stay local.
+
+## Maestro reviewer replay
+
+Evaluate `.codex/skills/maestro/agents/maestro-reviewer.md` against human
+verdicts. `mix symphony.eval.reviews` (run in `elixir/`) labels every
+`phase_published` artifact with its first disposition — human ✅ `approve`,
+agent ⏩ `auto_advanced`, a superseding rework round or rollback
+`request_changes`, else `pending` — and writes `eval/reviews/cases.jsonl`
+plus `labels-report.md` (only approve/request_changes are scored).
+
+```bash
+cd elixir && mix symphony.eval.reviews          # build the labeled test set
+python3 .codex/skills/artifact-eval/scripts/maestro_replay.py replay \
+  --cases eval/reviews/cases.jsonl --sample 20   # one codex session per case
+python3 .codex/skills/artifact-eval/scripts/maestro_replay.py score \
+  --cases eval/reviews/cases.jsonl \
+  --predictions eval/reviews/replay/predictions.jsonl
+```
+
+`replay` runs `codex exec --sandbox read-only` per case (prompt on stdin:
+the full reviewer prompt plus a time-travel preamble) and appends
+`predictions.jsonl` incrementally — interrupted runs keep partial results and
+reruns resume by skipping predicted cases. Time-travel caveat: the reviewer
+is told to only consider Linear comments and PR state from before the
+artifact's `published_at`, but it reads live Linear/GitHub, so leakage from
+later history is possible — treat agreement as an upper bound. Cost note:
+each case is a full codex session; use `--sample N` (stable sort by case id,
+deterministic) and `--phase` for regression subsets. `score` writes
+`report.md` with overall/by-phase/by-label agreement, a confusion matrix,
+and the disagreement list.
