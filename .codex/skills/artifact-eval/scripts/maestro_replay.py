@@ -217,8 +217,13 @@ def finish_stats(stats: dict) -> dict:
 
 
 def score_predictions(cases: list[dict], predictions: list[dict]) -> dict:
-    """Pure scoring: agreement overall/by-phase/by-label, confusion, disagreements."""
+    """Pure scoring: agreement overall/by-phase/by-label, confusion, disagreements.
+
+    Predictions are deduplicated by case id (last occurrence wins): concurrent
+    replay processes appending to one file must not double-count a case.
+    """
     label_by_id = {case_id(case): case for case in cases if case_id(case)}
+    predictions = list({case_id(p): p for p in predictions}.values())
     overall = empty_stats()
     by_phase: dict[str, dict] = {}
     by_label: dict[str, dict] = {}

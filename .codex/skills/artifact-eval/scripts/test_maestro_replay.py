@@ -267,3 +267,22 @@ class ReplayCommandTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ScoreDedupTest(unittest.TestCase):
+    def test_duplicate_predictions_for_one_case_count_once_last_wins(self):
+        cases = [
+            {
+                "artifact_comment_id": "c1",
+                "issue_identifier": "X-1",
+                "phase": "Design",
+                "label": "approve",
+            }
+        ]
+        predictions = [
+            {"artifact_comment_id": "c1", "prediction": "request changes"},
+            {"artifact_comment_id": "c1", "prediction": "approve"},
+        ]
+        result = maestro_replay.score_predictions(cases, predictions)
+        self.assertEqual(result["overall"]["total"], 1)
+        self.assertEqual(result["overall"]["agreed"], 1)
