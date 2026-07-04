@@ -83,7 +83,11 @@ Status recommendations:
 - Requirements / Design approve -> `In Progress`.
 - Implementation approve with a real PR and no prerequisite blocker ->
   `Merging`; for no-PR `Type:Spike` findings accepted -> `Done`.
-- Request changes -> `Rework`.
+- Request changes -> `Rework`, except when the reviewed issue is already
+  blocked by a prerequisite and the only actionable fix is on that blocker
+  issue or its scheduling metadata. In that case recommend `no reply yet` /
+  `unchanged`, set `回复对象` to `human`, `回复位置` to `none`, and draft the
+  human next step for making the blocker schedulable.
 - Ask clarification when the human answer is missing -> `unchanged`.
 - Human answer to an unresolved `[NEEDS CLARIFICATION]` already exists ->
   `In Progress`; this is a clarification answer already exists resume, not
@@ -153,6 +157,12 @@ Reply locations:
   `依据`, assume there is no waiver.
 - Drop resolved artifacts unless a current comment explicitly refers back to
   that prior round.
+- When `## Requirements` is awaiting review, compare it directly to the issue
+  description and human comments. Do not approve Requirements that silently
+  turn a broad delivery issue into a Spike, research, or docs-only task just
+  because the description says to "first" / "首先" do one part; require the
+  artifact to define the parent/subissue boundary or cite explicit human scope
+  approval for the narrower issue.
 - When `## Deployment` is awaiting review, derive the close test from the
   approved `## Requirements` acceptance criteria plus later human-approved
   scope or verification changes.
@@ -164,8 +174,12 @@ Reply locations:
   `AUTOMATED_REVIEWER` from workflow env/defaults such as
   `workflows/<project>/project.env*`; run `gh pr view` with PR metadata,
   reviews, comments, and status rollup; run `gh pr diff`; run `gh pr checks`
-  when available. Exclude bot/configured automated reviewer feedback when
-  judging human intent.
+  when available. If the issue has multiple linked/open PRs, identify the
+  current merge target and classify every other open PR as superseded/stale or
+  still relevant; request changes or clarification when the target is ambiguous
+  or another open PR has unmerged scope, current human feedback, or unresolved
+  checks not covered by the target. Exclude bot/configured automated reviewer
+  feedback when judging human intent.
 - For `## Implementation`, audit the awaiting artifact body itself for an
   explicit merge-risk judgment tied to the current PR head. PR metadata,
   check/review facts, prior artifacts, or an older head's risk judgment do not
@@ -180,10 +194,15 @@ Reply locations:
   follow-up, prerequisite, validation proof, or cleanup item, verify the
   artifact explains why it was created and that the reason is valid; verify the
   new issue's title, description, project, assignee, relations, blocker
-  direction, and whether validation/disposable issues have a durable relation
-  plus terminal cleanup state. If any field is wrong or missing, request
-  changes. If all fields are correct but the issue lacks the `symphony` label or
-  `To Do` state, request changes to set both so automatic scheduling can start.
+  direction, priority, and whether validation/disposable issues have a durable
+  relation plus terminal cleanup state. If any field is wrong or missing,
+  request changes. For true prerequisite blockers, require the blocker priority
+  to be at least the highest priority of the issue it blocks unless current
+  human feedback explicitly accepts lower priority. If all fields are correct
+  but the issue lacks the `symphony` label or `To Do` state, request changes to
+  set both so automatic scheduling can start.
+  If that issue already blocks the reviewed issue, keep the reviewed issue
+  unchanged/blocked and tell the human to schedule the blocker instead.
 - For spawned or related issues, classify by useful value before relation
   direction. Operational work needed before write-capable acceptance or real use
   -- infra, secrets, protected environments, test users, data reset/seed, or
@@ -309,6 +328,15 @@ Reply locations:
   acceptance criteria plus later human-approved scope changes. Request changes
   when the artifact would leave the next phase unable to satisfy that source of
   truth.
+- For Design or Implementation of a cross-component runtime path that touches a
+  user/API entrypoint plus durable state, a background worker, external process,
+  or metric/alert semantics, require one black-box or near-black-box runtime
+  exercise of that path. For Design, the verification plan must name that
+  exercise; for Implementation, the artifact must cite the command, log, or
+  manual exercise. Do not infer equivalence from unit/service tests, CI, PR diff,
+  approved Design, or future Deployment observation; an exception requires the
+  artifact to explicitly say the runtime exercise is impossible and map named
+  tests to each runtime boundary. Request changes when this is absent.
 - When feedback or evidence shows the accepted source of truth is incomplete,
   wrong, or newly changed, treat it as cross-phase rework. Target Requirements
   for scope, acceptance criteria, actor identity, auth/permission boundaries,
@@ -342,6 +370,10 @@ Reply locations:
   rework of the relevant earlier phase.
 - For `## Implementation`, request changes when the artifact 缺少合并风险判断,
   or when its 合并风险判断 is clearly contradicted by the PR diff / evidence.
+- For `## Implementation`, request changes when a cross-component runtime path
+  lacks artifact-cited black-box or near-black-box runtime exercise evidence;
+  targeted pytest, CI, PR diff, or an approved Design test plan do not satisfy
+  this by themselves.
 - For `## Implementation`, request changes instead of approve/merge nudge when
   a related issue contains operational prerequisites and the reviewed issue has
   no independent runtime/deployment value until that work finishes. If the
