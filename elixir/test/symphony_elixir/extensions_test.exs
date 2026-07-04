@@ -332,6 +332,7 @@ defmodule SymphonyElixir.ExtensionsTest do
     end)
 
     Application.put_env(:symphony_elixir, :analytics_file, analytics_path)
+    put_rollup_file_env(analytics_tmp_path("missing-rollup.json"))
 
     snapshot = static_snapshot()
     orchestrator_name = Module.concat(__MODULE__, :ObservabilityApiOrchestrator)
@@ -412,7 +413,8 @@ defmodule SymphonyElixir.ExtensionsTest do
                "reasoning_output_tokens" => 3,
                "seconds_running" => 42.5
              },
-             "rate_limits" => %{"primary" => %{"remaining" => 11}}
+             "rate_limits" => %{"primary" => %{"remaining" => 11}},
+             "rollup" => nil
            }
 
     conn = get(build_conn(), "/api/v1/MT-HTTP")
@@ -735,6 +737,7 @@ defmodule SymphonyElixir.ExtensionsTest do
     end)
 
     Application.put_env(:symphony_elixir, :analytics_file, path)
+    put_rollup_file_env(analytics_tmp_path("missing-rollup.json"))
 
     :ok =
       SymphonyElixir.Analytics.record_event(
@@ -785,6 +788,53 @@ defmodule SymphonyElixir.ExtensionsTest do
     assert html =~ "Partial (可展示但样本不足)"
     assert html =~ "Gap (仅展示数据质量/缺口)"
     assert html =~ "GitHub review/CI data is not configured in v1"
+
+    assert html =~ "历史（rollup）"
+    assert html =~ "运行 mix symphony.analytics.rollup 生成历史汇总。"
+  end
+
+  test "dashboard liveview renders rollup history when rollup.json is present" do
+    rollup_path = analytics_tmp_path("rollup.json")
+    put_rollup_file_env(rollup_path)
+
+    File.write!(
+      rollup_path,
+      Jason.encode!(%{
+        generated_at: "2026-06-16T00:00:00Z",
+        totals: %{days: 2},
+        north_star: [
+          %{date: "2026-06-14", cycle: %{issues_first_published: 1, runs_completed: 2}, rework_rate: "50.0%", cost_per_issue: 1234},
+          %{date: "2026-06-15", cycle: %{issues_first_published: 0, runs_completed: 1}, rework_rate: "n/a", cost_per_issue: "n/a"}
+        ]
+      })
+    )
+
+    orchestrator_name = Module.concat(__MODULE__, :DashboardRollupOrchestrator)
+
+    {:ok, _pid} =
+      StaticOrchestrator.start_link(
+        name: orchestrator_name,
+        snapshot: static_snapshot(),
+        refresh: %{
+          queued: true,
+          coalesced: false,
+          requested_at: DateTime.utc_now(),
+          operations: ["poll"]
+        }
+      )
+
+    start_test_endpoint(orchestrator: orchestrator_name, snapshot_timeout_ms: 50)
+
+    {:ok, _view, html} = live(build_conn(), "/")
+
+    assert html =~ "历史（rollup）"
+    assert html =~ "生成时间:"
+    assert html =~ "每 issue Token"
+    assert html =~ "2026-06-14"
+    assert html =~ "2026-06-15"
+    assert html =~ "50.0%"
+    assert html =~ "1,234"
+    refute html =~ "运行 mix symphony.analytics.rollup 生成历史汇总。"
   end
 
   test "dashboard liveview renders an unavailable state without crashing" do
@@ -872,6 +922,18 @@ defmodule SymphonyElixir.ExtensionsTest do
 
     Application.put_env(:symphony_elixir, SymphonyElixirWeb.Endpoint, endpoint_config)
     start_supervised!({SymphonyElixirWeb.Endpoint, []})
+  end
+
+  defp put_rollup_file_env(path) do
+    previous = Application.fetch_env(:symphony_elixir, :rollup_file)
+    Application.put_env(:symphony_elixir, :rollup_file, path)
+
+    on_exit(fn ->
+      case previous do
+        {:ok, value} -> Application.put_env(:symphony_elixir, :rollup_file, value)
+        :error -> Application.delete_env(:symphony_elixir, :rollup_file)
+      end
+    end)
   end
 
   defp analytics_tmp_path(name) do

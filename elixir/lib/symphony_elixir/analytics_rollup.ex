@@ -13,6 +13,8 @@ defmodule SymphonyElixir.AnalyticsRollup do
 
   alias SymphonyElixir.Analytics
 
+  @default_rollup_json_path "log/rollup/rollup.json"
+
   @empty_tokens %{total: 0, input: 0, output: 0, cached_input: 0}
 
   @count_keys [
@@ -106,6 +108,46 @@ defmodule SymphonyElixir.AnalyticsRollup do
       archive: archive_lines |> Enum.map(&ensure_trailing_newline/1) |> IO.iodata_to_binary(),
       keep: IO.iodata_to_binary(keep_lines),
       archived_count: length(archive_lines)
+    }
+  end
+
+  @doc """
+  Compact display summary of the `mix symphony.analytics.rollup` output file.
+
+  Returns `nil` when the file is missing, unreadable, or partially written;
+  `generated_at` is the file mtime. The default path can be overridden with
+  the `:rollup_file` application env (mirrors `:analytics_file`).
+  """
+  @spec read_rollup_summary(Path.t() | nil) :: map() | nil
+  def read_rollup_summary(path \\ nil) do
+    path = path || Application.get_env(:symphony_elixir, :rollup_file, @default_rollup_json_path)
+
+    with {:ok, %File.Stat{mtime: mtime}} <- File.stat(path, time: :posix),
+         {:ok, content} <- File.read(path),
+         {:ok, %{"north_star" => north_star}} when is_list(north_star) <- Jason.decode(content) do
+      %{
+        generated_at: mtime |> DateTime.from_unix!() |> DateTime.to_iso8601(),
+        days: length(north_star),
+        last_14_north_star: north_star |> Enum.take(-14) |> Enum.map(&north_star_summary_entry/1)
+      }
+    else
+      _missing_or_invalid -> nil
+    end
+  rescue
+    _partial_write -> nil
+  end
+
+  defp north_star_summary_entry(entry) when is_map(entry) do
+    cycle = Map.get(entry, "cycle") || %{}
+
+    %{
+      date: Map.get(entry, "date"),
+      cycle: %{
+        issues_first_published: Map.get(cycle, "issues_first_published"),
+        runs_completed: Map.get(cycle, "runs_completed")
+      },
+      rework_rate: Map.get(entry, "rework_rate"),
+      cost_per_issue: Map.get(entry, "cost_per_issue")
     }
   end
 

@@ -159,6 +159,46 @@ defmodule SymphonyElixirWeb.DashboardLive do
         <section class="section-card">
           <div class="section-header">
             <div>
+              <h2 class="section-title">历史（rollup）</h2>
+              <p class="section-copy">mix symphony.analytics.rollup 输出的北极星历史序列。</p>
+            </div>
+          </div>
+
+          <%= if @payload[:rollup] do %>
+            <p class="muted">
+              生成时间: <span class="mono numeric"><%= @payload.rollup.generated_at %></span>
+              · 覆盖 <span class="numeric"><%= @payload.rollup.days %></span> 天，下表为最近 14 天。
+            </p>
+            <div class="table-wrap">
+              <table class="data-table" style="min-width: 560px;">
+                <thead>
+                  <tr>
+                    <th>日期</th>
+                    <th>首次发布 issue 数</th>
+                    <th>完成运行数</th>
+                    <th>返工率</th>
+                    <th>每 issue Token</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr :for={day <- @payload.rollup.last_14_north_star}>
+                    <td class="mono"><%= day.date %></td>
+                    <td class="numeric"><%= format_metric_value(day.cycle.issues_first_published) %></td>
+                    <td class="numeric"><%= format_metric_value(day.cycle.runs_completed) %></td>
+                    <td class="numeric"><%= format_metric_value(day.rework_rate) %></td>
+                    <td class="numeric"><%= format_metric_value(day.cost_per_issue) %></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          <% else %>
+            <p class="empty-state">运行 mix symphony.analytics.rollup 生成历史汇总。</p>
+          <% end %>
+        </section>
+
+        <section class="section-card">
+          <div class="section-header">
+            <div>
               <h2 class="section-title">Rate limits</h2>
               <p class="section-copy">Latest upstream rate-limit snapshot, when available.</p>
             </div>
