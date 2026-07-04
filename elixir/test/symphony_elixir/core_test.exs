@@ -367,11 +367,11 @@ defmodule SymphonyElixir.CoreTest do
       File.read!(Path.expand("../workflows/agavemindlab/skills/phase-implementation/SKILL.md", File.cwd!()))
 
     for section <- [
-          "### 当前对象",
+          "### 结论",
           "### Root cause",
           "### Rework 已回应",
-          "### Code changes",
-          "### Verification",
+          "### 本轮变化",
+          "### 验证结论",
           "### Acceptance mapping",
           "### Human action needed"
         ] do
