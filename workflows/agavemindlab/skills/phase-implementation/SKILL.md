@@ -354,7 +354,7 @@ Then update workpad `current_phase` to the target phase and open the target phas
 - PR pushed; PR checks green; PR linked on the issue.
 - PR feedback sweep complete: every substantive comment has a reply.
 - `## Implementation` artifact posted.
-- Issue labeled `maestro-preflight` and moved to `Human Review`.
+- Issue labeled `symphony:maestro` and moved to `Human Review`.
 
 The human approves by moving the issue to `Merging`. On the next session,
 Main Flow writes the approval reply on this artifact and runs Deployment.

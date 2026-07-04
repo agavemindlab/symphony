@@ -5,7 +5,7 @@ tracker:
   project_slugs: $SYMPHONY_PROJECT_SLUGS
   project_name: $SYMPHONY_PROJECT_NAME
   project_names: $SYMPHONY_PROJECT_NAMES
-  required_labels: ["symphony", "maestro-preflight"]
+  required_labels: ["symphony", "symphony:maestro"]
   active_states:
     - Human Review
   terminal_states:
@@ -86,7 +86,7 @@ codex:
 You are the Maestro preflight workflow for Linear issue `{{ issue.identifier }}`.
 
 This is a fresh Codex session. It exists only because the normal Symphony
-workflow moved the issue to `Human Review` and added the `maestro-preflight`
+workflow moved the issue to `Human Review` and added the `symphony:maestro`
 label. You are running under the Maestro profile, so Linear writes must use the
 Maestro OAuth app identity.
 
@@ -97,7 +97,7 @@ Maestro OAuth app identity.
 ## Required Checks
 
 1. Re-read the issue with `linear_graphql`. Continue only if it is still in
-   `Human Review` and has both `symphony` and `maestro-preflight`.
+   `Human Review` and has both `symphony` and `symphony:maestro`.
 2. Ensure this workspace is on the project main branch. The target ref is
    `upstream/${SYMPHONY_BASE_BRANCH:-main}`:
 
@@ -108,13 +108,13 @@ Maestro OAuth app identity.
    git status --short
    ```
 
-   If checkout fails, remove `maestro-preflight` if Linear auth works, then stop.
+   If checkout fails, remove `symphony:maestro` if Linear auth works, then stop.
 3. Use `$maestro {{ issue.identifier }}`. The `$maestro` skill must run with
    context forking disabled and collect only Linear / GitHub / repository
    evidence. Do not pass it facts from this prompt beyond the issue key.
 4. Identify the current awaiting-review phase artifact and current PR/head when
    one exists. If there is already a `🤖 Maestro 预审核:` reply for the same
-   artifact/head, write no second review. Remove `maestro-preflight` and stop.
+   artifact/head, write no second review. Remove `symphony:maestro` and stop.
 
 ## Apply The Recommendation
 
@@ -130,7 +130,7 @@ yet>` and, when a confidence score exists, `置信度：<N>/10`.
   end the reply with the line `🤖 auto: 已自动将 issue 置为 Rework` and move
   the issue to `Rework` (reversible — a human who disagrees moves it back with
   a reason); with auto-rework disabled, keep the issue in `Human Review`.
-  Then remove `maestro-preflight`.
+  Then remove `symphony:maestro`.
 - If `$maestro` says `approve`, reply in the current artifact thread with the
   Maestro-chosen approval content, include the artifact id and head, add a
   `0-10` confidence score plus short rationale. Only when ALL hold — env
@@ -140,10 +140,10 @@ yet>` and, when a confidence score exists, `置信度：<N>/10`.
   artifact has no unresolved `[NEEDS CLARIFICATION]` marker and no 🔴
   high-impact open question — end the reply with the line
   `🤖 auto: 已自动批准，置为 In Progress` and move the issue to `In Progress`.
-  Otherwise keep the issue in `Human Review`. Then remove `maestro-preflight`.
+  Otherwise keep the issue in `Human Review`. Then remove `symphony:maestro`.
 - If `$maestro` has no actionable approve/rework decision, reply with a concise
   no-action reason when there is a safe artifact thread, keep the issue in
-  `Human Review`, then remove `maestro-preflight`.
+  `Human Review`, then remove `symphony:maestro`.
 
 Do not write phase-closing replies such as `✅ 已批准` or `⏩ 自动进入`.
 

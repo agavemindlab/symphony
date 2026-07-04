@@ -203,8 +203,8 @@ defmodule SymphonyElixir.CoreTest do
     assert prompt =~ "Cross-phase rework"
     assert prompt =~ "Agent never moves to `Done`"
     assert prompt =~ "**`Human Review` is not an agent state for the normal workflow**"
-    assert prompt =~ "`maestro-preflight`"
-    assert prompt =~ "add the `maestro-preflight` label before moving the issue to `Human Review`"
+    assert prompt =~ "`symphony:maestro`"
+    assert prompt =~ "add the `symphony:maestro` label before moving the issue to `Human Review`"
     assert prompt =~ "collapsible sections (`>>>`)"
     assert prompt =~ "Skills-activated footer"
     assert prompt =~ "Codex session id"
@@ -237,7 +237,7 @@ defmodule SymphonyElixir.CoreTest do
 
     tracker = Map.fetch!(config, "tracker")
     assert Map.fetch!(tracker, "active_states") == ["Human Review"]
-    assert Map.fetch!(tracker, "required_labels") == ["symphony", "maestro-preflight"]
+    assert Map.fetch!(tracker, "required_labels") == ["symphony", "symphony:maestro"]
     assert get_in(config, ["workspace", "root"]) == "$SYMPHONY_MAESTRO_WORKSPACE_ROOT"
 
     assert prompt =~ "$maestro {{ issue.identifier }}"
@@ -247,7 +247,7 @@ defmodule SymphonyElixir.CoreTest do
     assert prompt =~ "Linear / GitHub / repository"
     assert prompt =~ "evidence"
     assert prompt =~ "Maestro OAuth app"
-    assert prompt =~ "remove `maestro-preflight`"
+    assert prompt =~ "remove `symphony:maestro`"
     assert prompt =~ "request changes"
     assert prompt =~ "`Rework`"
     assert prompt =~ "`approve`"
@@ -434,16 +434,16 @@ defmodule SymphonyElixir.CoreTest do
 
     main_workflow = File.read!(Path.join(repo_root, "workflows/agavemindlab/WORKFLOW.md"))
 
-    assert maestro_workflow =~ ~s(required_labels: ["symphony", "maestro-preflight"])
+    assert maestro_workflow =~ ~s(required_labels: ["symphony", "symphony:maestro"])
     assert maestro_workflow =~ "- Human Review"
     assert maestro_workflow =~ "{{ routing_brief }}"
     assert maestro_workflow =~ "🤖 Maestro 预审核"
     assert maestro_workflow =~ "建议回复方式"
     assert maestro_workflow =~ "MAESTRO_AUTO_REWORK"
     assert maestro_workflow =~ "MAESTRO_AUTO_APPROVE_MIN_CONFIDENCE"
-    assert maestro_workflow =~ "remove `maestro-preflight`"
+    assert maestro_workflow =~ "remove `symphony:maestro`"
     refute maestro_workflow =~ "✅ 已批准，进入"
-    assert main_workflow =~ "maestro-preflight"
+    assert main_workflow =~ "symphony:maestro"
   end
 
   test "workflow prompts provide the explicit command fast path" do

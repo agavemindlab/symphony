@@ -411,7 +411,7 @@ On `advance`, record `confidence: advance` in the workpad notes; Main Flow
 writes the `⏩` reply, sets `current_phase: Design`, persists state, and stops
 this agent run. The next Symphony dispatch opens `phase-design`.
 
-Otherwise choose **`stop`** — Main Flow adds `maestro-preflight`, then moves the issue to `Human Review`.
+Otherwise choose **`stop`** — Main Flow adds `symphony:maestro`, then moves the issue to `Human Review`.
 This is the right outcome for a rework, for a human already in the thread,
 for the `Rework` state, and for the **complete-but-not-confident** case: a
 key interpretation could reasonably go another way, or you resolved a
