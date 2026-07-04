@@ -411,7 +411,9 @@ defmodule SymphonyElixir.Analytics do
   # "In Progress" is ambiguous: the issue may still be awaiting the Merging flip.
   defp merge_expectation_verdict(_next_state), do: :pending
 
-  defp run_started_entries(events) do
+  @doc false
+  @spec run_started_entries([map()]) :: [map()]
+  def run_started_entries(events) do
     events
     |> Enum.filter(&(Map.get(&1, "event_type") == "run_started"))
     |> Enum.flat_map(fn event ->
@@ -422,7 +424,9 @@ defmodule SymphonyElixir.Analytics do
     end)
   end
 
-  defp next_run_state(review, run_starts) do
+  @doc false
+  @spec next_run_state(map(), [map()]) :: String.t() | nil
+  def next_run_state(review, run_starts) do
     with issue_id when not is_nil(issue_id) <- Map.get(review, "issue_id"),
          %DateTime{} = reviewed_at <- maestro_reviewed_at(review),
          %{state: state} <-
