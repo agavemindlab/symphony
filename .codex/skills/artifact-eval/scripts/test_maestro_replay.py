@@ -286,3 +286,14 @@ class ScoreDedupTest(unittest.TestCase):
         result = maestro_replay.score_predictions(cases, predictions)
         self.assertEqual(result["overall"]["total"], 1)
         self.assertEqual(result["overall"]["agreed"], 1)
+
+
+class ParseConfidenceTest(unittest.TestCase):
+    def test_parses_last_confidence_line_and_tolerates_absence(self):
+        self.assertEqual(
+            maestro_replay.parse_confidence("CONFIDENCE: 8\nRECOMMENDATION: approve"), 8.0
+        )
+        self.assertEqual(
+            maestro_replay.parse_confidence("**Confidence：7.5**\nRECOMMENDATION: approve"), 7.5
+        )
+        self.assertIsNone(maestro_replay.parse_confidence("RECOMMENDATION: approve"))

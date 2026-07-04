@@ -40,6 +40,7 @@ RECOMMENDATIONS = (
 )
 REVIEWER_PROMPT_RELPATH = Path(".codex/skills/maestro/agents/maestro-reviewer.md")
 RECOMMENDATION_LINE_RE = re.compile(r"recommendation\s*[:：]\s*(.+)", re.IGNORECASE)
+CONFIDENCE_LINE_RE = re.compile(r"confidence\s*[:：]\s*(\d+(?:\.\d+)?)", re.IGNORECASE)
 
 
 class ReplayError(RuntimeError):
@@ -92,11 +93,24 @@ def compose_prompt(reviewer_prompt: str, case: dict) -> str:
     preamble = (
         f"回放评审 {issue} 的 artifact {artifact}（发布于 {published_at}）。"
         f"时间旅行纪律：只考虑 createdAt <= {published_at} 的 Linear 评论与当时已存在的 PR 状态；"
-        "忽略之后发生的一切。不得写入任何东西。最后一行输出且仅输出："
+        "忽略之后发生的一切。不得写入任何东西。最后两行输出且仅输出："
+        "`CONFIDENCE: <0-10>`（你的置信分）与 "
         "`RECOMMENDATION: <approve|request changes|ask clarification|merge nudge|"
         "completion confirmation|no reply yet>`"
     )
     return reviewer_prompt.rstrip() + "\n\n" + preamble + "\n"
+
+
+def parse_confidence(output: str):
+    """Parse the LAST `CONFIDENCE:` line; None when absent or unparseable."""
+    for line in reversed(output.splitlines()):
+        match = CONFIDENCE_LINE_RE.search(line)
+        if match:
+            try:
+                return float(match.group(1))
+            except ValueError:
+                return None
+    return None
 
 
 def parse_recommendation(output: str) -> str:
@@ -140,7 +154,13 @@ def run_case(case: dict, *, codex_argv: list[str], prompt: str, timeout_s: float
         output = _as_text(exc.stdout) + _as_text(exc.stderr)
         prediction = "timeout"
     duration_s = round(time.monotonic() - started, 1)
-    return {**case, "prediction": prediction, "raw_tail": output[-RAW_TAIL_CHARS:], "duration_s": duration_s}
+    return {
+        **case,
+        "prediction": prediction,
+        "confidence": parse_confidence(output),
+        "raw_tail": output[-RAW_TAIL_CHARS:],
+        "duration_s": duration_s,
+    }
 
 
 def load_done_ids(predictions_path: Path) -> set[str]:
