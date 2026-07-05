@@ -354,8 +354,14 @@ defmodule SymphonyElixir.ExtensionsTest do
     conn = get(build_conn(), "/api/v1/state")
     state_payload = json_response(conn, 200)
 
-    assert %{"event_sample_count" => 0, "panels" => analytics_panels} = state_payload["analytics"]
-    assert length(analytics_panels) == 6
+    assert %{
+             "event_sample_count" => 0,
+             "window_started_at" => nil,
+             "window_ended_at" => nil,
+             "panels" => analytics_panels
+           } = state_payload["analytics"]
+
+    assert length(analytics_panels) == 5
 
     assert Map.delete(state_payload, "analytics") == %{
              "generated_at" => state_payload["generated_at"],
@@ -519,19 +525,20 @@ defmodule SymphonyElixir.ExtensionsTest do
 
     assert %{
              "event_sample_count" => 1,
+             "window_started_at" => "2026-06-15T10:10:00Z",
+             "window_ended_at" => "2026-06-15T10:10:00Z",
              "panels" => panels,
              "data_quality" => %{"gaps" => gaps}
            } = payload["analytics"]
 
-    assert length(panels) == 6
+    assert length(panels) == 5
 
     assert Enum.map(panels, & &1["id"]) == [
              "delivery_cycle",
              "autonomy_funnel",
              "quality_rework",
              "cost_per_accepted_issue",
-             "capacity_reliability",
-             "data_quality_exclusions"
+             "capacity_reliability"
            ]
 
     assert "GitHub review/CI data is not configured in v1" in gaps
@@ -673,6 +680,9 @@ defmodule SymphonyElixir.ExtensionsTest do
     assert html =~ "Offline"
     assert html =~ "Copy ID"
     assert html =~ "Codex update"
+    assert html =~ "Retry #2"
+    assert html =~ ~r/Updated \d+s ago/
+    assert html =~ "remaining 11"
     refute html =~ "data-runtime-clock="
     refute html =~ "setInterval(refreshRuntimeClocks"
     refute html =~ "Refresh now"
@@ -777,20 +787,26 @@ defmodule SymphonyElixir.ExtensionsTest do
           "Autonomy Funnel",
           "Quality / Rework",
           "Cost Per Accepted Issue",
-          "Capacity / Reliability",
-          "Data Quality / Exclusions"
+          "Capacity / Reliability"
         ] do
       assert html =~ title
     end
 
+    refute html =~ "Data Quality / Exclusions"
+
     assert html =~ "Can accepted issues move faster with the current persisted signals?"
-    assert html =~ "Direct (可直接展示)"
-    assert html =~ "Partial (可展示但样本不足)"
-    assert html =~ "Gap (仅展示数据质量/缺口)"
+    assert html =~ "1 events"
+    assert html =~ "~0m window"
+    assert html =~ ~s(title="usable as-is")
+    assert html =~ ~s(title="shown but sample-limited")
+    assert html =~ ~s(title="data-quality gap only")
+    assert html =~ ~r/>\s*Direct\s*</
+    assert html =~ ~r/>\s*Partial\s*</
+    assert html =~ ~r/>\s*Gap\s*</
     assert html =~ "GitHub review/CI data is not configured in v1"
 
-    assert html =~ "历史（rollup）"
-    assert html =~ "运行 mix symphony.analytics.rollup 生成历史汇总。"
+    assert html =~ "History (rollup)"
+    assert html =~ "No rollup yet — run: mix symphony.analytics.rollup"
   end
 
   test "dashboard liveview renders rollup history when rollup.json is present" do
@@ -827,14 +843,16 @@ defmodule SymphonyElixir.ExtensionsTest do
 
     {:ok, _view, html} = live(build_conn(), "/")
 
-    assert html =~ "历史（rollup）"
-    assert html =~ "生成时间:"
-    assert html =~ "每 issue Token"
+    assert html =~ "History (rollup)"
+    assert html =~ ~r/generated \d+s ago/
+    assert html =~ "Daily deltas from rollup; not comparable to the live totals card."
+    assert html =~ "sparkline"
+    assert html =~ "Tokens per issue"
     assert html =~ "2026-06-14"
     assert html =~ "2026-06-15"
     assert html =~ "50.0%"
     assert html =~ "1,234"
-    refute html =~ "运行 mix symphony.analytics.rollup 生成历史汇总。"
+    refute html =~ "No rollup yet"
   end
 
   test "dashboard liveview renders an unavailable state without crashing" do
@@ -846,6 +864,57 @@ defmodule SymphonyElixir.ExtensionsTest do
     {:ok, _view, html} = live(build_conn(), "/")
     assert html =~ "Snapshot unavailable"
     assert html =~ "snapshot_unavailable"
+    assert html =~ "Retrying automatically"
+  end
+
+  test "dashboard liveview retries automatically after snapshot errors" do
+    orchestrator_name = Module.concat(__MODULE__, :RetryRecoveryOrchestrator)
+
+    start_test_endpoint(
+      orchestrator: orchestrator_name,
+      snapshot_timeout_ms: 50,
+      snapshot_retry_initial_ms: 10
+    )
+
+    {:ok, view, html} = live(build_conn(), "/")
+    assert html =~ "Snapshot unavailable"
+
+    {:ok, _pid} =
+      StaticOrchestrator.start_link(
+        name: orchestrator_name,
+        snapshot: static_snapshot(),
+        refresh: %{
+          queued: true,
+          coalesced: false,
+          requested_at: DateTime.utc_now(),
+          operations: ["poll"]
+        }
+      )
+
+    assert_eventually(fn -> render(view) =~ "MT-HTTP" end, 80)
+  end
+
+  test "runtime formatting and rate-limit summaries handle real payload shapes" do
+    assert SymphonyElixirWeb.DashboardLive.format_runtime_seconds_for_test(14_833) == "4h 7m"
+    assert SymphonyElixirWeb.DashboardLive.format_runtime_seconds_for_test(200) == "3m 20s"
+
+    now = DateTime.utc_now()
+
+    # Real Codex buckets carry used_percent + resets_at (unix seconds), not remaining/limit.
+    assert SymphonyElixirWeb.DashboardLive.rate_limit_summary_for_test(
+             %{"used_percent" => 62.5, "window_minutes" => 300, "resets_at" => DateTime.to_unix(now) + 4_520},
+             now
+           ) == "62.5% used · resets in 1h 15m"
+
+    assert SymphonyElixirWeb.DashboardLive.rate_limit_summary_for_test(
+             %{"remaining" => 3_120, "limit" => 12_000, "reset_in_seconds" => 4_520},
+             now
+           ) == "3,120/12,000 · resets in 1h 15m"
+
+    assert SymphonyElixirWeb.DashboardLive.rate_limit_summary_for_test(%{"remaining" => 11}, now) ==
+             "remaining 11"
+
+    assert SymphonyElixirWeb.DashboardLive.rate_limit_summary_for_test(%{}, now) == "n/a"
   end
 
   test "http server serves embedded assets, accepts form posts, and rejects invalid hosts" do

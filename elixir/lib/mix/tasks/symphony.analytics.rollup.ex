@@ -13,7 +13,8 @@ defmodule Mix.Tasks.Symphony.Analytics.Rollup do
 
   Writes `rollup.json` (full per-day / per-issue / north-star structure) and
   `report.md` (compact Chinese markdown report) into `--output`
-  (default `log/rollup/`). `--analytics` defaults to the configured
+  (default `rollup/` next to the analytics file, so the dashboard reader
+  finds it regardless of cwd). `--analytics` defaults to the configured
   analytics file path.
 
   `--archive-before YYYY-MM-DD` additionally moves event lines strictly older
@@ -25,7 +26,6 @@ defmodule Mix.Tasks.Symphony.Analytics.Rollup do
 
   alias SymphonyElixir.{Analytics, AnalyticsRollup}
 
-  @default_output_dir "log/rollup"
   @lock_timeout_ms 5_000
   @lock_retry_ms 50
 
@@ -35,7 +35,7 @@ defmodule Mix.Tasks.Symphony.Analytics.Rollup do
     if invalid != [], do: Mix.raise("Invalid option(s): #{inspect(invalid)}")
 
     analytics_path = opts[:analytics] || Analytics.file_path()
-    output_dir = opts[:output] || @default_output_dir
+    output_dir = opts[:output] || Path.join(Path.dirname(analytics_path), "rollup")
     cutoff_date = parse_archive_before(opts[:archive_before])
 
     %{events: events, skipped_lines: skipped_lines} = AnalyticsRollup.read_all_events(analytics_path)

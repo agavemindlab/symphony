@@ -247,6 +247,29 @@ defmodule SymphonyElixir.AnalyticsRollupTest do
     end
   end
 
+  test "read_rollup_summary/0 defaults to rollup/rollup.json next to the analytics file" do
+    dir = tmp_dir!()
+    rollup_path = Path.join(dir, "rollup/rollup.json")
+    File.mkdir_p!(Path.dirname(rollup_path))
+
+    File.write!(
+      rollup_path,
+      Jason.encode!(%{north_star: [%{date: "2026-06-01", cycle: %{issues_first_published: 0, runs_completed: 0}, rework_rate: "n/a", cost_per_issue: "n/a"}]})
+    )
+
+    original_analytics = Application.fetch_env(:symphony_elixir, :analytics_file)
+    original_rollup = Application.fetch_env(:symphony_elixir, :rollup_file)
+    Application.put_env(:symphony_elixir, :analytics_file, Path.join(dir, "analytics.ndjson"))
+    Application.delete_env(:symphony_elixir, :rollup_file)
+
+    try do
+      assert %{days: 1, last_14_north_star: [%{date: "2026-06-01"}]} = AnalyticsRollup.read_rollup_summary()
+    after
+      restore_app_env(:analytics_file, original_analytics)
+      restore_app_env(:rollup_file, original_rollup)
+    end
+  end
+
   test "mix task writes rollup.json and report.md and prints a one-line summary" do
     dir = tmp_dir!()
     path = Path.join(dir, "analytics.ndjson")
@@ -306,26 +329,23 @@ defmodule SymphonyElixir.AnalyticsRollupTest do
     assert length(json["north_star"]) == 16
   end
 
-  test "mix task uses the default analytics path and default output directory" do
+  test "mix task defaults output to rollup/ next to the analytics file regardless of cwd" do
     dir = tmp_dir!()
     path = Path.join(dir, "analytics.ndjson")
     write_ndjson!(path, [event("run_started", "2026-06-01T10:00:00Z", %{"issue_identifier" => "DEV-1", "issue_id" => "issue-1"})])
 
     original_env = Application.fetch_env(:symphony_elixir, :analytics_file)
     Application.put_env(:symphony_elixir, :analytics_file, path)
-    original_cwd = File.cwd!()
 
     try do
-      File.cd!(dir)
       output = capture_io(fn -> RollupTask.run([]) end)
       assert output =~ "rollup: 1 events (0 skipped), 1 days, 1 issues"
     after
-      File.cd!(original_cwd)
       restore_app_env(:analytics_file, original_env)
     end
 
-    assert File.regular?(Path.join(dir, "log/rollup/rollup.json"))
-    assert File.regular?(Path.join(dir, "log/rollup/report.md"))
+    assert File.regular?(Path.join(dir, "rollup/rollup.json"))
+    assert File.regular?(Path.join(dir, "rollup/report.md"))
   end
 
   test "mix task validates options and archive-before dates" do

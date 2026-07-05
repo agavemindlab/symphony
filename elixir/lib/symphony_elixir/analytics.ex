@@ -66,11 +66,22 @@ defmodule SymphonyElixir.Analytics do
 
     %{
       event_sample_count: length(events),
+      window_started_at: window_timestamp(List.first(events)),
+      window_ended_at: window_timestamp(List.last(events)),
       panels: panels(metrics),
       data_quality: data_quality(warnings, truncated?),
       warnings: warnings,
       truncated?: truncated?
     }
+  end
+
+  defp window_timestamp(nil), do: nil
+
+  defp window_timestamp(event) do
+    case parse_datetime(Map.get(event, "recorded_at")) do
+      nil -> nil
+      datetime -> datetime |> DateTime.truncate(:second) |> DateTime.to_iso8601()
+    end
   end
 
   @spec file_path() :: Path.t()
@@ -309,7 +320,7 @@ defmodule SymphonyElixir.Analytics do
         id: "cost_per_accepted_issue",
         title: "Cost Per Accepted Issue",
         question: "What token and runtime cost is attached to accepted issues?",
-        status: "direct",
+        status: "partial",
         metrics: [
           metric("Runtime seconds", metrics.runtime_seconds, "partial"),
           metric("Total tokens", metrics.total_tokens, "partial"),
@@ -325,17 +336,6 @@ defmodule SymphonyElixir.Analytics do
         question: "Where do retries, blockers, or capacity pressure stall throughput?",
         status: "direct",
         metrics: capacity_metrics(metrics)
-      },
-      %{
-        id: "data_quality_exclusions",
-        title: "Data Quality / Exclusions",
-        question: "Which signals are safe to use, and which are only gaps?",
-        status: "direct",
-        metrics: [
-          metric("Direct sources", 1, "direct"),
-          metric("Partial sources", 1, "partial"),
-          metric("Gap sources", 2, "gap")
-        ]
       }
     ]
   end

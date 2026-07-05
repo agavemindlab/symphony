@@ -13,8 +13,6 @@ defmodule SymphonyElixir.AnalyticsRollup do
 
   alias SymphonyElixir.Analytics
 
-  @default_rollup_json_path "log/rollup/rollup.json"
-
   @empty_tokens %{total: 0, input: 0, output: 0, cached_input: 0}
 
   @count_keys [
@@ -115,12 +113,16 @@ defmodule SymphonyElixir.AnalyticsRollup do
   Compact display summary of the `mix symphony.analytics.rollup` output file.
 
   Returns `nil` when the file is missing, unreadable, or partially written;
-  `generated_at` is the file mtime. The default path can be overridden with
-  the `:rollup_file` application env (mirrors `:analytics_file`).
+  `generated_at` is the file mtime. The default path is `rollup/rollup.json`
+  next to the analytics file and can be overridden with the `:rollup_file`
+  application env (mirrors `:analytics_file`).
   """
   @spec read_rollup_summary(Path.t() | nil) :: map() | nil
   def read_rollup_summary(path \\ nil) do
-    path = path || Application.get_env(:symphony_elixir, :rollup_file, @default_rollup_json_path)
+    path =
+      path ||
+        Application.get_env(:symphony_elixir, :rollup_file) ||
+        Path.join(Path.dirname(Analytics.file_path()), "rollup/rollup.json")
 
     with {:ok, %File.Stat{mtime: mtime}} <- File.stat(path, time: :posix),
          {:ok, content} <- File.read(path),

@@ -39,7 +39,7 @@ defmodule SymphonyElixir.AnalyticsTest do
            } = Analytics.read_events(path: path)
   end
 
-  test "summarizes runtime events into the six v1 dashboard panels" do
+  test "summarizes runtime events into the five v1 dashboard panels" do
     path = tmp_path("summary.ndjson")
 
     [
@@ -104,14 +104,15 @@ defmodule SymphonyElixir.AnalyticsTest do
     summary = Analytics.summary(path: path)
 
     assert summary.event_sample_count == 7
+    assert summary.window_started_at == "2026-06-15T10:00:00Z"
+    assert summary.window_ended_at == "2026-06-15T10:00:43Z"
 
     assert Enum.map(summary.panels, & &1.id) == [
              "delivery_cycle",
              "autonomy_funnel",
              "quality_rework",
              "cost_per_accepted_issue",
-             "capacity_reliability",
-             "data_quality_exclusions"
+             "capacity_reliability"
            ]
 
     assert Enum.all?(summary.panels, &(is_binary(&1.question) and &1.question != ""))
@@ -123,7 +124,7 @@ defmodule SymphonyElixir.AnalyticsTest do
     assert %{question: "Can accepted issues move faster with the current persisted signals?"} =
              panel(summary, "delivery_cycle")
 
-    assert %{status: "direct", metrics: cost_metrics} =
+    assert %{status: "partial", metrics: cost_metrics} =
              panel(summary, "cost_per_accepted_issue")
 
     assert %{label: "Runtime seconds", value: 42, status: "partial"} in cost_metrics
@@ -159,6 +160,14 @@ defmodule SymphonyElixir.AnalyticsTest do
     assert %{label: "Effective capacity", value: 12, status: "partial"} in capacity_metrics
 
     assert "GitHub review/CI data is not configured in v1" in summary.data_quality.gaps
+  end
+
+  test "window span is nil when the event window is empty" do
+    summary = Analytics.summary(path: tmp_path("no-events.ndjson"))
+
+    assert summary.event_sample_count == 0
+    assert summary.window_started_at == nil
+    assert summary.window_ended_at == nil
   end
 
   test "verdict join skips the reviewer instance's Human Review dispatches" do
