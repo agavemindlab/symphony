@@ -234,6 +234,40 @@ defmodule SymphonyElixir.PhaseEventsTest do
     assert %{recommendation: "unknown", confidence: nil} = derive_maestro_event("🤖 Maestro 预审核: 只留了一句话，没有建议行。")
   end
 
+  test "derive_all adds one human_comment event per non-bot comment, thread replies included" do
+    comments = [
+      comment("chatter", "先讨论一下范围。", created_at: "2026-07-01T09:00:00Z", author_name: "Bob"),
+      comment("req-1", "## Requirements\n\n目标", created_at: "2026-07-01T10:00:00Z", author_name: "symphony-agent", author_is_bot: true),
+      comment("req-1-approve", "✅ 已批准，进入 Design", parent_id: "req-1", created_at: "2026-07-01T11:00:00Z", author_name: "Alice"),
+      comment("req-1-reply", "补充一个细节。", parent_id: "req-1", created_at: "2026-07-01T12:00:00Z", author_name: "Alice")
+    ]
+
+    events = PhaseEvents.derive_all(comments)
+
+    assert Enum.map(events, & &1.event_id) == [
+             "human-comment-chatter",
+             "phase_published:req-1",
+             "phase_approved:req-1-approve",
+             "human-comment-req-1-approve",
+             "human-comment-req-1-reply"
+           ]
+
+    assert %{
+             event_type: "human_comment",
+             event_id: "human-comment-chatter",
+             occurred_at: "2026-07-01T09:00:00Z",
+             author_name: "Bob"
+           } == hd(events)
+
+    # derive/1 keeps its phase-events-only contract for existing consumers.
+    assert Enum.map(PhaseEvents.derive(comments), & &1.event_id) == [
+             "phase_published:req-1",
+             "phase_approved:req-1-approve"
+           ]
+
+    assert PhaseEvents.derive_all([]) == []
+  end
+
   test "event ids are stable and deterministic across repeated derivations" do
     comments = [
       comment("req-1", "## Requirements\n\n目标", created_at: "2026-07-01T10:00:00Z"),

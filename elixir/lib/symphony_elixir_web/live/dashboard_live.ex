@@ -374,6 +374,9 @@ defmodule SymphonyElixirWeb.DashboardLive do
               <p class="section-copy">
                 Durable runtime events and v1 data-quality status for the metrics catalog.
               </p>
+              <p class="analytics-legend">
+                Direct = complete engine-path signal · Partial = engine-visible activity only · Gap = source not collected yet
+              </p>
             </div>
             <div class="section-tools">
               <div class="window-selector" role="group" aria-label="Analytics window">
@@ -408,8 +411,9 @@ defmodule SymphonyElixirWeb.DashboardLive do
                   <div :for={metric <- panel.metrics} class="analytics-metric">
                     <dt><%= metric.label %></dt>
                     <dd>
-                      <span><%= format_metric_value(metric.value) %></span>
+                      <span class={metric_value_class(metric, panel)}><%= format_metric_value(metric.value) %></span>
                       <span
+                        :if={metric_status(metric, panel) != panel.status}
                         class={analytics_metric_status_class(metric, panel)}
                         title={analytics_status_title(metric_status(metric, panel))}
                       >
@@ -1195,6 +1199,10 @@ defmodule SymphonyElixirWeb.DashboardLive do
   defp metric_status(%{status: status}, _panel) when is_binary(status), do: status
   defp metric_status(_metric, %{status: status}) when is_binary(status), do: status
   defp metric_status(_metric, _panel), do: "gap"
+
+  defp metric_value_class(metric, panel) do
+    if metric_status(metric, panel) == "gap", do: "metric-value-gap"
+  end
 
   defp format_metric_value(value) when is_integer(value), do: format_int(value)
   defp format_metric_value(value) when is_float(value), do: :erlang.float_to_binary(value, decimals: 1)

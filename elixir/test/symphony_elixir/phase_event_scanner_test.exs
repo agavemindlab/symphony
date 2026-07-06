@@ -22,7 +22,7 @@ defmodule SymphonyElixir.PhaseEventScannerTest do
     :ok
   end
 
-  test "scan records derived phase events with issue fields and dedupes across rescans" do
+  test "scan records derived phase and human comment events with issue fields and dedupes across rescans" do
     write_workflow_file!(Workflow.workflow_file_path(), tracker_kind: "memory")
 
     issue = %Issue{
@@ -36,10 +36,10 @@ defmodule SymphonyElixir.PhaseEventScannerTest do
     Application.put_env(:symphony_elixir, :memory_tracker_comments, %{
       "issue-scan-1" => [
         comment("req-1", "## Requirements\n\n### 目标\n交付分析事件解析。", created_at: "2026-07-01T10:00:00Z", author_name: "symphony-agent", author_is_bot: true),
-        comment("req-1-advance", "⏩ 自动进入 Design（agent 自评通过，未经人工评审）", parent_id: "req-1", created_at: "2026-07-01T10:05:00Z", author_name: "symphony-agent"),
+        comment("req-1-advance", "⏩ 自动进入 Design（agent 自评通过，未经人工评审）", parent_id: "req-1", created_at: "2026-07-01T10:05:00Z", author_name: "symphony-agent", author_is_bot: true),
         comment("design-1", "## Design\n\n模块拆分。", created_at: "2026-07-01T10:10:00Z", author_name: "symphony-agent", author_is_bot: true),
         comment("design-1-approve", "✅ 已批准，进入 Implementation", parent_id: "design-1", created_at: "2026-07-01T11:00:00Z", author_name: "Alice"),
-        comment("chatter", "普通评论，不产生事件。", created_at: "not-a-timestamp")
+        comment("chatter", "人类普通评论，也计入 human touch。", created_at: "not-a-timestamp", author_name: "Bob")
       ]
     })
 
@@ -50,7 +50,8 @@ defmodule SymphonyElixir.PhaseEventScannerTest do
     assert :ok = PhaseEventScanner.scan(issue, server)
     assert :ok = PhaseEventScanner.scan_now(issue, server)
 
-    assert [published_requirements, auto_advanced, published_design, approved] = recorded_phase_events()
+    assert [human_chatter, published_requirements, auto_advanced, published_design, approved, human_approve] =
+             recorded_phase_events()
 
     assert %{
              "event_type" => "phase_published",
@@ -87,13 +88,33 @@ defmodule SymphonyElixir.PhaseEventScannerTest do
              "issue_id" => "issue-scan-1",
              "source" => "phase_scan"
            } = approved
+
+    # Every non-bot comment yields a human_comment event, including plain
+    # chatter outside artifact threads and marker replies inside them.
+    assert %{
+             "event_type" => "human_comment",
+             "event_id" => "human-comment-chatter",
+             "occurred_at" => "not-a-timestamp",
+             "author_name" => "Bob",
+             "issue_id" => "issue-scan-1",
+             "source" => "phase_scan"
+           } = human_chatter
+
+    assert %{
+             "event_type" => "human_comment",
+             "event_id" => "human-comment-design-1-approve",
+             "occurred_at" => "2026-07-01T11:00:00Z",
+             "author_name" => "Alice"
+           } = human_approve
   end
 
   test "a comment appearing between scans emits only the new event" do
     write_workflow_file!(Workflow.workflow_file_path(), tracker_kind: "memory")
 
     issue = %Issue{id: "issue-scan-2", identifier: "DEV-102", state: "In Progress", url: "https://linear.app/DEV-102"}
-    artifact = comment("impl-1", "## Implementation\n\nPR: https://github.com/x/y/pull/1", created_at: "2026-07-01T12:00:00Z")
+
+    artifact =
+      comment("impl-1", "## Implementation\n\nPR: https://github.com/x/y/pull/1", created_at: "2026-07-01T12:00:00Z", author_is_bot: true)
 
     Application.put_env(:symphony_elixir, :memory_tracker_comments, %{"issue-scan-2" => [artifact]})
 

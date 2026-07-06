@@ -38,9 +38,26 @@ defmodule SymphonyElixir.PhaseEvents do
 
   @spec derive([comment()]) :: [event()]
   def derive(comments) when is_list(comments) do
+    derive_sorted(comments, &comment_events/2)
+  end
+
+  @doc """
+  `derive/1` plus a `human_comment` event for every comment authored by a
+  human (`author_is_bot == false`), including thread replies. Kept separate
+  from `derive/1`, whose phase-events-only contract other consumers
+  (routing brief, agreement stats) rely on.
+  """
+  @spec derive_all([comment()]) :: [event()]
+  def derive_all(comments) when is_list(comments) do
+    derive_sorted(comments, fn comment, artifact_phases ->
+      comment_events(comment, artifact_phases) ++ human_comment_events(comment)
+    end)
+  end
+
+  defp derive_sorted(comments, events_fun) do
     sorted = Enum.sort_by(comments, &comment_sort_key/1)
     artifact_phases = artifact_phases(sorted)
-    Enum.flat_map(sorted, &comment_events(&1, artifact_phases))
+    Enum.flat_map(sorted, &events_fun.(&1, artifact_phases))
   end
 
   @spec phase_of_artifact(String.t() | nil) :: String.t() | nil
@@ -118,6 +135,19 @@ defmodule SymphonyElixir.PhaseEvents do
       nil -> []
     end
   end
+
+  defp human_comment_events(%{author_is_bot: false} = comment) do
+    [
+      %{
+        event_type: "human_comment",
+        event_id: "human-comment-" <> comment.id,
+        occurred_at: occurred_at(comment.created_at),
+        author_name: comment.author_name
+      }
+    ]
+  end
+
+  defp human_comment_events(_comment), do: []
 
   defp published_event(comment, phase) do
     %{

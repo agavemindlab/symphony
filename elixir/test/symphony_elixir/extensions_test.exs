@@ -537,15 +537,29 @@ defmodule SymphonyElixir.ExtensionsTest do
 
     assert length(panels) == 5
 
-    assert Enum.map(panels, & &1["id"]) == [
-             "delivery_cycle",
-             "autonomy_funnel",
-             "quality_rework",
-             "cost_per_accepted_issue",
-             "capacity_reliability"
+    # Panel statuses are derived from the majority of their metric statuses.
+    assert Enum.map(panels, &{&1["id"], &1["status"]}) == [
+             {"delivery_cycle", "partial"},
+             {"autonomy_funnel", "direct"},
+             {"quality_rework", "direct"},
+             {"cost_per_accepted_issue", "partial"},
+             {"capacity_reliability", "partial"}
            ]
 
-    assert "GitHub review/CI data is not configured in v1" in gaps
+    # Neither collector has run for this fixture, so the collector-backed
+    # metrics render as actionable gap rows.
+    autonomy = Enum.find(panels, &(&1["id"] == "autonomy_funnel"))
+
+    assert %{"label" => "Human touch count", "value" => "run mix symphony.events.backfill", "status" => "gap"} in autonomy["metrics"]
+
+    quality = Enum.find(panels, &(&1["id"] == "quality_rework"))
+
+    assert %{"label" => "PR review quality", "value" => "run mix symphony.events.github", "status" => "gap"} in quality["metrics"]
+
+    refute Enum.any?(quality["metrics"], &(&1["label"] == "Merged PRs"))
+
+    assert "GitHub PR review data not collected yet (run mix symphony.events.github)" in gaps
+    assert "Linear human comment data not collected yet (run mix symphony.events.backfill)" in gaps
 
     # The API analytics block stays summary-shaped: the same catalog that
     # Analytics.summary/0 produces over the live event tail.
@@ -828,13 +842,110 @@ defmodule SymphonyElixir.ExtensionsTest do
     assert html =~ ~r/>\s*Direct\s*</
     assert html =~ ~r/>\s*Partial\s*</
     assert html =~ ~r/>\s*Gap\s*</
-    assert html =~ "GitHub review/CI data is not configured in v1"
+
+    assert html =~
+             "Direct = complete engine-path signal · Partial = engine-visible activity only · Gap = source not collected yet"
+
+    # Metric chips are exception-only: metrics matching their panel status
+    # render no chip, so the all-partial Cost panel has none at all.
+    [cost_panel] = Regex.run(~r{Cost Per Accepted Issue.*?Capacity / Reliability}s, html)
+    refute cost_panel =~ "analytics-metric-status"
+
+    # Gap rows keep their chip and get the muted-italic value treatment.
+    [touch_row] = Regex.run(~r{Human touch count.*?</div>}s, html)
+    assert touch_row =~ "metric-value-gap"
+    assert touch_row =~ "analytics-metric-status"
+    assert touch_row =~ "run mix symphony.events.backfill"
+
+    [pr_row] = Regex.run(~r{PR review quality.*?</div>}s, html)
+    assert pr_row =~ "metric-value-gap"
+    assert pr_row =~ "analytics-metric-status"
+    assert pr_row =~ "run mix symphony.events.github"
+
+    assert html =~ "GitHub PR review data not collected yet (run mix symphony.events.github)"
+    assert html =~ "Linear human comment data not collected yet (run mix symphony.events.backfill)"
 
     assert html =~ "History"
     refute html =~ "History (rollup)"
     refute html =~ "No rollup yet"
     assert html =~ "Date (UTC)"
     assert html =~ "2026-06-15"
+  end
+
+  test "dashboard liveview renders populated collector rows once human/PR events exist" do
+    path = analytics_tmp_path("dashboard-collected-analytics.ndjson")
+    put_analytics_file_env(path)
+
+    :ok =
+      SymphonyElixir.Analytics.record_event(
+        %{event_type: :run_completed, issue_id: "issue-http", issue_identifier: "MT-HTTP", runtime_seconds: 11},
+        path: path,
+        recorded_at: ~U[2026-06-15 10:20:00Z]
+      )
+
+    :ok =
+      SymphonyElixir.Analytics.record_event(
+        %{
+          event_type: :human_comment,
+          event_id: "human-comment-c1",
+          author_name: "Alice",
+          occurred_at: "2026-06-15T10:25:00Z"
+        },
+        path: path,
+        recorded_at: ~U[2026-06-15 10:25:01Z]
+      )
+
+    :ok =
+      SymphonyElixir.Analytics.record_event(
+        %{
+          event_type: :pr_merged,
+          event_id: "github-pr-hongqn/demo#7",
+          repo: "hongqn/demo",
+          pr_number: 7,
+          pr_url: "https://github.com/hongqn/demo/pull/7",
+          issue_identifier: "MT-HTTP",
+          reviews_count: 2,
+          changes_requested: true,
+          approved: true,
+          occurred_at: "2026-06-15T11:00:00Z",
+          source: "github"
+        },
+        path: path,
+        recorded_at: ~U[2026-06-15 11:00:01Z]
+      )
+
+    orchestrator_name = Module.concat(__MODULE__, :DashboardCollectedOrchestrator)
+
+    {:ok, _pid} =
+      StaticOrchestrator.start_link(
+        name: orchestrator_name,
+        snapshot: static_snapshot(),
+        refresh: %{
+          queued: true,
+          coalesced: false,
+          requested_at: DateTime.utc_now(),
+          operations: ["poll"]
+        }
+      )
+
+    start_test_endpoint(orchestrator: orchestrator_name, snapshot_timeout_ms: 50)
+
+    {:ok, _view, html} = live(build_conn(), "/")
+
+    # The collectors ran, so the gap rows are replaced by real metrics and
+    # the collector gaps disappear from the data-quality list.
+    [touch_row] = Regex.run(~r{Human touch count.*?</div>}s, html)
+    assert touch_row =~ ">1</span>"
+    refute touch_row =~ "metric-value-gap"
+
+    assert html =~ "Merged PRs"
+    assert html =~ "Changes-requested rate"
+    assert html =~ "Unreviewed merge share"
+    assert html =~ "100.0%"
+    refute html =~ "PR review quality"
+    refute html =~ "run mix symphony.events.backfill"
+    refute html =~ "run mix symphony.events.github"
+    refute html =~ "data not collected yet"
   end
 
   test "dashboard liveview renders densified history from the analytics event log" do

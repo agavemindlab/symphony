@@ -3,9 +3,9 @@ defmodule SymphonyElixir.PhaseEventScanner do
   Derives Phase Artifact Protocol analytics events from issue comments.
 
   The orchestrator casts `scan/1` at dispatch/completion choke points; the
-  scanner fetches the issue's tracker comments, derives phase events via
-  `SymphonyElixir.PhaseEvents.derive/1`, and appends events it has not emitted
-  before to the analytics store. Event ids are deterministic, so read-side
+  scanner fetches the issue's tracker comments, derives phase and human
+  comment events via `SymphonyElixir.PhaseEvents.derive_all/1`, and appends
+  events it has not emitted before to the analytics store. Event ids are deterministic, so read-side
   dedup covers restarts; the in-process MapSet only avoids duplicate writes
   within one scanner lifetime.
   """
@@ -80,7 +80,7 @@ defmodule SymphonyElixir.PhaseEventScanner do
   defp record_new_events(issue, comments, emitted_event_ids) do
     new_events =
       comments
-      |> PhaseEvents.derive()
+      |> PhaseEvents.derive_all()
       |> Enum.reject(&MapSet.member?(emitted_event_ids, &1.event_id))
 
     Enum.each(new_events, fn event ->

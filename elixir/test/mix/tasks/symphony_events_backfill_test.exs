@@ -39,13 +39,14 @@ defmodule Mix.Tasks.Symphony.Events.BackfillTest do
 
     output = capture_io(fn -> Backfill.run(["--workflow", workflow_path, "--analytics", analytics_path]) end)
 
-    assert output =~ "backfill: 2 issues scanned, 4 events appended (0 already present, 0 fetch failures) -> #{analytics_path}"
+    assert output =~ "backfill: 2 issues scanned, 5 events appended (0 already present, 0 fetch failures) -> #{analytics_path}"
 
     events = read_events(analytics_path)
-    assert length(events) == 4
+    assert length(events) == 5
     assert Enum.all?(events, &(&1["source"] == "backfill"))
 
     assert Enum.map(events, & &1["event_id"]) |> Enum.sort() == [
+             "human-comment-impl-1-human",
              "maestro_review:impl-1-maestro",
              "phase_published:impl-1",
              "phase_published:req-1",
@@ -59,12 +60,18 @@ defmodule Mix.Tasks.Symphony.Events.BackfillTest do
     assert maestro["issue_identifier"] == "DEV-201"
     assert maestro["issue_url"] == "https://linear.app/DEV-201"
 
+    human = Enum.find(events, &(&1["event_type"] == "human_comment"))
+    assert human["event_id"] == "human-comment-impl-1-human"
+    assert human["occurred_at"] == "2026-07-01T11:30:00Z"
+    assert human["author_name"] == "Alice"
+    assert human["issue_identifier"] == "DEV-201"
+
     refute Enum.any?(events, &(&1["issue_id"] in ["issue-unlabeled", "issue-backlog"]))
 
     # Re-running appends nothing: every derived event id is already present.
     rerun_output = capture_io(fn -> Backfill.run(["--workflow", workflow_path, "--analytics", analytics_path]) end)
-    assert rerun_output =~ "backfill: 2 issues scanned, 0 events appended (4 already present, 0 fetch failures)"
-    assert length(read_events(analytics_path)) == 4
+    assert rerun_output =~ "backfill: 2 issues scanned, 0 events appended (5 already present, 0 fetch failures)"
+    assert length(read_events(analytics_path)) == 5
   end
 
   test "dry-run prints per-issue counts and writes nothing" do
@@ -78,11 +85,11 @@ defmodule Mix.Tasks.Symphony.Events.BackfillTest do
     output =
       capture_io(fn -> Backfill.run(["--workflow", workflow_path, "--analytics", analytics_path, "--dry-run"]) end)
 
-    assert output =~ "dry-run DEV-201: 3 new event(s), 0 already present"
+    assert output =~ "dry-run DEV-201: 4 new event(s), 0 already present"
     assert output =~ "dry-run DEV-202: 1 new event(s), 0 already present"
 
     assert output =~
-             "backfill (dry-run): 2 issues scanned, 4 events would be appended (0 already present, 0 fetch failures)"
+             "backfill (dry-run): 2 issues scanned, 5 events would be appended (0 already present, 0 fetch failures)"
 
     refute File.exists?(analytics_path)
   end
@@ -135,7 +142,7 @@ defmodule Mix.Tasks.Symphony.Events.BackfillTest do
 
     Application.put_env(:symphony_elixir, :memory_tracker_comments, %{
       "issue-done" => [
-        comment("impl-1", "## Implementation\n\nPR: https://github.com/x/y/pull/1", created_at: "2026-07-01T10:00:00Z"),
+        comment("impl-1", "## Implementation\n\nPR: https://github.com/x/y/pull/1", created_at: "2026-07-01T10:00:00Z", author_is_bot: true),
         comment(
           "impl-1-maestro",
           "🤖 Maestro 预审核: 本轮交付还需修改。\n\n建议回复方式: request changes\n置信度 7/10",
@@ -143,10 +150,11 @@ defmodule Mix.Tasks.Symphony.Events.BackfillTest do
           created_at: "2026-07-01T11:00:00Z",
           author_is_bot: true
         ),
-        comment("impl-1-rework", "🔧 本轮修改：按反馈调整。", parent_id: "impl-1", created_at: "2026-07-01T12:00:00Z")
+        comment("impl-1-human", "同意 Maestro，请修改。", parent_id: "impl-1", created_at: "2026-07-01T11:30:00Z", author_name: "Alice"),
+        comment("impl-1-rework", "🔧 本轮修改：按反馈调整。", parent_id: "impl-1", created_at: "2026-07-01T12:00:00Z", author_is_bot: true)
       ],
       "issue-active" => [
-        comment("req-1", "## Requirements\n\n目标", created_at: "2026-07-01T09:00:00Z")
+        comment("req-1", "## Requirements\n\n目标", created_at: "2026-07-01T09:00:00Z", author_is_bot: true)
       ],
       "issue-unlabeled" => [
         comment("skip-1", "## Design\n\n不应出现", created_at: "2026-07-01T09:00:00Z")

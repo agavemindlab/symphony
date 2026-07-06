@@ -8,7 +8,8 @@ defmodule Mix.Tasks.Symphony.Events.Backfill do
   the Maestro eval corpus does not have to wait for live accumulation. The
   running scanner only covers actively-dispatched issues; this task sweeps
   every issue in the configured active + terminal states, derives Phase
-  Artifact Protocol events from the full comment history, and appends only
+  Artifact Protocol events plus `human_comment` events (one per non-bot
+  comment) from the full comment history, and appends only
   the events whose `event_id` is not already present in the analytics file.
 
       mix symphony.events.backfill --workflow PATH [--analytics PATH] [--dry-run]
@@ -142,7 +143,7 @@ defmodule Mix.Tasks.Symphony.Events.Backfill do
   defp record_issue_events(issue, comments, counts, existing_event_ids, analytics_path, dry_run?) do
     {new_events, present_events} =
       comments
-      |> PhaseEvents.derive()
+      |> PhaseEvents.derive_all()
       |> Enum.split_with(&(not MapSet.member?(existing_event_ids, &1.event_id)))
 
     unless dry_run? do

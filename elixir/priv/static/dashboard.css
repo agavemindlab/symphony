@@ -543,6 +543,19 @@ button.secondary:hover {
   font-weight: 700;
 }
 
+.metric-value-gap {
+  color: var(--muted);
+  font-style: italic;
+  font-weight: 500;
+}
+
+.analytics-legend {
+  margin: 0.4rem 0 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
 .quality-list {
   display: grid;
   gap: 0.35rem;

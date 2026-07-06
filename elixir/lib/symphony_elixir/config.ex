@@ -111,6 +111,27 @@ defmodule SymphonyElixir.Config do
     end
   end
 
+  @doc """
+  GitHub repositories (`OWNER/NAME`) whose merged PRs feed the analytics
+  store via `mix symphony.events.github`. Resolution order: the
+  `:github_repos` app env list override, then the comma-separated
+  `SYMPHONY_GITHUB_REPOS` environment variable, then `[]`.
+  """
+  @spec github_repos() :: [String.t()]
+  def github_repos do
+    case Application.get_env(:symphony_elixir, :github_repos) do
+      repos when is_list(repos) ->
+        repos
+
+      _unset ->
+        "SYMPHONY_GITHUB_REPOS"
+        |> System.get_env("")
+        |> String.split(",")
+        |> Enum.map(&String.trim/1)
+        |> Enum.reject(&(&1 == ""))
+    end
+  end
+
   @spec validate!() :: :ok | {:error, term()}
   def validate! do
     with {:ok, settings} <- settings() do

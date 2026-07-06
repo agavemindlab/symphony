@@ -66,7 +66,7 @@ defmodule SymphonyElixir.Analytics do
   @spec summary(keyword()) :: map()
   def summary(opts \\ []) do
     %{events: events, warnings: warnings, truncated?: truncated?} = read_events(opts)
-    build_summary(events, warnings, truncated?, nil)
+    build_summary(events, warnings, truncated?, nil, store_presence(events))
   end
 
   @doc """
@@ -92,7 +92,7 @@ defmodule SymphonyElixir.Analytics do
 
     %{
       window: window,
-      summary: build_summary(events, warnings, false, window_token_totals(per_day)),
+      summary: build_summary(events, warnings, false, window_token_totals(per_day), store_presence(history.events)),
       history: %{per_day: per_day, north_star: AnalyticsRollup.north_star(%{per_day: per_day})}
     }
   end
@@ -123,17 +123,27 @@ defmodule SymphonyElixir.Analytics do
     }
   end
 
-  defp build_summary(events, warnings, truncated?, token_totals_override) do
+  # `presence` reflects the FULL store (window_report threads the complete
+  # history through), so gap rows only appear when a collector never ran —
+  # a zero inside one window still renders as a real 0.
+  defp build_summary(events, warnings, truncated?, token_totals_override, presence) do
     metrics = runtime_metrics(events, token_totals_override)
 
     %{
       event_sample_count: length(events),
       window_started_at: window_timestamp(List.first(events)),
       window_ended_at: window_timestamp(List.last(events)),
-      panels: panels(metrics),
-      data_quality: data_quality(warnings, truncated?),
+      panels: panels(metrics, presence),
+      data_quality: data_quality(warnings, truncated?, presence),
       warnings: warnings,
       truncated?: truncated?
+    }
+  end
+
+  defp store_presence(events) do
+    %{
+      human_comment?: Enum.any?(events, &(Map.get(&1, "event_type") == "human_comment")),
+      pr_merged?: Enum.any?(events, &(Map.get(&1, "event_type") == "pr_merged"))
     }
   end
 
@@ -380,8 +390,13 @@ defmodule SymphonyElixir.Analytics do
     events = dedupe_events_by_event_id(events)
     token_totals = token_totals_override || token_totals(events)
     maestro_metrics = maestro_metrics(events)
+    merged_prs = Enum.filter(events, &(Map.get(&1, "event_type") == "pr_merged"))
 
     %{
+      human_comment_count: count_events(events, "human_comment"),
+      pr_merged_count: length(merged_prs),
+      pr_changes_requested_count: Enum.count(merged_prs, &(Map.get(&1, "changes_requested") == true)),
+      pr_unreviewed_count: Enum.count(merged_prs, &(integer_value(Map.get(&1, "reviews_count")) == 0)),
       run_count: count_events(events, "run_started"),
       phase_published_count: count_events(events, "phase_published"),
       phase_approved_count: count_events(events, "phase_approved"),
@@ -405,51 +420,46 @@ defmodule SymphonyElixir.Analytics do
     }
   end
 
-  defp panels(metrics) do
+  defp panels(metrics, presence) do
     [
-      %{
-        id: "delivery_cycle",
-        title: "Delivery Cycle",
-        question: "Can accepted issues move faster with the current persisted signals?",
-        status: "partial",
-        metrics: [
+      panel(
+        "delivery_cycle",
+        "Delivery Cycle",
+        "Can accepted issues move faster with the current persisted signals?",
+        [
           metric("Runtime-backed runs", metrics.run_count, "partial"),
           metric("Completed runs", metrics.completed_count, "partial")
         ]
-      },
-      %{
-        id: "autonomy_funnel",
-        title: "Autonomy Funnel",
-        question: "How often does Symphony advance without human intervention?",
-        status: "partial",
-        metrics: [
+      ),
+      panel(
+        "autonomy_funnel",
+        "Autonomy Funnel",
+        "How often does Symphony advance without human intervention?",
+        [
           metric("Phases published", metrics.phase_published_count, "direct"),
           metric("Human approvals", metrics.phase_approved_count, "direct"),
           metric("Auto-advances", metrics.phase_auto_advanced_count, "direct"),
           metric("Auto-advance rate", auto_advance_rate(metrics), "direct"),
           metric("Rework rounds", rework_rounds(metrics), "direct"),
-          metric("Human touch count", "Linear comments required", "gap")
+          human_touch_metric(metrics, presence)
         ]
-      },
-      %{
-        id: "quality_rework",
-        title: "Quality / Rework",
-        question: "How much accepted work comes back as rework or PR/CI failure?",
-        status: "partial",
-        metrics: [
+      ),
+      panel(
+        "quality_rework",
+        "Quality / Rework",
+        "How much accepted work comes back as rework or PR/CI failure?",
+        [
           metric("Rework rate", rework_rate(metrics), "partial"),
           metric("Maestro reviews", metrics.maestro_review_count, "direct"),
           metric("Maestro agreement rate", maestro_agreement_rate(metrics), "direct"),
-          metric("Maestro overridden", metrics.maestro_overridden, "direct"),
-          metric("PR review quality", "GitHub review/CI data gap", "gap")
-        ]
-      },
-      %{
-        id: "cost_per_accepted_issue",
-        title: "Cost Per Accepted Issue",
-        question: "What token and runtime cost is attached to accepted issues?",
-        status: "partial",
-        metrics: [
+          metric("Maestro overridden", metrics.maestro_overridden, "direct")
+        ] ++ pr_review_metrics(metrics, presence)
+      ),
+      panel(
+        "cost_per_accepted_issue",
+        "Cost Per Accepted Issue",
+        "What token and runtime cost is attached to accepted issues?",
+        [
           metric("Runtime seconds", metrics.runtime_seconds, "partial"),
           metric("Total tokens", metrics.total_tokens, "partial"),
           metric("Input tokens", metrics.input_tokens, "partial"),
@@ -457,15 +467,49 @@ defmodule SymphonyElixir.Analytics do
           metric("Cached input tokens", metrics.cached_input_tokens, "partial"),
           metric("Cache hit share", cache_hit_share(metrics.cached_input_tokens, metrics.input_tokens), "partial")
         ]
-      },
-      %{
-        id: "capacity_reliability",
-        title: "Capacity / Reliability",
-        question: "Where do retries, blockers, or capacity pressure stall throughput?",
-        status: "direct",
-        metrics: capacity_metrics(metrics)
-      }
+      ),
+      panel(
+        "capacity_reliability",
+        "Capacity / Reliability",
+        "Where do retries, blockers, or capacity pressure stall throughput?",
+        capacity_metrics(metrics)
+      )
     ]
+  end
+
+  defp panel(id, title, question, metrics) do
+    %{id: id, title: title, question: question, status: panel_status(metrics), metrics: metrics}
+  end
+
+  # Panel status is the most common status among its metrics; ties break
+  # toward the weakest signal (gap < partial < direct).
+  @status_strength %{"gap" => 0, "partial" => 1, "direct" => 2}
+
+  defp panel_status(metrics) do
+    metrics
+    |> Enum.frequencies_by(& &1.status)
+    |> Enum.max_by(fn {status, count} -> {count, -Map.fetch!(@status_strength, status)} end)
+    |> elem(0)
+  end
+
+  defp human_touch_metric(metrics, %{human_comment?: true}) do
+    metric("Human touch count", metrics.human_comment_count, "partial")
+  end
+
+  defp human_touch_metric(_metrics, _presence) do
+    metric("Human touch count", "run mix symphony.events.backfill", "gap")
+  end
+
+  defp pr_review_metrics(metrics, %{pr_merged?: true}) do
+    [
+      metric("Merged PRs", metrics.pr_merged_count, "partial"),
+      metric("Changes-requested rate", percent_share(metrics.pr_changes_requested_count, metrics.pr_merged_count), "partial"),
+      metric("Unreviewed merge share", percent_share(metrics.pr_unreviewed_count, metrics.pr_merged_count), "partial")
+    ]
+  end
+
+  defp pr_review_metrics(_metrics, _presence) do
+    [metric("PR review quality", "run mix symphony.events.github", "gap")]
   end
 
   defp metric(label, value, status), do: %{label: label, value: value, status: status}
@@ -604,12 +648,14 @@ defmodule SymphonyElixir.Analytics do
     ]
   end
 
-  defp data_quality(warnings, truncated?) do
+  defp data_quality(warnings, truncated?, presence) do
     gaps =
-      [
-        "GitHub review/CI data is not configured in v1",
-        "Linear phase metrics require collector availability"
-      ] ++ if(truncated?, do: ["Analytics event file was truncated to the latest window"], else: [])
+      if(presence.pr_merged?, do: [], else: ["GitHub PR review data not collected yet (run mix symphony.events.github)"]) ++
+        if(presence.human_comment?,
+          do: [],
+          else: ["Linear human comment data not collected yet (run mix symphony.events.backfill)"]
+        ) ++
+        if(truncated?, do: ["Analytics event file was truncated to the latest window"], else: [])
 
     %{
       direct: ["Symphony runtime event store"],

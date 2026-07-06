@@ -132,7 +132,10 @@ defmodule SymphonyElixir.AnalyticsTest do
     assert %{label: "Cached input tokens", value: 4, status: "partial"} in cost_metrics
     assert %{label: "Cache hit share", value: "40.0%", status: "partial"} in cost_metrics
 
-    assert %{status: "partial", metrics: autonomy_metrics} =
+    # Panel status is derived from member metric statuses: with the two gap
+    # rows in place both funnel panels still lean direct (5 direct vs 1 gap,
+    # 3 direct vs 1 partial + 1 gap).
+    assert %{status: "direct", metrics: autonomy_metrics} =
              panel(summary, "autonomy_funnel")
 
     assert %{label: "Phases published", value: 1, status: "direct"} in autonomy_metrics
@@ -140,18 +143,18 @@ defmodule SymphonyElixir.AnalyticsTest do
     assert %{label: "Auto-advances", value: 0, status: "direct"} in autonomy_metrics
     assert %{label: "Auto-advance rate", value: "n/a", status: "direct"} in autonomy_metrics
     assert %{label: "Rework rounds", value: 0, status: "direct"} in autonomy_metrics
-    assert %{label: "Human touch count", value: "Linear comments required", status: "gap"} in autonomy_metrics
+    assert %{label: "Human touch count", value: "run mix symphony.events.backfill", status: "gap"} in autonomy_metrics
 
-    assert %{status: "partial", metrics: quality_metrics} =
+    assert %{status: "direct", metrics: quality_metrics} =
              panel(summary, "quality_rework")
 
     assert %{label: "Rework rate", value: "0.0%", status: "partial"} in quality_metrics
     assert %{label: "Maestro reviews", value: 0, status: "direct"} in quality_metrics
     assert %{label: "Maestro agreement rate", value: "n/a", status: "direct"} in quality_metrics
     assert %{label: "Maestro overridden", value: 0, status: "direct"} in quality_metrics
-    assert %{label: "PR review quality", value: "GitHub review/CI data gap", status: "gap"} in quality_metrics
+    assert %{label: "PR review quality", value: "run mix symphony.events.github", status: "gap"} in quality_metrics
 
-    assert %{status: "direct", metrics: capacity_metrics} =
+    assert %{status: "partial", metrics: capacity_metrics} =
              panel(summary, "capacity_reliability")
 
     assert %{label: "Retry events", value: 1, status: "partial"} in capacity_metrics
@@ -159,7 +162,124 @@ defmodule SymphonyElixir.AnalyticsTest do
     assert %{label: "Hook failures", value: 0, status: "direct"} in capacity_metrics
     assert %{label: "Effective capacity", value: 12, status: "partial"} in capacity_metrics
 
-    assert "GitHub review/CI data is not configured in v1" in summary.data_quality.gaps
+    assert "GitHub PR review data not collected yet (run mix symphony.events.github)" in summary.data_quality.gaps
+    assert "Linear human comment data not collected yet (run mix symphony.events.backfill)" in summary.data_quality.gaps
+  end
+
+  test "pr_merged and human_comment events replace the gap rows with real metrics" do
+    path = tmp_path("collected.ndjson")
+
+    [
+      %{
+        event_type: :human_comment,
+        event_id: "human-comment-c1",
+        author_name: "Alice",
+        occurred_at: "2026-06-15T10:00:00Z",
+        recorded_at: "2026-06-15T10:00:01Z"
+      },
+      %{
+        event_type: :human_comment,
+        event_id: "human-comment-c2",
+        author_name: "Bob",
+        occurred_at: "2026-06-15T10:05:00Z",
+        recorded_at: "2026-06-15T10:05:01Z"
+      },
+      %{
+        event_type: :pr_merged,
+        event_id: "github-pr-hongqn/demo#7",
+        repo: "hongqn/demo",
+        pr_number: 7,
+        pr_url: "https://github.com/hongqn/demo/pull/7",
+        issue_identifier: "DEV-33",
+        reviews_count: 2,
+        changes_requested: false,
+        approved: true,
+        occurred_at: "2026-06-15T11:00:00Z",
+        source: "github"
+      },
+      %{
+        event_type: :pr_merged,
+        event_id: "github-pr-hongqn/demo#8",
+        repo: "hongqn/demo",
+        pr_number: 8,
+        pr_url: "https://github.com/hongqn/demo/pull/8",
+        issue_identifier: nil,
+        reviews_count: 0,
+        changes_requested: false,
+        approved: false,
+        occurred_at: "2026-06-15T11:10:00Z",
+        source: "github"
+      },
+      %{
+        event_type: :pr_merged,
+        event_id: "github-pr-hongqn/demo#9",
+        repo: "hongqn/demo",
+        pr_number: 9,
+        pr_url: "https://github.com/hongqn/demo/pull/9",
+        issue_identifier: "DEV-44",
+        reviews_count: 3,
+        changes_requested: true,
+        approved: true,
+        occurred_at: "2026-06-15T11:20:00Z",
+        source: "github"
+      }
+    ]
+    |> Enum.each(&Analytics.record_event(&1, path: path))
+
+    summary = Analytics.summary(path: path)
+
+    assert %{status: "direct", metrics: autonomy_metrics} = panel(summary, "autonomy_funnel")
+    assert %{label: "Human touch count", value: 2, status: "partial"} in autonomy_metrics
+    refute Enum.any?(autonomy_metrics, &(&1.status == "gap"))
+
+    assert %{status: "partial", metrics: quality_metrics} = panel(summary, "quality_rework")
+    assert %{label: "Merged PRs", value: 3, status: "partial"} in quality_metrics
+    assert %{label: "Changes-requested rate", value: "33.3%", status: "partial"} in quality_metrics
+    assert %{label: "Unreviewed merge share", value: "33.3%", status: "partial"} in quality_metrics
+    refute Enum.any?(quality_metrics, &(&1.label == "PR review quality"))
+
+    refute "GitHub PR review data not collected yet (run mix symphony.events.github)" in summary.data_quality.gaps
+    refute "Linear human comment data not collected yet (run mix symphony.events.backfill)" in summary.data_quality.gaps
+  end
+
+  test "collected-but-empty windows show real zeros instead of gap rows" do
+    now = ~U[2026-06-15 12:00:00Z]
+    live = tmp_path("collected-window.ndjson")
+
+    # Both collectors ran, but everything they found is outside the h24 window.
+    [
+      %{
+        event_type: :human_comment,
+        event_id: "human-comment-old",
+        author_name: "Alice",
+        occurred_at: "2026-05-10T10:00:00Z",
+        recorded_at: "2026-05-10T10:00:01Z"
+      },
+      %{
+        event_type: :pr_merged,
+        event_id: "github-pr-hongqn/demo#1",
+        repo: "hongqn/demo",
+        pr_number: 1,
+        reviews_count: 1,
+        changes_requested: false,
+        approved: true,
+        occurred_at: "2026-05-10T11:00:00Z",
+        recorded_at: "2026-05-10T11:00:01Z"
+      }
+    ]
+    |> Enum.each(&Analytics.record_event(&1, path: live))
+
+    summary = Analytics.window_report(:h24, path: live, now: now).summary
+
+    %{metrics: autonomy_metrics} = panel(summary, "autonomy_funnel")
+    assert %{label: "Human touch count", value: 0, status: "partial"} in autonomy_metrics
+
+    %{metrics: quality_metrics} = panel(summary, "quality_rework")
+    assert %{label: "Merged PRs", value: 0, status: "partial"} in quality_metrics
+    assert %{label: "Changes-requested rate", value: "n/a", status: "partial"} in quality_metrics
+    assert %{label: "Unreviewed merge share", value: "n/a", status: "partial"} in quality_metrics
+
+    assert summary.data_quality.gaps == []
   end
 
   test "window span is nil when the event window is empty" do
@@ -235,7 +355,7 @@ defmodule SymphonyElixir.AnalyticsTest do
     ]
     |> Enum.each(&Analytics.record_event(&1, path: path))
 
-    %{status: "direct", metrics: capacity_metrics} =
+    %{status: "partial", metrics: capacity_metrics} =
       [path: path]
       |> Analytics.summary()
       |> panel("capacity_reliability")
@@ -437,7 +557,7 @@ defmodule SymphonyElixir.AnalyticsTest do
 
     summary = Analytics.summary(path: path)
 
-    assert %{status: "partial", metrics: quality_metrics} = panel(summary, "quality_rework")
+    assert %{status: "direct", metrics: quality_metrics} = panel(summary, "quality_rework")
 
     # 8 unique reviews; agreed = rc-agree + design-agree + impl-agree + fallback (4),
     # overridden = rc-override (1), pending = pending + unparseable (2), excluded = clarify.
