@@ -174,100 +174,27 @@ defmodule SymphonyElixir.AnalyticsRollupTest do
            ]
   end
 
-  test "read_rollup_summary returns nil for missing, corrupt, or mis-shaped rollup.json" do
-    dir = tmp_dir!()
-    path = Path.join(dir, "rollup.json")
+  test "rollup buckets days by occurred_at when present, falling back to recorded_at" do
+    events = [
+      event("phase_published", "2026-07-04T09:00:00Z", %{
+        "issue_id" => "issue-1",
+        "issue_identifier" => "DEV-1",
+        "occurred_at" => "2026-06-02T10:00:00Z"
+      }),
+      event("phase_published", "2026-07-04T09:01:00Z", %{"issue_id" => "issue-2", "issue_identifier" => "DEV-2"}),
+      event("phase_published", "2026-07-04T09:02:00Z", %{
+        "issue_id" => "issue-3",
+        "issue_identifier" => "DEV-3",
+        "occurred_at" => "not-a-date"
+      })
+    ]
 
-    assert AnalyticsRollup.read_rollup_summary(path) == nil
+    rollup = AnalyticsRollup.rollup(events)
 
-    File.write!(path, ~s({"generated_at":"2026-06-16T00:00:00Z","north_star":[{"date":"20))
-    assert AnalyticsRollup.read_rollup_summary(path) == nil
-
-    File.write!(path, ~s({"totals":{"days":3}}))
-    assert AnalyticsRollup.read_rollup_summary(path) == nil
-
-    File.write!(path, ~s({"north_star":"not-a-list"}))
-    assert AnalyticsRollup.read_rollup_summary(path) == nil
-
-    File.write!(path, ~s({"north_star":[["not","a","map"]]}))
-    assert AnalyticsRollup.read_rollup_summary(path) == nil
-  end
-
-  test "read_rollup_summary trims a valid rollup.json to the last 14 north-star days with the file mtime" do
-    dir = tmp_dir!()
-    path = Path.join(dir, "rollup.json")
-
-    north_star =
-      for day <- 1..16 do
-        date = "2026-06-#{String.pad_leading(Integer.to_string(day), 2, "0")}"
-
-        %{
-          date: date,
-          cycle: %{issues_first_published: day, runs_completed: day + 1},
-          rework_rate: "#{day}.0%",
-          cost_per_issue: day * 10
-        }
-      end
-
-    File.write!(path, Jason.encode!(%{generated_at: "ignored-in-favor-of-mtime", totals: %{days: 16}, north_star: north_star}))
-
-    assert %{generated_at: generated_at, days: 16, last_14_north_star: last_14} = AnalyticsRollup.read_rollup_summary(path)
-    assert {:ok, mtime, 0} = DateTime.from_iso8601(generated_at)
-    assert_in_delta DateTime.to_unix(mtime), System.os_time(:second), 60
-    assert length(last_14) == 14
-
-    assert List.first(last_14) == %{
-             date: "2026-06-03",
-             cycle: %{issues_first_published: 3, runs_completed: 4},
-             rework_rate: "3.0%",
-             cost_per_issue: 30
-           }
-
-    assert List.last(last_14) == %{
-             date: "2026-06-16",
-             cycle: %{issues_first_published: 16, runs_completed: 17},
-             rework_rate: "16.0%",
-             cost_per_issue: 160
-           }
-  end
-
-  test "read_rollup_summary/0 reads the :rollup_file app env path" do
-    dir = tmp_dir!()
-    path = Path.join(dir, "rollup.json")
-    File.write!(path, Jason.encode!(%{north_star: [%{date: "2026-06-01", cycle: %{issues_first_published: 0, runs_completed: 0}, rework_rate: "n/a", cost_per_issue: "n/a"}]}))
-
-    original_env = Application.fetch_env(:symphony_elixir, :rollup_file)
-    Application.put_env(:symphony_elixir, :rollup_file, path)
-
-    try do
-      assert %{days: 1, last_14_north_star: [%{date: "2026-06-01"} = entry]} = AnalyticsRollup.read_rollup_summary()
-      assert entry.cost_per_issue == "n/a"
-    after
-      restore_app_env(:rollup_file, original_env)
-    end
-  end
-
-  test "read_rollup_summary/0 defaults to rollup/rollup.json next to the analytics file" do
-    dir = tmp_dir!()
-    rollup_path = Path.join(dir, "rollup/rollup.json")
-    File.mkdir_p!(Path.dirname(rollup_path))
-
-    File.write!(
-      rollup_path,
-      Jason.encode!(%{north_star: [%{date: "2026-06-01", cycle: %{issues_first_published: 0, runs_completed: 0}, rework_rate: "n/a", cost_per_issue: "n/a"}]})
-    )
-
-    original_analytics = Application.fetch_env(:symphony_elixir, :analytics_file)
-    original_rollup = Application.fetch_env(:symphony_elixir, :rollup_file)
-    Application.put_env(:symphony_elixir, :analytics_file, Path.join(dir, "analytics.ndjson"))
-    Application.delete_env(:symphony_elixir, :rollup_file)
-
-    try do
-      assert %{days: 1, last_14_north_star: [%{date: "2026-06-01"}]} = AnalyticsRollup.read_rollup_summary()
-    after
-      restore_app_env(:analytics_file, original_analytics)
-      restore_app_env(:rollup_file, original_rollup)
-    end
+    assert [
+             %{date: "2026-06-02", phase_published: 1, issues_first_published: 1},
+             %{date: "2026-07-04", phase_published: 2, issues_first_published: 2}
+           ] = rollup.per_day
   end
 
   test "mix task writes rollup.json and report.md and prints a one-line summary" do

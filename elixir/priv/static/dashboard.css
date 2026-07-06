@@ -504,11 +504,6 @@ button.secondary:hover {
   color: var(--danger);
 }
 
-.analytics-window {
-  color: var(--muted);
-  font-weight: 500;
-}
-
 .analytics-metrics {
   display: grid;
   gap: 0.52rem;
@@ -557,22 +552,117 @@ button.secondary:hover {
   font-size: 0.9rem;
 }
 
-.rollup-meta {
+.history-note {
   margin: 1rem 0 0;
+  font-size: 0.86rem;
 }
 
-.rollup-age {
+.section-tools {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.window-selector {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--card-muted);
+}
+
+.window-button {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 0.3rem 0.7rem;
+  cursor: pointer;
+}
+
+.window-button:hover {
+  color: var(--ink);
+}
+
+.window-button-active {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+
+.instance-chip {
   display: inline-flex;
   align-items: center;
+  gap: 0.4rem;
+  padding: 0.14rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--card-muted);
+  color: var(--ink);
+  font-size: 0.8rem;
+  font-weight: 600;
+  white-space: nowrap;
 }
 
-.rollup-age-stale {
-  padding: 0.12rem 0.5rem;
+.instance-chip-header {
+  margin: 0.55rem 0 0;
+}
+
+.instance-name {
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.mode-badge {
+  padding: 0.08rem 0.45rem;
   border-radius: 999px;
   border: 1px solid var(--warning-line);
   background: var(--warning-soft);
   color: var(--warning-ink);
+  font-size: 0.72rem;
   font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.instance-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.85rem;
+}
+
+.instance-card {
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--card);
+  padding: 0.85rem 1rem;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.instance-card-unreachable {
+  background: var(--card-muted);
+  color: var(--muted);
+  border-style: dashed;
+}
+
+.instance-card-head {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.instance-card-counts {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.instance-card-meta,
+.instance-card-error {
+  margin: 0;
+  font-size: 0.82rem;
 }
 
 .sparkline-group {

@@ -3,7 +3,7 @@ defmodule SymphonyElixirWeb.Presenter do
   Shared projections for the observability API and dashboard.
   """
 
-  alias SymphonyElixir.{Analytics, AnalyticsRollup, Config, Orchestrator, StatusDashboard}
+  alias SymphonyElixir.{AnalyticsCache, Config, HttpServer, Orchestrator, StatusDashboard, Workflow}
 
   @spec state_payload(GenServer.name(), timeout()) :: map()
   def state_payload(orchestrator, snapshot_timeout_ms) do
@@ -13,6 +13,7 @@ defmodule SymphonyElixirWeb.Presenter do
       %{} = snapshot ->
         %{
           generated_at: generated_at,
+          instance: instance_payload(),
           counts: %{
             running: length(snapshot.running),
             retrying: length(snapshot.retrying),
@@ -23,16 +24,42 @@ defmodule SymphonyElixirWeb.Presenter do
           blocked: Enum.map(Map.get(snapshot, :blocked, []), &blocked_entry_payload/1),
           codex_totals: snapshot.codex_totals,
           rate_limits: snapshot.rate_limits,
-          analytics: Analytics.summary(),
-          rollup: AnalyticsRollup.read_rollup_summary()
+          analytics: AnalyticsCache.report(:all).summary
         }
 
       :timeout ->
-        %{generated_at: generated_at, error: %{code: "snapshot_timeout", message: "Snapshot timed out"}}
+        %{
+          generated_at: generated_at,
+          instance: instance_payload(),
+          error: %{code: "snapshot_timeout", message: "Snapshot timed out"}
+        }
 
       :unavailable ->
-        %{generated_at: generated_at, error: %{code: "snapshot_unavailable", message: "Snapshot unavailable"}}
+        %{
+          generated_at: generated_at,
+          instance: instance_payload(),
+          error: %{code: "snapshot_unavailable", message: "Snapshot unavailable"}
+        }
     end
+  end
+
+  @doc """
+  Identity of this Symphony instance for multi-instance dashboards.
+
+  `port` comes from the live endpoint (`HttpServer.bound_port/0`, nil-safe)
+  rather than config — this path must never raise, even on a broken
+  WORKFLOW.md.
+  """
+  @spec instance_payload() :: %{name: String.t(), mode: String.t(), port: non_neg_integer() | nil}
+  def instance_payload do
+    workflow_path = Workflow.workflow_file_path()
+    mode = if String.starts_with?(Path.basename(workflow_path), "MAESTRO"), do: "maestro", else: "main"
+
+    %{
+      name: workflow_path |> Path.dirname() |> Path.basename(),
+      mode: mode,
+      port: HttpServer.bound_port()
+    }
   end
 
   @spec issue_payload(String.t(), GenServer.name(), timeout()) :: {:ok, map()} | {:error, :issue_not_found}

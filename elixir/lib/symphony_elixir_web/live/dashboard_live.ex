@@ -5,9 +5,12 @@ defmodule SymphonyElixirWeb.DashboardLive do
 
   use Phoenix.LiveView, layout: {SymphonyElixirWeb.Layouts, :app}
 
-  alias SymphonyElixirWeb.{Endpoint, ObservabilityPubSub, Presenter}
+  alias SymphonyElixir.{AnalyticsCache, Config}
+  alias SymphonyElixirWeb.{Endpoint, ObservabilityPubSub, PeerStatus, Presenter}
   @runtime_tick_ms 1_000
   @snapshot_retry_max_ms 30_000
+  @peer_poll_every_ticks 5
+  @analytics_windows %{"h24" => :h24, "d7" => :d7, "d30" => :d30, "all" => :all}
 
   @impl true
   def mount(_params, _session, socket) do
@@ -20,7 +23,12 @@ defmodule SymphonyElixirWeb.DashboardLive do
       socket
       |> assign(:snapshot_retry_ref, nil)
       |> assign(:snapshot_retry_delay_ms, nil)
+      |> assign(:analytics_window, :all)
+      |> assign(:tick_count, 0)
+      |> assign(:peer_urls, Config.peer_dashboards())
+      |> assign(:peers, %{})
       |> load_snapshot()
+      |> poll_peers()
 
     {:ok, socket}
   end
@@ -28,7 +36,15 @@ defmodule SymphonyElixirWeb.DashboardLive do
   @impl true
   def handle_info(:runtime_tick, socket) do
     schedule_runtime_tick()
-    {:noreply, assign(socket, :now, DateTime.utc_now())}
+    tick_count = socket.assigns.tick_count + 1
+
+    socket =
+      socket
+      |> assign(:tick_count, tick_count)
+      |> assign(:now, DateTime.utc_now())
+
+    socket = if rem(tick_count, @peer_poll_every_ticks) == 0, do: poll_peers(socket), else: socket
+    {:noreply, socket}
   end
 
   @impl true
@@ -42,7 +58,43 @@ defmodule SymphonyElixirWeb.DashboardLive do
   end
 
   @impl true
+  def handle_event("analytics_window", %{"window" => window}, socket) do
+    case Map.fetch(@analytics_windows, window) do
+      {:ok, window_atom} ->
+        socket =
+          socket
+          |> assign(:analytics_window, window_atom)
+          |> assign(:report, AnalyticsCache.report(window_atom))
+
+        {:noreply, socket}
+
+      :error ->
+        {:noreply, socket}
+    end
+  end
+
+  @impl true
+  def handle_async({:peer_fetch, url}, result, socket) do
+    peer_result =
+      case result do
+        {:ok, fetch_result} -> fetch_result
+        {:exit, reason} -> {:error, {:exit, reason}}
+      end
+
+    socket = update(socket, :peers, &Map.put(&1, url, peer_result))
+    {:noreply, assign_page_title(socket)}
+  end
+
+  @impl true
   def render(assigns) do
+    peer_payloads = peer_payloads(assigns.peer_urls, assigns.peers)
+
+    assigns =
+      assigns
+      |> assign(:multi?, assigns.peer_urls != [])
+      |> assign(:peer_payloads, peer_payloads)
+      |> assign(:combined, combined_counts(assigns.payload, peer_payloads))
+
     ~H"""
     <section class="dashboard-shell">
       <header class="hero-card">
@@ -53,6 +105,10 @@ defmodule SymphonyElixirWeb.DashboardLive do
           <h1 class="hero-title">
             Operations Dashboard
           </h1>
+          <p class="instance-chip instance-chip-header">
+            <span class="instance-name"><%= instance_label(instance_of(@payload)) %></span>
+            <span :if={instance_of(@payload).mode == "maestro"} class="mode-badge">maestro</span>
+          </p>
         </div>
 
         <div class="status-cluster">
@@ -85,57 +141,45 @@ defmodule SymphonyElixirWeb.DashboardLive do
           <p class="error-copy">Retrying automatically…</p>
         </section>
       <% else %>
+        <section :if={@multi?} class="instance-strip">
+          <.instance_card :for={card <- instance_cards(@payload, @peer_urls, @peers, @now)} card={card} />
+        </section>
+
         <section class="metric-grid">
           <article class="metric-card">
             <p class="metric-label">Running</p>
-            <p class="metric-value numeric"><%= @payload.counts.running %></p>
+            <p class="metric-value numeric"><%= @combined.running %></p>
             <p class="metric-detail">Active issue sessions in the current runtime.</p>
           </article>
 
           <article class="metric-card">
             <p class="metric-label">Retrying</p>
-            <p class="metric-value numeric"><%= @payload.counts.retrying %></p>
+            <p class="metric-value numeric"><%= @combined.retrying %></p>
             <p class="metric-detail">Issues waiting for the next retry window.</p>
           </article>
 
           <article class="metric-card">
             <p class="metric-label">Blocked</p>
-            <p class="metric-value numeric"><%= @payload.counts.blocked %></p>
+            <p class="metric-value numeric"><%= @combined.blocked %></p>
             <p class="metric-detail">Issues paused for operator input or approval.</p>
           </article>
 
           <article class="metric-card">
             <p class="metric-label">Total tokens</p>
-            <p class="metric-value numeric"><%= format_int(@payload.codex_totals.total_tokens) %></p>
+            <p class="metric-value numeric"><%= format_int(combined_tokens(@payload, @peer_payloads).total) %></p>
             <p class="metric-detail numeric">
-              In <%= format_int(@payload.codex_totals.input_tokens) %> / Out <%= format_int(@payload.codex_totals.output_tokens) %>
+              In <%= format_int(combined_tokens(@payload, @peer_payloads).input) %> / Out <%= format_int(combined_tokens(@payload, @peer_payloads).output) %>
             </p>
+            <p class="metric-detail"><%= since_start_text(@multi?) %></p>
           </article>
 
           <article class="metric-card">
             <p class="metric-label">Runtime</p>
-            <p class="metric-value numeric"><%= format_runtime_seconds(total_runtime_seconds(@payload, @now)) %></p>
-            <p class="metric-detail">Total Codex runtime across completed and active sessions.</p>
+            <p class="metric-value numeric"><%= format_runtime_seconds(combined_runtime_seconds(@payload, @peer_payloads, @now)) %></p>
+            <p class="metric-detail">Total Codex runtime across completed and active sessions. <%= since_start_text(@multi?) %></p>
           </article>
 
-          <article class="metric-card rate-limit-card">
-            <p class="metric-label">Rate limits</p>
-            <%= if rate_limit_windows(@payload.rate_limits) == [] and is_nil(rate_limit_credits_text(@payload.rate_limits)) do %>
-              <p class="metric-detail">No rate-limit snapshot yet.</p>
-            <% else %>
-              <div class="rate-limit-rows">
-                <.rate_limit_window
-                  :for={{label, bucket} <- rate_limit_windows(@payload.rate_limits)}
-                  label={label}
-                  bucket={bucket}
-                  now={@now}
-                />
-              </div>
-              <p :if={rate_limit_credits_text(@payload.rate_limits)} class="metric-detail numeric">
-                Credits: <%= rate_limit_credits_text(@payload.rate_limits) %>
-              </p>
-            <% end %>
-          </article>
+          <.rate_limit_card payload={@payload} peer_payloads={@peer_payloads} now={@now} />
         </section>
 
         <section class="section-card">
@@ -146,13 +190,14 @@ defmodule SymphonyElixirWeb.DashboardLive do
             </div>
           </div>
 
-          <%= if @payload.running == [] do %>
+          <%= if merged_rows(@payload, @peer_payloads, :running) == [] do %>
             <p class="empty-state">No active sessions.</p>
           <% else %>
             <div class="table-wrap">
               <table class="data-table data-table-running">
                 <colgroup>
                   <col style="width: 12rem;" />
+                  <col :if={@multi?} style="width: 7rem;" />
                   <col style="width: 8rem;" />
                   <col style="width: 7.5rem;" />
                   <col style="width: 8.5rem;" />
@@ -162,6 +207,7 @@ defmodule SymphonyElixirWeb.DashboardLive do
                 <thead>
                   <tr>
                     <th>Issue</th>
+                    <th :if={@multi?}>Instance</th>
                     <th>State</th>
                     <th>Session</th>
                     <th>Runtime / turns</th>
@@ -170,13 +216,14 @@ defmodule SymphonyElixirWeb.DashboardLive do
                   </tr>
                 </thead>
                 <tbody>
-                  <tr :for={entry <- @payload.running}>
+                  <tr :for={entry <- merged_rows(@payload, @peer_payloads, :running)}>
                     <td>
                       <div class="issue-stack">
                         <.issue_identifier identifier={entry.issue_identifier} url={entry.issue_url} />
-                        <a class="issue-link" href={"/api/v1/#{entry.issue_identifier}"}>JSON details</a>
+                        <a class="issue-link" href={json_details_href(entry)}>JSON details</a>
                       </div>
                     </td>
+                    <td :if={@multi?}><span class="instance-chip"><%= entry.instance_name %></span></td>
                     <td>
                       <span class={state_badge_class(entry.state)}>
                         <%= entry.state %>
@@ -215,69 +262,67 @@ defmodule SymphonyElixirWeb.DashboardLive do
           <% end %>
         </section>
 
-        <section class="section-card">
+        <section :if={@combined.blocked > 0} class="section-card">
           <div class="section-header">
             <div>
-              <h2 class={blocked_section_title_class(@payload.counts.blocked)}>Blocked sessions</h2>
+              <h2 class="section-title section-title-danger">Blocked sessions</h2>
               <p class="section-copy">Issues paused because Codex requested operator input or approval.</p>
             </div>
           </div>
 
-          <%= if @payload.blocked == [] do %>
-            <p class="empty-state">No blocked sessions.</p>
-          <% else %>
-            <div class="table-wrap">
-              <table class="data-table" style="min-width: 760px;">
-                <thead>
-                  <tr>
-                    <th>Issue</th>
-                    <th>State</th>
-                    <th>Session</th>
-                    <th>Blocked at</th>
-                    <th>Last update</th>
-                    <th>Error</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr :for={entry <- @payload.blocked}>
-                    <td>
-                      <div class="issue-stack">
-                        <.issue_identifier identifier={entry.issue_identifier} url={entry.issue_url} />
-                        <a class="issue-link" href={"/api/v1/#{entry.issue_identifier}"}>JSON details</a>
-                      </div>
-                    </td>
-                    <td>
-                      <span class={state_badge_class(entry.state || "Blocked")}>
-                        <%= entry.state || "Blocked" %>
+          <div class="table-wrap">
+            <table class="data-table" style="min-width: 760px;">
+              <thead>
+                <tr>
+                  <th>Issue</th>
+                  <th :if={@multi?}>Instance</th>
+                  <th>State</th>
+                  <th>Session</th>
+                  <th>Blocked at</th>
+                  <th>Last update</th>
+                  <th>Error</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr :for={entry <- merged_rows(@payload, @peer_payloads, :blocked)}>
+                  <td>
+                    <div class="issue-stack">
+                      <.issue_identifier identifier={entry.issue_identifier} url={entry.issue_url} />
+                      <a class="issue-link" href={json_details_href(entry)}>JSON details</a>
+                    </div>
+                  </td>
+                  <td :if={@multi?}><span class="instance-chip"><%= entry.instance_name %></span></td>
+                  <td>
+                    <span class={state_badge_class(entry.state || "Blocked")}>
+                      <%= entry.state || "Blocked" %>
+                    </span>
+                  </td>
+                  <td>
+                    <.copy_session_id session_id={entry.session_id} />
+                  </td>
+                  <td class="mono"><%= entry.blocked_at || "n/a" %></td>
+                  <td>
+                    <div class="detail-stack">
+                      <span
+                        class="event-text"
+                        title={entry.last_message || to_string(entry.last_event || "n/a")}
+                      ><%= entry.last_message || to_string(entry.last_event || "n/a") %></span>
+                      <span class="muted event-meta">
+                        <%= entry.last_event || "n/a" %>
+                        <%= if entry.last_event_at do %>
+                          · <span class="mono numeric"><%= entry.last_event_at %></span>
+                        <% end %>
                       </span>
-                    </td>
-                    <td>
-                      <.copy_session_id session_id={entry.session_id} />
-                    </td>
-                    <td class="mono"><%= entry.blocked_at || "n/a" %></td>
-                    <td>
-                      <div class="detail-stack">
-                        <span
-                          class="event-text"
-                          title={entry.last_message || to_string(entry.last_event || "n/a")}
-                        ><%= entry.last_message || to_string(entry.last_event || "n/a") %></span>
-                        <span class="muted event-meta">
-                          <%= entry.last_event || "n/a" %>
-                          <%= if entry.last_event_at do %>
-                            · <span class="mono numeric"><%= entry.last_event_at %></span>
-                          <% end %>
-                        </span>
-                      </div>
-                    </td>
-                    <td><%= entry.error || "n/a" %></td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          <% end %>
+                    </div>
+                  </td>
+                  <td><%= entry.error || "n/a" %></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </section>
 
-        <section class="section-card">
+        <section :if={@combined.retrying > 0} class="section-card">
           <div class="section-header">
             <div>
               <h2 class="section-title">Retry queue</h2>
@@ -285,37 +330,35 @@ defmodule SymphonyElixirWeb.DashboardLive do
             </div>
           </div>
 
-          <%= if @payload.retrying == [] do %>
-            <p class="empty-state">No issues are currently backing off.</p>
-          <% else %>
-            <div class="table-wrap">
-              <table class="data-table" style="min-width: 680px;">
-                <thead>
-                  <tr>
-                    <th>Issue</th>
-                    <th>Attempt</th>
-                    <th>Due at</th>
-                    <th>Error</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr :for={entry <- @payload.retrying}>
-                    <td>
-                      <div class="issue-stack">
-                        <.issue_identifier identifier={entry.issue_identifier} url={entry.issue_url} />
-                        <a class="issue-link" href={"/api/v1/#{entry.issue_identifier}"}>JSON details</a>
-                      </div>
-                    </td>
-                    <td>
-                      <span class={state_badge_class("retry")}>Retry #<%= entry.attempt %></span>
-                    </td>
-                    <td class="mono"><%= entry.due_at || "n/a" %></td>
-                    <td><%= entry.error || "n/a" %></td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          <% end %>
+          <div class="table-wrap">
+            <table class="data-table" style="min-width: 680px;">
+              <thead>
+                <tr>
+                  <th>Issue</th>
+                  <th :if={@multi?}>Instance</th>
+                  <th>Attempt</th>
+                  <th>Due at</th>
+                  <th>Error</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr :for={entry <- merged_rows(@payload, @peer_payloads, :retrying)}>
+                  <td>
+                    <div class="issue-stack">
+                      <.issue_identifier identifier={entry.issue_identifier} url={entry.issue_url} />
+                      <a class="issue-link" href={json_details_href(entry)}>JSON details</a>
+                    </div>
+                  </td>
+                  <td :if={@multi?}><span class="instance-chip"><%= entry.instance_name %></span></td>
+                  <td>
+                    <span class={state_badge_class("retry")}>Retry #<%= entry.attempt %></span>
+                  </td>
+                  <td class="mono"><%= entry.due_at || "n/a" %></td>
+                  <td><%= entry.error || "n/a" %></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </section>
 
         <section class="section-card">
@@ -326,16 +369,27 @@ defmodule SymphonyElixirWeb.DashboardLive do
                 Durable runtime events and v1 data-quality status for the metrics catalog.
               </p>
             </div>
-            <span class="state-badge">
-              <%= format_int(analytics_payload(@payload).event_sample_count) %> events<%= if analytics_window_text(@payload) do %><span class="analytics-window">&nbsp;· <%= analytics_window_text(@payload) %></span><% end %>
-            </span>
+            <div class="section-tools">
+              <div class="window-selector" role="group" aria-label="Analytics window">
+                <button
+                  :for={{value, label} <- window_options()}
+                  type="button"
+                  class={window_button_class(value, @analytics_window)}
+                  phx-click="analytics_window"
+                  phx-value-window={value}
+                ><%= label %></button>
+              </div>
+              <span class="state-badge">
+                <%= format_int(@report.summary.event_sample_count) %> events · <%= window_span_text(@analytics_window) %>
+              </span>
+            </div>
           </div>
 
-          <%= if analytics_payload(@payload).event_sample_count == 0 do %>
+          <%= if @report.summary.event_sample_count == 0 do %>
             <p class="empty-state">No runtime events yet — analytics populates as sessions run.</p>
           <% else %>
             <div class="analytics-grid">
-              <article class="analytics-card" :for={panel <- analytics_panels(@payload)}>
+              <article class="analytics-card" :for={panel <- @report.summary.panels}>
                 <div class="analytics-card-head">
                   <h3 class="analytics-title"><%= panel.title %></h3>
                   <span class={analytics_status_class(panel.status)} title={analytics_status_title(panel.status)}>
@@ -362,9 +416,9 @@ defmodule SymphonyElixirWeb.DashboardLive do
             </div>
           <% end %>
 
-          <%= if analytics_gaps(@payload) != [] do %>
+          <%= if @report.summary.data_quality.gaps != [] do %>
             <ul class="quality-list">
-              <li :for={gap <- analytics_gaps(@payload)}><%= gap %></li>
+              <li :for={gap <- @report.summary.data_quality.gaps}><%= gap %></li>
             </ul>
           <% end %>
         </section>
@@ -372,32 +426,28 @@ defmodule SymphonyElixirWeb.DashboardLive do
         <section class="section-card">
           <div class="section-header">
             <div>
-              <h2 class="section-title">History (rollup)</h2>
-              <p class="section-copy">North-star history series from mix symphony.analytics.rollup.</p>
-              <p class="section-copy">Daily deltas from rollup; not comparable to the live totals card.</p>
+              <h2 class="section-title">History</h2>
+              <p class="section-copy">Daily series from the event log (UTC days).</p>
             </div>
           </div>
 
-          <%= if @payload[:rollup] do %>
-            <p class="muted rollup-meta">
-              <span class={rollup_age_class(@payload.rollup, @now)}>
-                generated <%= rollup_generated_text(@payload.rollup, @now) %>
-              </span>
-              · covers <span class="numeric"><%= @payload.rollup.days %></span> days · table shows the last 14.
-            </p>
+          <%= if @report.history.north_star == [] do %>
+            <p class="empty-state">No events in this window.</p>
+          <% else %>
+            <p class="muted history-note">Daily token deltas are not comparable to the live totals card.</p>
 
             <div class="sparkline-group">
               <.sparkline
                 label="Issues first published"
-                values={Enum.map(@payload.rollup.last_14_north_star, &number_or_nil(&1.cycle.issues_first_published))}
+                values={Enum.map(@report.history.north_star, &number_or_nil(&1.cycle.issues_first_published))}
               />
               <.sparkline
                 label="Runs completed"
-                values={Enum.map(@payload.rollup.last_14_north_star, &number_or_nil(&1.cycle.runs_completed))}
+                values={Enum.map(@report.history.north_star, &number_or_nil(&1.cycle.runs_completed))}
               />
               <.sparkline
                 label="Rework rate"
-                values={Enum.map(@payload.rollup.last_14_north_star, &rework_rate_value(&1.rework_rate))}
+                values={Enum.map(@report.history.north_star, &rework_rate_value(&1.rework_rate))}
               />
             </div>
 
@@ -405,7 +455,7 @@ defmodule SymphonyElixirWeb.DashboardLive do
               <table class="data-table" style="min-width: 560px;">
                 <thead>
                   <tr>
-                    <th>Date</th>
+                    <th>Date (UTC)</th>
                     <th>Issues first published</th>
                     <th>Runs completed</th>
                     <th>Rework rate</th>
@@ -413,7 +463,7 @@ defmodule SymphonyElixirWeb.DashboardLive do
                   </tr>
                 </thead>
                 <tbody>
-                  <tr :for={day <- @payload.rollup.last_14_north_star}>
+                  <tr :for={day <- @report.history.north_star}>
                     <td class="mono"><%= day.date %></td>
                     <td class="numeric"><%= format_metric_value(day.cycle.issues_first_published) %></td>
                     <td class="numeric"><%= format_metric_value(day.cycle.runs_completed) %></td>
@@ -423,8 +473,6 @@ defmodule SymphonyElixirWeb.DashboardLive do
                 </tbody>
               </table>
             </div>
-          <% else %>
-            <p class="empty-state">No rollup yet — run: mix symphony.analytics.rollup</p>
           <% end %>
         </section>
       <% end %>
@@ -438,7 +486,9 @@ defmodule SymphonyElixirWeb.DashboardLive do
     socket =
       socket
       |> assign(:payload, payload)
+      |> assign(:report, AnalyticsCache.report(socket.assigns.analytics_window))
       |> assign(:now, DateTime.utc_now())
+      |> assign_page_title()
 
     if payload[:error] do
       schedule_snapshot_retry(socket)
@@ -446,6 +496,251 @@ defmodule SymphonyElixirWeb.DashboardLive do
       reset_snapshot_retry(socket)
     end
   end
+
+  defp assign_page_title(socket) do
+    counts = combined_counts(socket.assigns.payload, peer_payloads(socket.assigns.peer_urls, socket.assigns.peers))
+    attention = counts.running + counts.blocked
+    title = "#{instance_of(socket.assigns.payload).name} · Symphony"
+    assign(socket, :page_title, if(attention > 0, do: "(#{attention}) #{title}", else: title))
+  end
+
+  defp poll_peers(socket) do
+    fetcher = peer_fetcher()
+
+    Enum.reduce(pollable_peer_urls(socket), socket, fn url, acc ->
+      start_async(acc, {:peer_fetch, url}, fn -> fetcher.(url) end)
+    end)
+  end
+
+  defp pollable_peer_urls(socket) do
+    if connected?(socket), do: socket.assigns.peer_urls, else: []
+  end
+
+  defp peer_fetcher do
+    Endpoint.config(:peer_fetcher) || (&PeerStatus.fetch/1)
+  end
+
+  defp peer_payloads(peer_urls, peers) do
+    Enum.flat_map(peer_urls, fn url ->
+      case Map.get(peers, url) do
+        {:ok, payload} -> [{peer_name(payload, url), url, payload}]
+        _unreachable -> []
+      end
+    end)
+  end
+
+  defp peer_name(payload, url) do
+    case payload[:instance] do
+      %{name: name} when is_binary(name) -> name
+      _missing -> url
+    end
+  end
+
+  defp instance_of(payload) do
+    payload[:instance] || %{name: "unknown", mode: "main", port: nil}
+  end
+
+  defp instance_label(%{name: name, port: nil}), do: name
+  defp instance_label(%{name: name, port: port}), do: "#{name} · :#{port}"
+
+  defp combined_counts(payload, peer_payloads) do
+    [payload | Enum.map(peer_payloads, &elem(&1, 2))]
+    |> Enum.map(& &1[:counts])
+    |> Enum.reduce(%{running: 0, retrying: 0, blocked: 0}, fn
+      %{} = counts, acc ->
+        %{
+          running: acc.running + (counts[:running] || 0),
+          retrying: acc.retrying + (counts[:retrying] || 0),
+          blocked: acc.blocked + (counts[:blocked] || 0)
+        }
+
+      _missing, acc ->
+        acc
+    end)
+  end
+
+  defp combined_tokens(payload, peer_payloads) do
+    [payload | Enum.map(peer_payloads, &elem(&1, 2))]
+    |> Enum.map(& &1[:codex_totals])
+    |> Enum.reduce(%{total: 0, input: 0, output: 0}, fn
+      %{} = totals, acc ->
+        %{
+          total: acc.total + (totals[:total_tokens] || 0),
+          input: acc.input + (totals[:input_tokens] || 0),
+          output: acc.output + (totals[:output_tokens] || 0)
+        }
+
+      _missing, acc ->
+        acc
+    end)
+  end
+
+  defp combined_runtime_seconds(payload, peer_payloads, now) do
+    [payload | Enum.map(peer_payloads, &elem(&1, 2))]
+    |> Enum.map(&total_runtime_seconds(&1, now))
+    |> Enum.sum()
+  end
+
+  defp merged_rows(payload, peer_payloads, key) do
+    local = tag_rows(payload[key] || [], instance_of(payload).name, nil)
+    peers = Enum.flat_map(peer_payloads, fn {name, url, peer} -> tag_rows(peer[key] || [], name, url) end)
+    local ++ peers
+  end
+
+  defp tag_rows(rows, instance_name, base_url) do
+    Enum.map(rows, &(&1 |> Map.put(:instance_name, instance_name) |> Map.put(:instance_base, base_url)))
+  end
+
+  # Peer-owned issues resolve only on their own instance's API.
+  defp json_details_href(entry) do
+    case entry[:instance_base] do
+      nil -> "/api/v1/#{entry.issue_identifier}"
+      base -> "#{base}/api/v1/#{entry.issue_identifier}"
+    end
+  end
+
+  defp since_start_text(false), do: "Since instance start."
+  defp since_start_text(true), do: "Combined across reachable instances since each instance start."
+
+  defp window_options, do: [{:h24, "24h"}, {:d7, "7d"}, {:d30, "30d"}, {:all, "All"}]
+
+  defp window_button_class(value, current) when value == current, do: "window-button window-button-active"
+  defp window_button_class(_value, _current), do: "window-button"
+
+  defp window_span_text(:h24), do: "last 24h"
+  defp window_span_text(:d7), do: "last 7d"
+  defp window_span_text(:d30), do: "last 30d"
+  defp window_span_text(:all), do: "all history"
+
+  attr(:card, :map, required: true)
+
+  defp instance_card(assigns) do
+    ~H"""
+    <article class={["instance-card", !@card.reachable? && "instance-card-unreachable"]}>
+      <div class="instance-card-head">
+        <span class="instance-name"><%= @card.name %></span>
+        <span :if={@card.mode == "maestro"} class="mode-badge">maestro</span>
+        <span :if={@card.port} class="muted numeric">:<%= @card.port %></span>
+      </div>
+      <%= if @card.reachable? do %>
+        <p class="instance-card-counts numeric">
+          <%= @card.counts.running %> running · <%= @card.counts.retrying %> retrying · <%= @card.counts.blocked %> blocked
+        </p>
+        <p class="muted numeric instance-card-meta">
+          Tokens <%= format_int(@card.tokens_total) %> · Runtime <%= format_runtime_seconds(@card.runtime_seconds) %>
+        </p>
+      <% else %>
+        <p class="muted instance-card-error">unreachable · <%= @card.error %></p>
+      <% end %>
+    </article>
+    """
+  end
+
+  defp instance_cards(payload, peer_urls, peers, now) do
+    [local_instance_card(payload, now) | Enum.map(peer_urls, &peer_instance_card(&1, Map.get(peers, &1), now))]
+  end
+
+  defp local_instance_card(payload, now) do
+    payload |> instance_of() |> reachable_card(payload, now)
+  end
+
+  defp peer_instance_card(url, {:ok, payload}, now) do
+    identity = %{instance_of(payload) | name: peer_name(payload, url)}
+    reachable_card(identity, payload, now)
+  end
+
+  defp peer_instance_card(url, {:error, reason}, _now) do
+    unreachable_card(%{name: url, mode: "main", port: nil}, peer_error_text(reason))
+  end
+
+  defp peer_instance_card(url, nil, _now) do
+    unreachable_card(%{name: url, mode: "main", port: nil}, "waiting for first poll")
+  end
+
+  defp reachable_card(identity, payload, now) do
+    case payload[:error] do
+      nil ->
+        identity
+        |> Map.merge(%{
+          reachable?: true,
+          counts: combined_counts(payload, []),
+          tokens_total: combined_tokens(payload, []).total,
+          runtime_seconds: total_runtime_seconds(payload, now)
+        })
+
+      error ->
+        unreachable_card(identity, error[:code] || "error")
+    end
+  end
+
+  defp unreachable_card(identity, error_text) do
+    Map.merge(identity, %{reachable?: false, error: error_text})
+  end
+
+  defp peer_error_text(reason) when is_atom(reason), do: to_string(reason)
+  defp peer_error_text({:http_status, status}), do: "HTTP #{status}"
+  defp peer_error_text(reason), do: inspect(reason)
+
+  attr(:payload, :map, required: true)
+  attr(:peer_payloads, :list, required: true)
+  attr(:now, :any, required: true)
+
+  defp rate_limit_card(assigns) do
+    assigns = assign(assigns, :source, rate_limits_source(assigns.payload, assigns.peer_payloads))
+
+    ~H"""
+    <article class="metric-card rate-limit-card">
+      <p class="metric-label">Rate limits</p>
+      <%= if rate_limit_windows(elem(@source, 1)) == [] and is_nil(rate_limit_credits_text(elem(@source, 1))) do %>
+        <p class="metric-detail">No rate-limit snapshot yet.</p>
+      <% else %>
+        <div class="rate-limit-rows">
+          <.rate_limit_window
+            :for={{label, bucket} <- rate_limit_windows(elem(@source, 1))}
+            label={label}
+            bucket={bucket}
+            now={@now}
+          />
+        </div>
+        <p :if={rate_limit_credits_text(elem(@source, 1))} class="metric-detail numeric">
+          Credits: <%= rate_limit_credits_text(elem(@source, 1)) %>
+        </p>
+        <p :if={elem(@source, 0)} class="metric-detail">from <%= elem(@source, 0) %></p>
+      <% end %>
+    </article>
+    """
+  end
+
+  # Local rate limits win; otherwise the freshest reachable peer's non-empty
+  # snapshot (by generated_at) is shown, labeled with that instance's name.
+  defp rate_limits_source(payload, peer_payloads) do
+    local = payload[:rate_limits]
+
+    if meaningful_rate_limits?(local) do
+      {nil, local}
+    else
+      peer_payloads
+      |> Enum.filter(fn {_name, _url, peer} -> meaningful_rate_limits?(peer[:rate_limits]) end)
+      |> Enum.max_by(fn {_name, _url, peer} -> generated_at_unix(peer[:generated_at]) end, fn -> nil end)
+      |> case do
+        nil -> {nil, local}
+        {name, _url, peer} -> {name, peer.rate_limits}
+      end
+    end
+  end
+
+  defp meaningful_rate_limits?(rate_limits), do: is_map(rate_limits) and map_size(rate_limits) > 0
+
+  # Freshness ranking must survive malformed peer timestamps: parse-or-zero,
+  # never raw string comparison.
+  defp generated_at_unix(value) when is_binary(value) do
+    case DateTime.from_iso8601(value) do
+      {:ok, datetime, _offset} -> DateTime.to_unix(datetime)
+      {:error, _reason} -> 0
+    end
+  end
+
+  defp generated_at_unix(_value), do: 0
 
   defp schedule_snapshot_retry(socket) do
     if connected?(socket) do
@@ -645,16 +940,18 @@ defmodule SymphonyElixirWeb.DashboardLive do
   defp reset_at_delta(_value, _now), do: nil
 
   defp rate_limit_credits_text(rate_limits) when is_map(rate_limits) do
-    with credits when is_map(credits) <- rl_value(rate_limits, ["credits", :credits]) do
-      balance = rl_value(credits, ["balance", :balance])
+    case rl_value(rate_limits, ["credits", :credits]) do
+      credits when is_map(credits) ->
+        balance = rl_value(credits, ["balance", :balance])
 
-      cond do
-        rl_value(credits, ["unlimited", :unlimited]) == true -> "unlimited"
-        is_number(balance) -> number_text(balance)
-        true -> nil
-      end
-    else
-      _ -> nil
+        cond do
+          rl_value(credits, ["unlimited", :unlimited]) == true -> "unlimited"
+          is_number(balance) -> number_text(balance)
+          true -> nil
+        end
+
+      _ ->
+        nil
     end
   end
 
@@ -749,43 +1046,29 @@ defmodule SymphonyElixirWeb.DashboardLive do
 
   defp rework_rate_value(_value), do: nil
 
-  defp rollup_age_class(rollup, now) do
-    case seconds_since(rollup.generated_at, now) do
-      seconds when is_integer(seconds) and seconds > 86_400 -> "rollup-age rollup-age-stale"
-      _ -> "rollup-age"
-    end
-  end
-
-  defp rollup_generated_text(rollup, now) do
-    case seconds_since(rollup.generated_at, now) do
-      nil -> to_string(rollup.generated_at)
-      seconds -> format_relative_age(seconds)
-    end
-  end
-
   defp format_relative_age(seconds) when seconds < 60, do: "#{seconds}s ago"
   defp format_relative_age(seconds) when seconds < 3_600, do: "#{div(seconds, 60)}m ago"
   defp format_relative_age(seconds) when seconds < 48 * 3_600, do: "#{div(seconds, 3_600)}h ago"
   defp format_relative_age(seconds), do: "#{div(seconds, 86_400)}d ago"
 
   @doc false
+  @spec format_runtime_seconds_for_test(number()) :: String.t()
   def format_runtime_seconds_for_test(seconds), do: format_runtime_seconds(seconds)
 
   @doc false
+  @spec rate_limit_summary_for_test(map(), DateTime.t()) :: String.t()
   def rate_limit_summary_for_test(bucket, now), do: rate_limit_summary(bucket, now)
 
-  defp blocked_section_title_class(count) when is_integer(count) and count > 0,
-    do: "section-title section-title-danger"
-
-  defp blocked_section_title_class(_count), do: "section-title"
-
   defp completed_runtime_seconds(payload) do
-    payload.codex_totals.seconds_running || 0
+    case payload[:codex_totals] do
+      %{seconds_running: seconds} when is_number(seconds) -> seconds
+      _missing -> 0
+    end
   end
 
   defp total_runtime_seconds(payload, now) do
     completed_runtime_seconds(payload) +
-      Enum.reduce(payload.running, 0, fn entry, total ->
+      Enum.reduce(payload[:running] || [], 0, fn entry, total ->
         total + runtime_seconds_from_started_at(entry.started_at, now)
       end)
   end
@@ -841,39 +1124,6 @@ defmodule SymphonyElixirWeb.DashboardLive do
       true -> base
     end
   end
-
-  defp analytics_payload(%{analytics: %{} = analytics}), do: analytics
-  defp analytics_payload(_payload), do: %{event_sample_count: 0, panels: [], data_quality: %{gaps: []}}
-
-  defp analytics_panels(payload) do
-    payload
-    |> analytics_payload()
-    |> Map.get(:panels, [])
-  end
-
-  defp analytics_gaps(payload) do
-    payload
-    |> analytics_payload()
-    |> Map.get(:data_quality, %{})
-    |> Map.get(:gaps, [])
-  end
-
-  defp analytics_window_text(payload) do
-    analytics = analytics_payload(payload)
-
-    with started when is_binary(started) <- Map.get(analytics, :window_started_at),
-         ended when is_binary(ended) <- Map.get(analytics, :window_ended_at),
-         {:ok, started_at, _} <- DateTime.from_iso8601(started),
-         {:ok, ended_at, _} <- DateTime.from_iso8601(ended) do
-      "~#{format_window_duration(max(DateTime.diff(ended_at, started_at, :second), 0))} window"
-    else
-      _ -> nil
-    end
-  end
-
-  defp format_window_duration(seconds) when seconds < 3_600, do: "#{round(seconds / 60)}m"
-  defp format_window_duration(seconds) when seconds < 48 * 3_600, do: "#{round(seconds / 3_600)}h"
-  defp format_window_duration(seconds), do: "#{round(seconds / 86_400)}d"
 
   defp analytics_status_class("direct"), do: "analytics-status analytics-status-direct"
   defp analytics_status_class("partial"), do: "analytics-status analytics-status-partial"

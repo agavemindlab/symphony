@@ -91,6 +91,26 @@ defmodule SymphonyElixir.Config do
     end
   end
 
+  @doc """
+  Base URLs of the OTHER Symphony instances whose dashboards this instance
+  should surface. The configuration semantic is "the other instances" — no
+  self-exclusion logic is applied.
+  """
+  @spec peer_dashboards() :: [String.t()]
+  def peer_dashboards do
+    case Application.get_env(:symphony_elixir, :peer_dashboards) do
+      urls when is_list(urls) ->
+        urls
+
+      _unset ->
+        "SYMPHONY_PEER_DASHBOARDS"
+        |> System.get_env("")
+        |> String.split(",")
+        |> Enum.map(&String.trim/1)
+        |> Enum.reject(&(&1 == ""))
+    end
+  end
+
   @spec validate!() :: :ok | {:error, term()}
   def validate! do
     with {:ok, settings} <- settings() do

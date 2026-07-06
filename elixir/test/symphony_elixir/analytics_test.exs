@@ -699,6 +699,209 @@ defmodule SymphonyElixir.AnalyticsTest do
     end
   end
 
+  test "window_report merges archives before the live file and dedupes across files" do
+    live = tmp_path("analytics.ndjson")
+    dir = Path.dirname(live)
+    archive_one = Path.join(dir, "archive-2026-06-01.ndjson")
+    archive_two = Path.join(dir, "archive-2026-06-10.ndjson")
+    # An engine-log DIRECTORY and a stray text file next to the store must not match the glob.
+    File.mkdir_p!(Path.join(dir, "archive-20260620-140057"))
+    File.write!(Path.join(dir, "archive-notes.txt"), "ignored")
+
+    Analytics.record_event(
+      %{event_type: :run_started, event_id: "dup-1", issue_id: "issue-arch", issue_identifier: "ARCH-1"},
+      path: archive_one,
+      recorded_at: "2026-06-01T10:00:00Z"
+    )
+
+    File.write!(archive_one, "garbage\n", [:append])
+
+    Analytics.record_event(
+      %{event_type: :run_started, event_id: "arch-2", issue_id: "issue-arch-2"},
+      path: archive_two,
+      recorded_at: "2026-06-10T10:00:00Z"
+    )
+
+    # Live duplicate of the archived event_id: the archive copy must win.
+    Analytics.record_event(
+      %{event_type: :run_started, event_id: "dup-1", issue_id: "issue-live-dup"},
+      path: live,
+      recorded_at: "2026-06-15T10:00:00Z"
+    )
+
+    Analytics.record_event(
+      %{event_type: :run_started, event_id: "live-1", issue_id: "issue-live"},
+      path: live,
+      recorded_at: "2026-06-15T11:00:00Z"
+    )
+
+    File.write!(live, "also-garbage\n", [:append])
+
+    assert Analytics.archive_paths(live) == [archive_one, archive_two]
+
+    report = Analytics.window_report(:all, path: live)
+
+    assert report.window == :all
+    assert report.summary.event_sample_count == 3
+    assert report.summary.warnings == ["skipped 2 malformed analytics event line(s)"]
+    assert report.summary.truncated? == false
+    refute "Analytics event file was truncated to the latest window" in report.summary.data_quality.gaps
+    assert report.summary.window_started_at == "2026-06-01T10:00:00Z"
+    assert report.summary.window_ended_at == "2026-06-15T11:00:00Z"
+
+    per_day = report.history.per_day
+    expected_dates = Enum.map(Date.range(~D[2026-06-01], ~D[2026-06-15]), &Date.to_iso8601/1)
+    assert Enum.map(per_day, & &1.date) == expected_dates
+    assert Enum.map(report.history.north_star, & &1.date) == expected_dates
+
+    # First-wins dedupe: dup-1 lands on the archive date, not the live one.
+    assert %{runs_started: 1, active_issues: 1} = hd(per_day)
+    assert %{runs_started: 1} = List.last(per_day)
+
+    # Densified gap days carry zeroed counters and "n/a" north-star ratios.
+    assert %{runs_started: 0, active_issues: 0, tokens: %{total: 0}, completed_by_state: %{}} = Enum.at(per_day, 1)
+
+    assert %{cycle: %{issues_first_published: 0, runs_completed: 0}, rework_rate: "n/a", cost_per_issue: "n/a"} =
+             Enum.at(report.history.north_star, 1)
+  end
+
+  test "window_report filters point events by cutoff and drops undatable events from bounded windows" do
+    now = ~U[2026-06-15 12:00:00Z]
+    live = tmp_path("windowed.ndjson")
+
+    [
+      {"2026-05-06T12:00:00Z", "all-only"},
+      {"2026-05-26T12:00:00Z", "in-d30"},
+      {"2026-06-12T12:00:00Z", "in-d7"},
+      {"2026-06-15T10:00:00Z", "in-h24"},
+      {"not-a-timestamp", "undated"}
+    ]
+    |> Enum.each(fn {recorded_at, issue_id} ->
+      Analytics.record_event(%{event_type: :run_started, issue_id: issue_id}, path: live, recorded_at: recorded_at)
+    end)
+
+    # A raw line with no recorded_at at all is equally unplaceable.
+    File.write!(live, Jason.encode!(%{event_type: "run_started", issue_id: "no-timestamp"}) <> "\n", [:append])
+
+    for {window, expected_count} <- [h24: 1, d7: 2, d30: 3, all: 6] do
+      report = Analytics.window_report(window, path: live, now: now)
+      assert report.window == window
+      assert report.summary.event_sample_count == expected_count
+    end
+
+    h24 = Analytics.window_report(:h24, path: live, now: now)
+    assert Enum.map(h24.history.per_day, & &1.date) == ["2026-06-15"]
+    assert h24.summary.window_started_at == "2026-06-15T10:00:00Z"
+
+    d7 = Analytics.window_report(:d7, path: live, now: now)
+    d7_dates = Enum.map(Date.range(~D[2026-06-12], ~D[2026-06-15]), &Date.to_iso8601/1)
+    assert Enum.map(d7.history.per_day, & &1.date) == d7_dates
+    assert Enum.map(d7.history.north_star, & &1.date) == d7_dates
+
+    all = Analytics.window_report(:all, path: live, now: now)
+    assert all.summary.window_started_at == "2026-05-06T12:00:00Z"
+    # The trailing undated events are unplaceable: the window end stays nil and
+    # they never land in per_day; they only count toward the :all totals.
+    assert all.summary.window_ended_at == nil
+    assert all.history.per_day |> Enum.map(& &1.runs_started) |> Enum.sum() == 4
+  end
+
+  test "window_report filters backfilled events on occurred_at, matching the day-bucketing axis" do
+    now = ~U[2026-06-15 12:00:00Z]
+    live = tmp_path("backfilled.ndjson")
+
+    # A backfilled event: really happened a month ago (occurred_at) but was
+    # recorded yesterday. Summary counts and history rows must agree it is
+    # OUTSIDE the 7-day window and inside :all.
+    Analytics.record_event(
+      %{event_type: :phase_published, issue_id: "old-issue", occurred_at: "2026-05-10T09:00:00Z"},
+      path: live,
+      recorded_at: "2026-06-14T08:00:00Z"
+    )
+
+    Analytics.record_event(
+      %{event_type: :phase_published, issue_id: "fresh-issue"},
+      path: live,
+      recorded_at: "2026-06-14T09:00:00Z"
+    )
+
+    d7 = Analytics.window_report(:d7, path: live, now: now)
+    assert d7.summary.event_sample_count == 1
+    assert d7.summary.window_started_at == "2026-06-14T09:00:00Z"
+    assert d7.history.per_day |> Enum.map(& &1.phase_published) |> Enum.sum() == 1
+
+    all = Analytics.window_report(:all, path: live, now: now)
+    assert all.summary.event_sample_count == 2
+    assert all.summary.window_started_at == "2026-05-10T09:00:00Z"
+    assert List.first(all.history.per_day).date == "2026-05-10"
+  end
+
+  test "window_report and read_full_history default to the configured live file" do
+    Analytics.record_event(%{event_type: :run_started, issue_id: "issue-default"}, recorded_at: "2026-06-15T10:00:00Z")
+
+    assert %{events: [%{"issue_id" => "issue-default"}], skipped_lines: 0} = Analytics.read_full_history()
+
+    report = Analytics.window_report(:all)
+    assert report.summary.event_sample_count == 1
+    assert Enum.map(report.history.per_day, & &1.date) == ["2026-06-15"]
+  end
+
+  test "window_report sums sliced per-day token deltas instead of re-baselining filtered snapshots" do
+    now = ~U[2026-06-15 12:00:00Z]
+    live = tmp_path("token-window.ndjson")
+
+    [
+      %{
+        event_type: :cost_snapshot,
+        issue_id: "issue-1",
+        run_id: "run-1",
+        tokens: %{input_tokens: 70, output_tokens: 30, total_tokens: 100, cached_input_tokens: 35},
+        recorded_at: "2026-06-10T00:30:00Z"
+      },
+      %{event_type: :run_completed, issue_id: "issue-0", run_id: "run-0", runtime_seconds: 40, recorded_at: "2026-06-10T00:31:00Z"},
+      %{
+        event_type: :cost_snapshot,
+        issue_id: "issue-1",
+        run_id: "run-1",
+        tokens: %{input_tokens: 90, output_tokens: 40, total_tokens: 130, cached_input_tokens: 45},
+        recorded_at: "2026-06-15T11:00:00Z"
+      },
+      %{event_type: :run_completed, issue_id: "issue-1", run_id: "run-1", runtime_seconds: 20, recorded_at: "2026-06-15T11:00:30Z"}
+    ]
+    |> Enum.each(&Analytics.record_event(&1, path: live))
+
+    # run-1 was alive at the h24 cutoff: only the in-window DELTA may be booked,
+    # never the run's full cumulative 130-token snapshot.
+    h24_cost = :h24 |> Analytics.window_report(path: live, now: now) |> Map.fetch!(:summary) |> panel("cost_per_accepted_issue")
+
+    assert %{label: "Total tokens", value: 30, status: "partial"} in h24_cost.metrics
+    assert %{label: "Input tokens", value: 20, status: "partial"} in h24_cost.metrics
+    assert %{label: "Output tokens", value: 10, status: "partial"} in h24_cost.metrics
+    assert %{label: "Cached input tokens", value: 10, status: "partial"} in h24_cost.metrics
+    assert %{label: "Cache hit share", value: "50.0%", status: "partial"} in h24_cost.metrics
+    assert %{label: "Runtime seconds", value: 20, status: "partial"} in h24_cost.metrics
+
+    all_cost = :all |> Analytics.window_report(path: live, now: now) |> Map.fetch!(:summary) |> panel("cost_per_accepted_issue")
+
+    assert %{label: "Total tokens", value: 130, status: "partial"} in all_cost.metrics
+    assert %{label: "Input tokens", value: 90, status: "partial"} in all_cost.metrics
+    assert %{label: "Output tokens", value: 40, status: "partial"} in all_cost.metrics
+    assert %{label: "Cached input tokens", value: 45, status: "partial"} in all_cost.metrics
+    assert %{label: "Runtime seconds", value: 60, status: "partial"} in all_cost.metrics
+  end
+
+  test "window_report on a missing store returns an empty report" do
+    report = Analytics.window_report(:d30, path: tmp_path("missing.ndjson"), now: ~U[2026-06-15 12:00:00Z])
+
+    assert report.window == :d30
+    assert report.summary.event_sample_count == 0
+    assert report.summary.window_started_at == nil
+    assert report.summary.window_ended_at == nil
+    assert report.summary.warnings == []
+    refute "Analytics event file was truncated to the latest window" in report.summary.data_quality.gaps
+    assert report.history == %{per_day: [], north_star: []}
+  end
+
   defp panel(summary, id) do
     Enum.find(summary.panels, &(&1.id == id))
   end

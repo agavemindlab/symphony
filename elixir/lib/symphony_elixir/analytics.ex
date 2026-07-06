@@ -5,14 +5,18 @@ defmodule SymphonyElixir.Analytics do
 
   require Logger
 
-  alias SymphonyElixir.{Config, LogFile}
+  alias SymphonyElixir.{AnalyticsRollup, Config, LogFile}
 
   @default_max_events 500
   @read_chunk_bytes 65_536
   @lock_retry_ms 10
   @lock_timeout_ms 5_000
 
+  @windows [:h24, :d7, :d30, :all]
+
   @type event :: map()
+  @type window :: :h24 | :d7 | :d30 | :all
+  @type history :: %{events: [map()], skipped_lines: non_neg_integer()}
   @type read_result :: %{
           events: [map()],
           warnings: [String.t()],
@@ -62,7 +66,65 @@ defmodule SymphonyElixir.Analytics do
   @spec summary(keyword()) :: map()
   def summary(opts \\ []) do
     %{events: events, warnings: warnings, truncated?: truncated?} = read_events(opts)
-    metrics = runtime_metrics(events)
+    build_summary(events, warnings, truncated?, nil)
+  end
+
+  @doc """
+  Full-history dashboard report for one time window.
+
+  Merges every archive plus the live file (`read_full_history/1`), rolls the
+  FULL deduplicated event list up ONCE via `AnalyticsRollup.rollup/1`, then
+  slices per-day history and derives the windowed summary from the slice.
+  Callers that already hold a pre-read history and rollup (see
+  `SymphonyElixir.AnalyticsCache`) can inject them via `:history` / `:rollup`;
+  `:now` overrides the cutoff clock and `:path` the live-file location.
+  """
+  @spec window_report(window(), keyword()) :: map()
+  def window_report(window, opts \\ []) when window in @windows do
+    now = Keyword.get(opts, :now, DateTime.utc_now())
+    history = Keyword.get_lazy(opts, :history, fn -> read_full_history(opts) end)
+    rollup = Keyword.get_lazy(opts, :rollup, fn -> AnalyticsRollup.rollup(history.events) end)
+
+    cutoff = window_cutoff(window, now)
+    events = filter_window_events(history.events, cutoff)
+    per_day = rollup.per_day |> slice_per_day(cutoff) |> densify_per_day()
+    warnings = skipped_line_warnings(history.skipped_lines)
+
+    %{
+      window: window,
+      summary: build_summary(events, warnings, false, window_token_totals(per_day)),
+      history: %{per_day: per_day, north_star: AnalyticsRollup.north_star(%{per_day: per_day})}
+    }
+  end
+
+  @doc """
+  Reads the full event history: every sibling `archive-*.ndjson` file
+  (lexicographic order = chronological) followed by the live file, with
+  events deduplicated by `event_id` across files (first occurrence wins).
+  """
+  @spec read_full_history(keyword()) :: history()
+  def read_full_history(opts \\ []) do
+    path = Keyword.get(opts, :path, file_path())
+    merge_history(Enum.map(archive_paths(path) ++ [path], &AnalyticsRollup.read_all_events/1))
+  end
+
+  @doc false
+  @spec archive_paths(Path.t()) :: [Path.t()]
+  def archive_paths(live_path) do
+    live_path |> Path.dirname() |> Path.join("archive-*.ndjson") |> Path.wildcard() |> Enum.sort()
+  end
+
+  @doc false
+  @spec merge_history([history()]) :: history()
+  def merge_history(reads) do
+    %{
+      events: reads |> Enum.flat_map(& &1.events) |> dedupe_events_by_event_id(),
+      skipped_lines: reads |> Enum.map(& &1.skipped_lines) |> Enum.sum()
+    }
+  end
+
+  defp build_summary(events, warnings, truncated?, token_totals_override) do
+    metrics = runtime_metrics(events, token_totals_override)
 
     %{
       event_sample_count: length(events),
@@ -75,10 +137,76 @@ defmodule SymphonyElixir.Analytics do
     }
   end
 
+  defp window_cutoff(:all, _now), do: nil
+  defp window_cutoff(:h24, now), do: DateTime.add(now, -24, :hour)
+  defp window_cutoff(:d7, now), do: DateTime.add(now, -7, :day)
+  defp window_cutoff(:d30, now), do: DateTime.add(now, -30, :day)
+
+  # :all keeps events with missing/garbage timestamps (they count toward the
+  # full-history totals); bounded windows drop them — they cannot be placed.
+  # Filtering MUST use the same time axis as AnalyticsRollup's day bucketing
+  # (occurred_at || recorded_at), or backfilled events land in the summary of
+  # a window whose history excludes them.
+  defp filter_window_events(events, nil), do: events
+
+  defp filter_window_events(events, cutoff) do
+    Enum.filter(events, fn event ->
+      case AnalyticsRollup.event_datetime(event) do
+        nil -> false
+        at -> DateTime.compare(at, cutoff) != :lt
+      end
+    end)
+  end
+
+  defp slice_per_day(per_day, nil), do: per_day
+
+  defp slice_per_day(per_day, cutoff) do
+    cutoff_date = DateTime.to_date(cutoff)
+    Enum.filter(per_day, &(Date.compare(Date.from_iso8601!(&1.date), cutoff_date) != :lt))
+  end
+
+  defp densify_per_day([]), do: []
+
+  defp densify_per_day(per_day) do
+    by_date = Map.new(per_day, &{&1.date, &1})
+    first = Date.from_iso8601!(hd(per_day).date)
+    last = Date.from_iso8601!(List.last(per_day).date)
+
+    Enum.map(Date.range(first, last), fn date ->
+      iso = Date.to_iso8601(date)
+      Map.get(by_date, iso, Map.put(AnalyticsRollup.empty_day(), :date, iso))
+    end)
+  end
+
+  # Windowed token metrics MUST be the sum of the sliced per-day deltas.
+  # Re-running the last-snapshot-per-run accounting over cutoff-filtered
+  # events would lose the per-run baseline that AnalyticsRollup.rollup/1
+  # keeps and book a run's full cumulative tokens into the window whenever
+  # the run was already alive at the cutoff. Consequence: bounded windows are
+  # UTC-calendar-day granular for token metrics — the whole cutoff day is
+  # included, up to ~24h before the exact cutoff instant.
+  defp window_token_totals(per_day) do
+    Enum.reduce(
+      per_day,
+      %{total_tokens: 0, input_tokens: 0, output_tokens: 0, cached_input_tokens: 0},
+      fn day, totals ->
+        %{
+          total_tokens: totals.total_tokens + day.tokens.total,
+          input_tokens: totals.input_tokens + day.tokens.input,
+          output_tokens: totals.output_tokens + day.tokens.output,
+          cached_input_tokens: totals.cached_input_tokens + day.tokens.cached_input
+        }
+      end
+    )
+  end
+
+  defp skipped_line_warnings(0), do: []
+  defp skipped_line_warnings(count), do: ["skipped #{count} malformed analytics event line(s)"]
+
   defp window_timestamp(nil), do: nil
 
   defp window_timestamp(event) do
-    case parse_datetime(Map.get(event, "recorded_at")) do
+    case AnalyticsRollup.event_datetime(event) do
       nil -> nil
       datetime -> datetime |> DateTime.truncate(:second) |> DateTime.to_iso8601()
     end
@@ -248,9 +376,9 @@ defmodule SymphonyElixir.Analytics do
     }
   end
 
-  defp runtime_metrics(events) do
+  defp runtime_metrics(events, token_totals_override) do
     events = dedupe_events_by_event_id(events)
-    token_totals = token_totals(events)
+    token_totals = token_totals_override || token_totals(events)
     maestro_metrics = maestro_metrics(events)
 
     %{

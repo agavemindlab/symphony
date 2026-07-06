@@ -109,50 +109,6 @@ defmodule SymphonyElixir.AnalyticsRollup do
     }
   end
 
-  @doc """
-  Compact display summary of the `mix symphony.analytics.rollup` output file.
-
-  Returns `nil` when the file is missing, unreadable, or partially written;
-  `generated_at` is the file mtime. The default path is `rollup/rollup.json`
-  next to the analytics file and can be overridden with the `:rollup_file`
-  application env (mirrors `:analytics_file`).
-  """
-  @spec read_rollup_summary(Path.t() | nil) :: map() | nil
-  def read_rollup_summary(path \\ nil) do
-    path =
-      path ||
-        Application.get_env(:symphony_elixir, :rollup_file) ||
-        Path.join(Path.dirname(Analytics.file_path()), "rollup/rollup.json")
-
-    with {:ok, %File.Stat{mtime: mtime}} <- File.stat(path, time: :posix),
-         {:ok, content} <- File.read(path),
-         {:ok, %{"north_star" => north_star}} when is_list(north_star) <- Jason.decode(content) do
-      %{
-        generated_at: mtime |> DateTime.from_unix!() |> DateTime.to_iso8601(),
-        days: length(north_star),
-        last_14_north_star: north_star |> Enum.take(-14) |> Enum.map(&north_star_summary_entry/1)
-      }
-    else
-      _missing_or_invalid -> nil
-    end
-  rescue
-    _partial_write -> nil
-  end
-
-  defp north_star_summary_entry(entry) when is_map(entry) do
-    cycle = Map.get(entry, "cycle") || %{}
-
-    %{
-      date: Map.get(entry, "date"),
-      cycle: %{
-        issues_first_published: Map.get(cycle, "issues_first_published"),
-        runs_completed: Map.get(cycle, "runs_completed")
-      },
-      rework_rate: Map.get(entry, "rework_rate"),
-      cost_per_issue: Map.get(entry, "cost_per_issue")
-    }
-  end
-
   defp accumulate_line(line, acc) do
     case String.trim(line) do
       "" -> acc
@@ -368,7 +324,22 @@ defmodule SymphonyElixir.AnalyticsRollup do
   defp cost_per_issue(_tokens_total, 0), do: "n/a"
   defp cost_per_issue(tokens_total, active_issues), do: round(tokens_total / active_issues)
 
-  defp event_datetime(event), do: parse_datetime(Map.get(event, "recorded_at"))
+  # Backfilled events carry the REAL time in occurred_at and the backfill
+  # time in recorded_at; day bucketing prefers the real time. This is the
+  # single time axis for analytics — window filtering in Analytics reuses it.
+  @doc false
+  @spec event_datetime(map()) :: DateTime.t() | nil
+  def event_datetime(event) do
+    parse_datetime(Map.get(event, "occurred_at")) || parse_datetime(Map.get(event, "recorded_at"))
+  end
+
+  # The finalized per-day shape with every counter at zero — the canonical
+  # source for densified gap days so the key set cannot drift.
+  @doc false
+  @spec empty_day() :: map()
+  def empty_day do
+    Map.merge(@empty_day, %{active_issues: 0, issues_first_published: 0})
+  end
 
   defp parse_datetime(value) when is_binary(value) do
     case DateTime.from_iso8601(value) do
