@@ -2971,6 +2971,54 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     end)
   end
 
+  test "remote legacy no-marker workspace with matching git remote backfills marker and reuses" do
+    trace =
+      run_remote_legacy_no_marker_case!(
+        "MT-SSH-LEGACY-MATCH",
+        "worker-legacy-match",
+        "git@github.com:agavemindlab/symphony.git"
+      )
+
+    assert trace =~ "__SYMPHONY_WORKSPACE_INSPECT__"
+    assert trace =~ "__SYMPHONY_WORKSPACE_REMOTE__"
+    assert trace =~ "REMOTE_OUTPUT:git@github.com:agavemindlab/symphony.git"
+    assert trace =~ "__SYMPHONY_WORKSPACE_MARKER_WRITE__"
+    refute trace =~ ".quarantine."
+    refute trace =~ "echo after-create"
+    assert trace_index(trace, "__SYMPHONY_WORKSPACE_INSPECT__") < trace_index(trace, "__SYMPHONY_WORKSPACE_MARKER_WRITE__")
+  end
+
+  test "remote legacy no-marker workspace with mismatching git remote is quarantined" do
+    trace =
+      run_remote_legacy_no_marker_case!(
+        "MT-SSH-LEGACY-MISMATCH",
+        "worker-legacy-mismatch",
+        "https://github.com/agavemindlab/grotto.git"
+      )
+
+    assert trace =~ "__SYMPHONY_WORKSPACE_INSPECT__"
+    assert trace =~ "REMOTE_OUTPUT:https://github.com/agavemindlab/grotto.git"
+    assert trace =~ ".quarantine."
+    assert trace =~ "echo after-create"
+    assert trace =~ "__SYMPHONY_WORKSPACE_MARKER_WRITE__"
+    assert trace_index(trace, "__SYMPHONY_WORKSPACE_REMOTE__") < trace_index(trace, ".quarantine.")
+    assert trace_index(trace, ".quarantine.") < trace_index(trace, "echo after-create")
+    assert trace_index(trace, "echo after-create") < trace_index(trace, "__SYMPHONY_WORKSPACE_MARKER_WRITE__")
+  end
+
+  test "remote legacy no-marker workspace with unknown git remote is quarantined" do
+    trace = run_remote_legacy_no_marker_case!("MT-SSH-LEGACY-UNKNOWN", "worker-legacy-unknown", nil)
+
+    assert trace =~ "__SYMPHONY_WORKSPACE_INSPECT__"
+    assert trace =~ "REMOTE_OUTPUT:<none>"
+    assert trace =~ ".quarantine."
+    assert trace =~ "echo after-create"
+    assert trace =~ "__SYMPHONY_WORKSPACE_MARKER_WRITE__"
+    assert trace_index(trace, "__SYMPHONY_WORKSPACE_INSPECT__") < trace_index(trace, ".quarantine.")
+    assert trace_index(trace, ".quarantine.") < trace_index(trace, "echo after-create")
+    assert trace_index(trace, "echo after-create") < trace_index(trace, "__SYMPHONY_WORKSPACE_MARKER_WRITE__")
+  end
+
   test "remote workspace symlink escape quarantines before marker read or hook" do
     test_root =
       Path.join(
@@ -3185,6 +3233,100 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     marker_path = Path.join(workspace, ".symphony/workspace-identity.json")
     File.mkdir_p!(Path.dirname(marker_path))
     File.write!(marker_path, Jason.encode!(marker))
+  end
+
+  defp run_remote_legacy_no_marker_case!(identifier, worker_host, remote_url) do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-remote-legacy-#{System.unique_integer([:positive])}"
+      )
+
+    previous_path = System.get_env("PATH")
+    previous_trace = System.get_env("SYMP_TEST_SSH_TRACE")
+
+    with_project_env("remote-project", "symphony", fn ->
+      on_exit(fn ->
+        restore_env("PATH", previous_path)
+        restore_env("SYMP_TEST_SSH_TRACE", previous_trace)
+      end)
+
+      try do
+        trace_file = Path.join(test_root, "ssh.trace")
+        fake_ssh = Path.join(test_root, "ssh")
+        workspace_root = "~/.symphony-remote-workspaces"
+        workspace_path = "/remote/home/.symphony-remote-workspaces/#{identifier}"
+
+        File.mkdir_p!(test_root)
+        System.put_env("SYMP_TEST_SSH_TRACE", trace_file)
+        System.put_env("PATH", test_root <> ":" <> (previous_path || ""))
+
+        File.write!(fake_ssh, remote_legacy_no_marker_ssh_script(workspace_path, remote_url))
+        File.chmod!(fake_ssh, 0o755)
+
+        write_workflow_file!(Workflow.workflow_file_path(),
+          workspace_root: workspace_root,
+          worker_ssh_hosts: [worker_host],
+          hook_after_create: "echo after-create"
+        )
+
+        issue = %Issue{
+          id: "issue-#{String.downcase(identifier)}",
+          identifier: identifier,
+          title: "Remote legacy no-marker",
+          state: "Todo",
+          project: %{id: "remote-project-id", slug_id: "remote-project", name: "Remote Project"}
+        }
+
+        assert {:ok, ^workspace_path} = Workspace.create_for_issue(issue, worker_host)
+        File.read!(trace_file)
+      after
+        File.rm_rf(test_root)
+      end
+    end)
+  end
+
+  defp remote_legacy_no_marker_ssh_script(workspace_path, nil) do
+    """
+    #!/bin/sh
+    trace_file="${SYMP_TEST_SSH_TRACE:-/tmp/symphony-fake-ssh.trace}"
+    printf 'ARGV:%s\\n' "$*" >> "$trace_file"
+
+    case "$*" in
+      *"__SYMPHONY_WORKSPACE_INSPECT__"*)
+        printf '%s\\t%s\\n' '__SYMPHONY_WORKSPACE_INSPECT__' 'dir'
+        printf '%s\\t%s\\n' '__SYMPHONY_WORKSPACE_PATH__' '#{workspace_path}'
+        printf 'REMOTE_OUTPUT:<none>\\n' >> "$trace_file"
+        ;;
+      *"__SYMPHONY_WORKSPACE__"*)
+        printf '%s\\t%s\\t%s\\n' '__SYMPHONY_WORKSPACE__' '1' '#{workspace_path}'
+        ;;
+    esac
+
+    exit 0
+    """
+  end
+
+  defp remote_legacy_no_marker_ssh_script(workspace_path, remote_url) when is_binary(remote_url) do
+    """
+    #!/bin/sh
+    trace_file="${SYMP_TEST_SSH_TRACE:-/tmp/symphony-fake-ssh.trace}"
+    printf 'ARGV:%s\\n' "$*" >> "$trace_file"
+
+    case "$*" in
+      *"__SYMPHONY_WORKSPACE_INSPECT__"*)
+        printf '%s\\t%s\\n' '__SYMPHONY_WORKSPACE_INSPECT__' 'dir'
+        printf '%s\\t%s\\n' '__SYMPHONY_WORKSPACE_PATH__' '#{workspace_path}'
+        printf '%s\\t%s\\n' '__SYMPHONY_WORKSPACE_REMOTE__' '#{remote_url}'
+        printf 'REMOTE_OUTPUT:%s\\n' '#{remote_url}' >> "$trace_file"
+        ;;
+      *"__SYMPHONY_WORKSPACE__"*)
+        printf '%s\\t%s\\t%s\\n' '__SYMPHONY_WORKSPACE__' '1' '#{workspace_path}'
+        ;;
+    esac
+
+    exit 0
+    """
   end
 
   defp trace_index(trace, needle) do
