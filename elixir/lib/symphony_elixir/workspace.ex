@@ -613,9 +613,12 @@ defmodule SymphonyElixir.Workspace do
     repo = Map.get(env, "SYMPHONY_REPO")
     project_slug = Map.get(env, "SYMPHONY_PROJECT_SLUG")
 
-    if blank?(repo) or blank?(project_slug) do
-      {:ok, nil}
-    else
+    missing_keys =
+      [{"SYMPHONY_PROJECT_SLUG", project_slug}, {"SYMPHONY_REPO", repo}]
+      |> Enum.filter(fn {_key, value} -> blank?(value) end)
+      |> Enum.map(fn {key, _value} -> key end)
+
+    if missing_keys == [] do
       {:ok,
        %{
          "version" => @workspace_identity_version,
@@ -627,6 +630,8 @@ defmodule SymphonyElixir.Workspace do
          "symphony_project_slug" => project_slug,
          "symphony_repo" => repo
        }}
+    else
+      {:error, {:workspace_identity_missing_project_env, missing_keys}}
     end
   end
 

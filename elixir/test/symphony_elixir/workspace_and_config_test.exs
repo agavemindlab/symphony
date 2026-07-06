@@ -440,6 +440,51 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     end
   end
 
+  test "project issue without effective repo or project slug fails before reusing existing workspace" do
+    workspace_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-workspace-project-env-missing-#{System.unique_integer([:positive])}"
+      )
+
+    previous_project_slug = System.get_env("SYMPHONY_PROJECT_SLUG")
+    previous_repo = System.get_env("SYMPHONY_REPO")
+
+    try do
+      workspace = Path.join(workspace_root, "MT-MISSING-PROJECT-ENV")
+
+      write_workflow_file!(Workflow.workflow_file_path(),
+        workspace_root: workspace_root,
+        hook_after_create: "echo new > repo.txt"
+      )
+
+      File.mkdir_p!(workspace)
+      File.write!(Path.join(workspace, "repo.txt"), "old\n")
+      System.put_env("SYMPHONY_PROJECT_SLUG", "other-project")
+      System.put_env("SYMPHONY_REPO", "stale-repo")
+
+      issue = %Issue{
+        id: "issue-missing-project-env",
+        identifier: "MT-MISSING-PROJECT-ENV",
+        title: "Missing project env",
+        state: "In Progress",
+        project: %{id: "project-id", slug_id: "project-slug", name: "Project"}
+      }
+
+      assert {:error, {:workspace_identity_missing_project_env, missing_keys}} =
+               Workspace.create_for_issue(issue)
+
+      assert Enum.sort(missing_keys) == ["SYMPHONY_PROJECT_SLUG", "SYMPHONY_REPO"]
+      assert File.read!(Path.join(workspace, "repo.txt")) == "old\n"
+      assert Path.wildcard(Path.join(workspace_root, "MT-MISSING-PROJECT-ENV.quarantine.*")) == []
+      refute File.exists?(Path.join(workspace, ".symphony/workspace-identity.json"))
+    after
+      restore_env("SYMPHONY_PROJECT_SLUG", previous_project_slug)
+      restore_env("SYMPHONY_REPO", previous_repo)
+      File.rm_rf(workspace_root)
+    end
+  end
+
   test "workflow project env resolver uses selector output and surfaces selector failures" do
     test_root =
       Path.join(
@@ -2022,10 +2067,15 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
         "symphony-elixir-project-hook-env-#{System.unique_integer([:positive])}"
       )
 
+    previous_project_slug = System.get_env("SYMPHONY_PROJECT_SLUG")
+    previous_repo = System.get_env("SYMPHONY_REPO")
+
     try do
       workspace_root = Path.join(test_root, "workspaces")
       before_remove_marker = Path.join(test_root, "before-remove-project-env.txt")
       File.mkdir_p!(workspace_root)
+      System.put_env("SYMPHONY_PROJECT_SLUG", "project-slug")
+      System.put_env("SYMPHONY_REPO", "symphony")
 
       write_workflow_file!(Workflow.workflow_file_path(),
         workspace_root: workspace_root,
@@ -2054,6 +2104,8 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       assert :ok = Workspace.remove_issue_workspaces(issue)
       assert File.read!(before_remove_marker) == "project-id\nproject-slug\nProject Name\n"
     after
+      restore_env("SYMPHONY_PROJECT_SLUG", previous_project_slug)
+      restore_env("SYMPHONY_REPO", previous_repo)
       File.rm_rf(test_root)
     end
   end
@@ -2741,10 +2793,14 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
 
     previous_path = System.get_env("PATH")
     previous_trace = System.get_env("SYMP_TEST_SSH_TRACE")
+    previous_project_slug = System.get_env("SYMPHONY_PROJECT_SLUG")
+    previous_repo = System.get_env("SYMPHONY_REPO")
 
     on_exit(fn ->
       restore_env("PATH", previous_path)
       restore_env("SYMP_TEST_SSH_TRACE", previous_trace)
+      restore_env("SYMPHONY_PROJECT_SLUG", previous_project_slug)
+      restore_env("SYMPHONY_REPO", previous_repo)
     end)
 
     try do
@@ -2756,6 +2812,8 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       File.mkdir_p!(test_root)
       System.put_env("SYMP_TEST_SSH_TRACE", trace_file)
       System.put_env("PATH", test_root <> ":" <> (previous_path || ""))
+      System.put_env("SYMPHONY_PROJECT_SLUG", "remote-project")
+      System.put_env("SYMPHONY_REPO", "symphony")
 
       File.write!(fake_ssh, """
       #!/bin/sh
@@ -2763,6 +2821,9 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       printf 'ARGV:%s\\n' "$*" >> "$trace_file"
 
       case "$*" in
+        *"__SYMPHONY_WORKSPACE_INSPECT__"*)
+          printf '%s\\t%s\\n' '__SYMPHONY_WORKSPACE_INSPECT__' 'missing'
+          ;;
         *"__SYMPHONY_WORKSPACE__"*)
           printf '%s\\t%s\\t%s\\n' '__SYMPHONY_WORKSPACE__' '1' '#{workspace_path}'
           ;;
