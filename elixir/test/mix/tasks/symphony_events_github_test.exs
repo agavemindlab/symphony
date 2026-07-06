@@ -257,8 +257,38 @@ defmodule Mix.Tasks.Symphony.Events.GithubTest do
     )
   end
 
+  test "--since forwards a merged-date search filter to gh" do
+    analytics_path = tmp_path("github-since-events.ndjson")
+
+    with_fake_gh(
+      """
+      #!/bin/sh
+      printf '%s\\n' "$*" >> "$GH_LOG"
+
+      if [ "$1" = "auth" ] && [ "$2" = "status" ]; then
+        exit 0
+      fi
+
+      if [ "$1" = "pr" ] && [ "$2" = "list" ]; then
+        cat "$GH_DEMO_PRS"
+        exit 0
+      fi
+
+      exit 99
+      """,
+      fn log_path ->
+        capture_io(fn ->
+          Github.run(["--repo", "hongqn/demo", "--since", "2026-06-01", "--analytics", analytics_path])
+        end)
+
+        assert File.read!(log_path) =~ "--search merged:>=2026-06-01"
+      end
+    )
+  end
+
   test "raises without repos, without gh, without gh auth, and on invalid options" do
     assert_raise Mix.Error, ~r/Invalid option/, fn -> Github.run(["--wat"]) end
+    assert_raise Mix.Error, ~r/Invalid --since date/, fn -> Github.run(["--repo", "a/b", "--since", "junk"]) end
 
     with_env(%{"SYMPHONY_GITHUB_REPOS" => nil}, fn ->
       assert_raise Mix.Error, ~r/No GitHub repos to sweep/, fn -> Github.run([]) end
