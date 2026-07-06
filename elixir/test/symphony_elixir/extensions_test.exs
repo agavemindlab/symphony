@@ -817,7 +817,7 @@ defmodule SymphonyElixir.ExtensionsTest do
 
     assert html =~ "Can accepted issues move faster with the current persisted signals?"
     assert html =~ "1 events"
-    assert html =~ "all history"
+    assert html =~ ~r/all history · since \d{4}-\d{2}-\d{2} \(1 day\)/
     refute html =~ "~0m window"
     assert html =~ ~s(title="usable as-is")
     assert html =~ ~s(title="shown but sample-limited")
@@ -935,8 +935,8 @@ defmodule SymphonyElixir.ExtensionsTest do
     {:ok, view, html} = live(build_conn(), "/")
 
     assert html =~ "2 events"
-    assert html =~ "all history"
-    assert html =~ old_date
+    span_days = Date.diff(Date.from_iso8601!(recent_date), Date.from_iso8601!(old_date)) + 1
+    assert html =~ "all history · since #{old_date} (#{span_days} days)"
     assert html =~ recent_date
 
     html = view |> element(~s(button[phx-value-window="d7"])) |> render_click()

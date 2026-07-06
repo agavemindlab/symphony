@@ -380,7 +380,7 @@ defmodule SymphonyElixirWeb.DashboardLive do
                 ><%= label %></button>
               </div>
               <span class="state-badge">
-                <%= format_int(@report.summary.event_sample_count) %> events · <%= window_span_text(@analytics_window) %>
+                <%= format_int(@report.summary.event_sample_count) %> events · <%= window_span_text(@analytics_window, @report) %>
               </span>
             </div>
           </div>
@@ -607,10 +607,24 @@ defmodule SymphonyElixirWeb.DashboardLive do
   defp window_button_class(value, current) when value == current, do: "window-button window-button-active"
   defp window_button_class(_value, _current), do: "window-button"
 
-  defp window_span_text(:h24), do: "last 24h"
-  defp window_span_text(:d7), do: "last 7d"
-  defp window_span_text(:d30), do: "last 30d"
-  defp window_span_text(:all), do: "all history"
+  defp window_span_text(:h24, _report), do: "last 24h"
+  defp window_span_text(:d7, _report), do: "last 7d"
+  defp window_span_text(:d30, _report), do: "last 30d"
+
+  # "All history" is meaningless without its actual extent. The span comes
+  # from the densified per-day series (the bucketing axis), NOT from
+  # window_started_at: that is the first FILE-ORDER event, and backfilled
+  # lines appended later can carry older occurred_at dates.
+  defp window_span_text(:all, report) do
+    case report.history.per_day do
+      [] ->
+        "all history"
+
+      [first | _rest] = per_day ->
+        days = length(per_day)
+        "all history · since #{first.date} (#{days} #{if days == 1, do: "day", else: "days"})"
+    end
+  end
 
   attr(:card, :map, required: true)
 
