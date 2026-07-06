@@ -490,6 +490,34 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     end
   end
 
+  test "projectless issue does not source aggregate selector before workspace reuse" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-projectless-aggregate-workspace-#{System.unique_integer([:positive])}"
+      )
+
+    original_workflow_path = Workflow.workflow_file_path()
+
+    try do
+      workflow_dir = Path.join(test_root, "workflows/grandline")
+      workflow_file = Path.join(workflow_dir, "WORKFLOW.md")
+      workspace_root = Path.join(test_root, "workspaces")
+
+      File.mkdir_p!(workflow_dir)
+      Workflow.set_workflow_file_path(workflow_file)
+      File.write!(Path.join(workflow_dir, "project-for-linear-project.sh"), "exit 66\n")
+
+      write_workflow_file!(workflow_file, workspace_root: workspace_root)
+
+      assert {:ok, workspace} = Workspace.create_for_issue("MT-PROJECTLESS-AGGREGATE")
+      assert Path.basename(workspace) == "MT-PROJECTLESS-AGGREGATE"
+    after
+      Workflow.set_workflow_file_path(original_workflow_path)
+      File.rm_rf(test_root)
+    end
+  end
+
   test "workspace creation cleans failed new workspace before retry" do
     test_root =
       Path.join(
@@ -2876,6 +2904,81 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
 
         assert trace_index(trace, ".quarantine.") < trace_index(trace, "echo after-create")
         assert trace_index(trace, "echo after-create") < trace_index(trace, "__SYMPHONY_WORKSPACE_MARKER_WRITE__")
+      after
+        File.rm_rf(test_root)
+      end
+    end)
+  end
+
+  test "remote workspace symlink escape quarantines before marker read or hook" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-remote-workspace-symlink-escape-#{System.unique_integer([:positive])}"
+      )
+
+    previous_path = System.get_env("PATH")
+    previous_trace = System.get_env("SYMP_TEST_SSH_TRACE")
+
+    with_project_env("remote-project", "symphony", fn ->
+      on_exit(fn ->
+        restore_env("PATH", previous_path)
+        restore_env("SYMP_TEST_SSH_TRACE", previous_trace)
+      end)
+
+      try do
+        trace_file = Path.join(test_root, "ssh.trace")
+        fake_ssh = Path.join(test_root, "ssh")
+        workspace_root = "~/.symphony-remote-workspaces"
+        workspace_path = "/remote/home/.symphony-remote-workspaces/MT-SSH-ESCAPE"
+
+        File.mkdir_p!(test_root)
+        System.put_env("SYMP_TEST_SSH_TRACE", trace_file)
+        System.put_env("PATH", test_root <> ":" <> (previous_path || ""))
+
+        File.write!(fake_ssh, """
+        #!/bin/sh
+        trace_file="${SYMP_TEST_SSH_TRACE:-/tmp/symphony-fake-ssh.trace}"
+        printf 'ARGV:%s\\n' "$*" >> "$trace_file"
+
+        case "$*" in
+          *"__SYMPHONY_WORKSPACE_INSPECT__"*)
+            printf '%s\\t%s\\n' '__SYMPHONY_WORKSPACE_INSPECT__' 'escape'
+            printf '%s\\t%s\\n' '__SYMPHONY_WORKSPACE_PATH__' '/outside/old-repo'
+            ;;
+          *"__SYMPHONY_WORKSPACE__"*)
+            printf '%s\\t%s\\t%s\\n' '__SYMPHONY_WORKSPACE__' '1' '#{workspace_path}'
+            ;;
+        esac
+
+        exit 0
+        """)
+
+        File.chmod!(fake_ssh, 0o755)
+
+        write_workflow_file!(Workflow.workflow_file_path(),
+          workspace_root: workspace_root,
+          worker_ssh_hosts: ["worker-escape"],
+          hook_after_create: "echo after-create"
+        )
+
+        issue = %Issue{
+          id: "issue-ssh-escape",
+          identifier: "MT-SSH-ESCAPE",
+          title: "Remote escape",
+          state: "Todo",
+          project: %{id: "remote-project-id", slug_id: "remote-project", name: "Remote Project"}
+        }
+
+        assert {:ok, ^workspace_path} = Workspace.create_for_issue(issue, "worker-escape")
+
+        trace = File.read!(trace_file)
+        assert trace =~ "__SYMPHONY_WORKSPACE_INSPECT__"
+        assert trace =~ "pwd -P"
+        assert trace =~ ".quarantine."
+        assert trace =~ "echo after-create"
+        assert trace_index(trace, "pwd -P") < trace_index(trace, ".symphony/workspace-identity.json")
+        assert trace_index(trace, ".quarantine.") < trace_index(trace, "echo after-create")
       after
         File.rm_rf(test_root)
       end

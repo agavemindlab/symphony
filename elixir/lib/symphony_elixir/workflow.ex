@@ -56,7 +56,7 @@ defmodule SymphonyElixir.Workflow do
     base_env = base_project_env(workflow_dir, project)
     selector = Path.join(workflow_dir, "project-for-linear-project.sh")
 
-    if File.regular?(selector) do
+    if File.regular?(selector) and not blank?(Map.get(base_env, "SYMPHONY_LINEAR_PROJECT_SLUG")) do
       resolve_project_env_from_selector(workflow_file, workflow_dir, base_env)
     else
       {:ok,
@@ -270,6 +270,8 @@ defmodule SymphonyElixir.Workflow do
   defp safe_env_value?(value) when is_binary(value) do
     not String.contains?(value, ["\n", "\r", <<0>>])
   end
+
+  defp blank?(value), do: not is_binary(value) or String.trim(value) == ""
 
   defp issue_project(%{project: project}) when is_map(project) do
     %{

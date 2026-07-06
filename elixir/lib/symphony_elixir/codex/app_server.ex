@@ -12,6 +12,20 @@ defmodule SymphonyElixir.Codex.AppServer do
   @port_line_bytes 1_048_576
   @max_stream_log_bytes 1_000
   @non_interactive_tool_input_answer "This is a non-interactive session. Operator input is unavailable."
+  @project_env_keys [
+    "SYMPHONY_WORKFLOW_DIR",
+    "SYMPHONY_LINEAR_PROJECT_ID",
+    "SYMPHONY_LINEAR_PROJECT_SLUG",
+    "SYMPHONY_LINEAR_PROJECT_NAME",
+    "SYMPHONY_PROJECT_DIR",
+    "SYMPHONY_PROJECT_SLUG",
+    "SYMPHONY_REPO",
+    "SYMPHONY_BASE_BRANCH",
+    "SYMPHONY_PROFILE",
+    "SYMPHONY_ACCEPTANCE_USER_EMAIL_ENV",
+    "SYMPHONY_ACCEPTANCE_USER_CODE_ENV",
+    "SYMPHONY_ACCEPTANCE_USER_PURPOSE"
+  ]
 
   @type session :: %{
           port: port(),
@@ -239,9 +253,14 @@ defmodule SymphonyElixir.Codex.AppServer do
   defp project_env_source_prefix(issue) do
     case Workflow.resolve_project_env(issue) do
       {:ok, %{env: env}} ->
-        env
-        |> Enum.sort_by(fn {name, _value} -> name end)
-        |> Enum.map_join("\n", fn {name, value} -> env_export(name, value) end)
+        exports =
+          env
+          |> Enum.sort_by(fn {name, _value} -> name end)
+          |> Enum.map_join("\n", fn {name, value} -> env_export(name, value) end)
+
+        [project_env_unset(), exports]
+        |> Enum.reject(&(&1 == ""))
+        |> Enum.join("\n")
 
       {:error, reason} ->
         [
@@ -250,6 +269,10 @@ defmodule SymphonyElixir.Codex.AppServer do
         ]
         |> Enum.join("\n")
     end
+  end
+
+  defp project_env_unset do
+    "unset #{Enum.join(@project_env_keys, " ")}"
   end
 
   defp env_export(_name, nil), do: ""

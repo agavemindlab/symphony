@@ -127,8 +127,15 @@ defmodule SymphonyElixir.Workspace do
       [
         "set -eu",
         remote_shell_assign("workspace", workspace),
+        remote_shell_assign("root", Config.settings!().workspace.root),
+        "mkdir -p \"$root\"",
+        "root_canonical=\"$(cd \"$root\" && pwd -P)\"",
         "if [ -d \"$workspace\" ]; then",
-        "  created=0",
+        "  workspace_canonical=\"$(cd \"$workspace\" && pwd -P)\"",
+        "  case \"$workspace_canonical/\" in",
+        "    \"$root_canonical\"/*) created=0 ;;",
+        "    *) rm -rf \"$workspace\"; mkdir -p \"$workspace\"; created=1 ;;",
+        "  esac",
         "elif [ -e \"$workspace\" ]; then",
         "  rm -rf \"$workspace\"",
         "  mkdir -p \"$workspace\"",
@@ -644,6 +651,7 @@ defmodule SymphonyElixir.Workspace do
 
   defp remote_workspace_identity_status(%{kind: :missing}, _expected_identity), do: :create
   defp remote_workspace_identity_status(%{kind: :other}, _expected_identity), do: :create
+  defp remote_workspace_identity_status(%{kind: :escape}, _expected_identity), do: {:quarantine, :symlink_escape}
 
   defp remote_workspace_identity_status(%{kind: :dir} = inspection, expected_identity) do
     case Map.get(inspection, :marker) do
@@ -737,7 +745,19 @@ defmodule SymphonyElixir.Workspace do
       [
         "set -eu",
         remote_shell_assign("workspace", workspace),
+        remote_shell_assign("root", Config.settings!().workspace.root),
+        "mkdir -p \"$root\"",
+        "root_canonical=\"$(cd \"$root\" && pwd -P)\"",
         "if [ -d \"$workspace\" ]; then",
+        "  workspace_canonical=\"$(cd \"$workspace\" && pwd -P)\"",
+        "  case \"$workspace_canonical/\" in",
+        "    \"$root_canonical\"/*) ;;",
+        "    *)",
+        "      printf '%s\\t%s\\n' '#{@remote_workspace_inspect_marker}' 'escape'",
+        "      printf '%s\\t%s\\n' '#{@remote_workspace_path_marker}' \"$workspace_canonical\"",
+        "      exit 0",
+        "      ;;",
+        "  esac",
         "  printf '%s\\t%s\\n' '#{@remote_workspace_inspect_marker}' 'dir'",
         "  cd \"$workspace\"",
         "  printf '%s\\t%s\\n' '#{@remote_workspace_path_marker}' \"$(pwd -P)\"",
@@ -770,7 +790,7 @@ defmodule SymphonyElixir.Workspace do
     |> String.split("\n", trim: true)
     |> Enum.reduce(%{}, &put_remote_workspace_inspection_line/2)
     |> case do
-      %{kind: kind} = inspection when kind in [:dir, :other, :missing] -> {:ok, inspection}
+      %{kind: kind} = inspection when kind in [:dir, :other, :missing, :escape] -> {:ok, inspection}
       _inspection -> {:error, {:workspace_inspect_failed, :invalid_output, output}}
     end
   end
@@ -788,6 +808,7 @@ defmodule SymphonyElixir.Workspace do
   defp put_remote_workspace_kind(acc, "dir"), do: Map.put(acc, :kind, :dir)
   defp put_remote_workspace_kind(acc, "other"), do: Map.put(acc, :kind, :other)
   defp put_remote_workspace_kind(acc, "missing"), do: Map.put(acc, :kind, :missing)
+  defp put_remote_workspace_kind(acc, "escape"), do: Map.put(acc, :kind, :escape)
   defp put_remote_workspace_kind(acc, _kind), do: acc
 
   defp quarantine_remote_workspace(workspace, worker_host) do
