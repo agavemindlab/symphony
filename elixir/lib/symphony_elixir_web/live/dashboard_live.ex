@@ -171,12 +171,18 @@ defmodule SymphonyElixirWeb.DashboardLive do
               In <%= format_int(combined_tokens(@payload, @peer_payloads).input) %> / Out <%= format_int(combined_tokens(@payload, @peer_payloads).output) %>
             </p>
             <p class="metric-detail"><%= since_start_text(@multi?) %></p>
+            <p :if={report_metric(@report, "Total tokens")} class="metric-detail numeric">
+              <%= window_stat_label(@analytics_window) %>: <%= format_compact_int(report_metric(@report, "Total tokens")) %>
+            </p>
           </article>
 
           <article class="metric-card">
             <p class="metric-label">Runtime</p>
             <p class="metric-value numeric"><%= format_runtime_seconds(combined_runtime_seconds(@payload, @peer_payloads, @now)) %></p>
             <p class="metric-detail">Total Codex runtime across completed and active sessions. <%= since_start_text(@multi?) %></p>
+            <p :if={report_metric(@report, "Runtime seconds")} class="metric-detail numeric">
+              <%= window_stat_label(@analytics_window) %>: <%= format_runtime_seconds(report_metric(@report, "Runtime seconds")) %>
+            </p>
           </article>
 
           <.rate_limit_card payload={@payload} peer_payloads={@peer_payloads} now={@now} />
@@ -601,6 +607,30 @@ defmodule SymphonyElixirWeb.DashboardLive do
 
   defp since_start_text(false), do: "Since instance start."
   defp since_start_text(true), do: "Combined across reachable instances since each instance start."
+
+  # Persisted counterpart of the live counters, pulled from the Cost Per
+  # Accepted Issue panel of the currently selected analytics window.
+  defp report_metric(report, label) do
+    with %{metrics: metrics} <- Enum.find(report.summary.panels, &(&1.id == "cost_per_accepted_issue")),
+         %{value: value} when is_number(value) <- Enum.find(metrics, &(&1.label == label)) do
+      value
+    else
+      _missing -> nil
+    end
+  end
+
+  defp window_stat_label(:h24), do: "Last 24h"
+  defp window_stat_label(:d7), do: "Last 7d"
+  defp window_stat_label(:d30), do: "Last 30d"
+  defp window_stat_label(:all), do: "All time"
+
+  defp format_compact_int(value) when is_number(value) and value >= 1_000_000_000,
+    do: "#{Float.round(value / 1.0e9, 2)}B"
+
+  defp format_compact_int(value) when is_number(value) and value >= 1_000_000,
+    do: "#{Float.round(value / 1.0e6, 1)}M"
+
+  defp format_compact_int(value) when is_number(value), do: value |> trunc() |> format_int()
 
   defp window_options, do: [{:h24, "24h"}, {:d7, "7d"}, {:d30, "30d"}, {:all, "All"}]
 

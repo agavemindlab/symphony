@@ -819,6 +819,9 @@ defmodule SymphonyElixir.ExtensionsTest do
     assert html =~ "1 events"
     assert html =~ ~r/all history · since \d{4}-\d{2}-\d{2} \(1 day\)/
     refute html =~ "~0m window"
+    # Persisted counterparts on the live totals cards, from the same report.
+    assert html =~ "All time: 0m 11s"
+    assert html =~ "All time: 8"
     assert html =~ ~s(title="usable as-is")
     assert html =~ ~s(title="shown but sample-limited")
     assert html =~ ~s(title="data-quality gap only")
