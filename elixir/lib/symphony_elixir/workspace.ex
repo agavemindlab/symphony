@@ -7,6 +7,7 @@ defmodule SymphonyElixir.Workspace do
   alias SymphonyElixir.{Config, PathSafety, SSH, Workflow}
 
   @remote_workspace_marker "__SYMPHONY_WORKSPACE__"
+  @workspace_init_pending_suffix ".symphony-init-pending"
 
   @type worker_host :: String.t() | nil
 
@@ -33,6 +34,9 @@ defmodule SymphonyElixir.Workspace do
 
   defp ensure_workspace(workspace, nil) do
     cond do
+      File.exists?(workspace_init_pending_marker(workspace)) ->
+        create_workspace(workspace)
+
       File.dir?(workspace) ->
         {:ok, workspace, false}
 
@@ -50,15 +54,22 @@ defmodule SymphonyElixir.Workspace do
       [
         "set -eu",
         remote_shell_assign("workspace", workspace),
-        "if [ -d \"$workspace\" ]; then",
+        remote_shell_assign("workspace_init_pending_marker", workspace_init_pending_marker(workspace)),
+        "workspace_parent=$(dirname \"$workspace\")",
+        "if [ -f \"$workspace_init_pending_marker\" ]; then",
+        "  created=1",
+        "elif [ -d \"$workspace\" ]; then",
         "  created=0",
         "elif [ -e \"$workspace\" ]; then",
-        "  rm -rf \"$workspace\"",
-        "  mkdir -p \"$workspace\"",
         "  created=1",
         "else",
-        "  mkdir -p \"$workspace\"",
         "  created=1",
+        "fi",
+        "if [ \"$created\" = \"1\" ]; then",
+        "  mkdir -p \"$workspace_parent\"",
+        "  : > \"$workspace_init_pending_marker\"",
+        "  rm -rf \"$workspace\"",
+        "  mkdir -p \"$workspace\"",
         "fi",
         "cd \"$workspace\"",
         "printf '%s\\t%s\\t%s\\n' '#{@remote_workspace_marker}' \"$created\" \"$(pwd -P)\""
@@ -80,8 +91,16 @@ defmodule SymphonyElixir.Workspace do
 
   defp create_workspace(workspace) do
     File.rm_rf!(workspace)
-    File.mkdir_p!(workspace)
-    {:ok, workspace, true}
+    File.mkdir_p!(Path.dirname(workspace))
+
+    case write_workspace_init_pending_marker(workspace, nil) do
+      :ok ->
+        File.mkdir_p!(workspace)
+        {:ok, workspace, true}
+
+      {:error, _reason} = error ->
+        error
+    end
   end
 
   @spec remove(Path.t()) :: {:ok, [String.t()]} | {:error, term(), String.t()}
@@ -289,7 +308,7 @@ defmodule SymphonyElixir.Workspace do
       true ->
         case hooks.after_create do
           nil ->
-            :ok
+            clear_workspace_init_pending_marker(workspace, worker_host, issue_context)
 
           command ->
             run_after_create_hook(command, workspace, issue_context, worker_host)
@@ -303,7 +322,7 @@ defmodule SymphonyElixir.Workspace do
   defp run_after_create_hook(command, workspace, issue_context, worker_host) do
     case run_hook(command, workspace, issue_context, "after_create", worker_host) do
       :ok ->
-        :ok
+        clear_workspace_init_pending_marker(workspace, worker_host, issue_context)
 
       {:error, _reason} = error ->
         cleanup_failed_created_workspace(workspace, worker_host, issue_context)
@@ -316,6 +335,7 @@ defmodule SymphonyElixir.Workspace do
 
     case File.rm_rf(workspace) do
       {:ok, _removed} ->
+        clear_workspace_init_pending_marker(workspace, nil, issue_context)
         :ok
 
       {:error, reason, path} ->
@@ -337,6 +357,7 @@ defmodule SymphonyElixir.Workspace do
 
     case run_remote_command(worker_host, script, Config.settings!().hooks.timeout_ms) do
       {:ok, {_output, 0}} ->
+        clear_workspace_init_pending_marker(workspace, worker_host, issue_context)
         :ok
 
       {:ok, {output, status}} ->
@@ -351,6 +372,63 @@ defmodule SymphonyElixir.Workspace do
       {:error, reason} ->
         Logger.warning("Failed to remove workspace after failed after_create #{issue_log_context(issue_context)} workspace=#{workspace} reason=#{inspect(reason)} worker_host=#{worker_host}")
         :ok
+    end
+  end
+
+  defp workspace_init_pending_marker(workspace) do
+    workspace <> @workspace_init_pending_suffix
+  end
+
+  defp write_workspace_init_pending_marker(workspace, nil) do
+    marker = workspace_init_pending_marker(workspace)
+
+    case File.write(marker, "") do
+      :ok -> :ok
+      {:error, reason} -> {:error, {:workspace_init_marker_failed, marker, reason}}
+    end
+  end
+
+  defp clear_workspace_init_pending_marker(workspace, nil, issue_context) do
+    marker = workspace_init_pending_marker(workspace)
+
+    case File.rm(marker) do
+      :ok ->
+        :ok
+
+      {:error, :enoent} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning("Failed to clear workspace init marker #{issue_log_context(issue_context)} marker=#{marker} reason=#{inspect(reason)} worker_host=local")
+        {:error, {:workspace_init_marker_clear_failed, marker, reason}}
+    end
+  end
+
+  defp clear_workspace_init_pending_marker(workspace, worker_host, issue_context)
+       when is_binary(worker_host) do
+    marker = workspace_init_pending_marker(workspace)
+
+    script =
+      [
+        remote_shell_assign("workspace_init_pending_marker", marker),
+        "rm -f \"$workspace_init_pending_marker\""
+      ]
+      |> Enum.join("\n")
+
+    case run_remote_command(worker_host, script, Config.settings!().hooks.timeout_ms) do
+      {:ok, {_output, 0}} ->
+        :ok
+
+      {:ok, {output, status}} ->
+        sanitized_output = sanitize_hook_output_for_log(output)
+
+        Logger.warning("Failed to clear workspace init marker #{issue_log_context(issue_context)} marker=#{marker} status=#{status} output=#{inspect(sanitized_output)} worker_host=#{worker_host}")
+
+        {:error, {:workspace_init_marker_clear_failed, marker, worker_host, status, output}}
+
+      {:error, reason} ->
+        Logger.warning("Failed to clear workspace init marker #{issue_log_context(issue_context)} marker=#{marker} reason=#{inspect(reason)} worker_host=#{worker_host}")
+        {:error, reason}
     end
   end
 
