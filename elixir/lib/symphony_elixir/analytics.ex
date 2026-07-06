@@ -28,18 +28,44 @@ defmodule SymphonyElixir.Analytics do
     path = Keyword.get(opts, :path, file_path())
     recorded_at = Keyword.get(opts, :recorded_at, DateTime.utc_now())
     lock_timeout_ms = Keyword.get(opts, :lock_timeout_ms, @lock_timeout_ms)
+    normalized = normalize_event(event, recorded_at)
 
-    event
-    |> normalize_event(recorded_at)
-    |> Jason.encode()
-    |> case do
-      {:ok, json} ->
-        write_event_line(path, json, lock_timeout_ms)
+    if before_analytics_epoch?(normalized) do
+      :ok
+    else
+      case Jason.encode(normalized) do
+        {:ok, json} ->
+          write_event_line(path, json, lock_timeout_ms)
 
-      {:error, reason} ->
-        Logger.warning("Skipping analytics event that cannot be encoded: #{inspect(reason)}")
-        :ok
+        {:error, reason} ->
+          Logger.warning("Skipping analytics event that cannot be encoded: #{inspect(reason)}")
+          :ok
+      end
     end
+  end
+
+  # Write-time floor: backfill and the comment scanner sweep FULL comment/PR
+  # histories, so a one-time store cleanup would not stick — pre-era events
+  # would be re-appended on the next sweep. Dropping them at the single write
+  # choke point keeps the store's time axis anchored at the configured epoch.
+  defp before_analytics_epoch?(event) do
+    with %Date{} = epoch <- Config.analytics_epoch(),
+         %DateTime{} = at <- event_time_axis(event) do
+      Date.compare(DateTime.to_date(at), epoch) == :lt
+    else
+      _no_epoch_or_undatable -> false
+    end
+  end
+
+  defp event_time_axis(event) do
+    [:occurred_at, "occurred_at", :recorded_at, "recorded_at"]
+    |> Enum.find_value(fn key ->
+      case Map.get(event, key) do
+        %DateTime{} = at -> at
+        value when is_binary(value) -> parse_datetime(value)
+        _other -> nil
+      end
+    end)
   end
 
   @spec read_events(keyword()) :: read_result()

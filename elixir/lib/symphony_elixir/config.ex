@@ -132,6 +132,30 @@ defmodule SymphonyElixir.Config do
     end
   end
 
+  @doc """
+  Optional floor date for the analytics event store. Events whose time axis
+  (`occurred_at || recorded_at`) falls before this UTC date are dropped at
+  write time, so backfill/scanner sweeps over old comment history cannot
+  reintroduce pre-era events. Resolution order: the `:analytics_epoch` app
+  env `Date` override, then the `SYMPHONY_ANALYTICS_EPOCH` environment
+  variable (`YYYY-MM-DD`), then nil (no floor).
+  """
+  @spec analytics_epoch() :: Date.t() | nil
+  def analytics_epoch do
+    case Application.get_env(:symphony_elixir, :analytics_epoch) do
+      %Date{} = date ->
+        date
+
+      _unset ->
+        with value when is_binary(value) <- System.get_env("SYMPHONY_ANALYTICS_EPOCH"),
+             {:ok, date} <- Date.from_iso8601(String.trim(value)) do
+          date
+        else
+          _absent_or_invalid -> nil
+        end
+    end
+  end
+
   @spec validate!() :: :ok | {:error, term()}
   def validate! do
     with {:ok, settings} <- settings() do

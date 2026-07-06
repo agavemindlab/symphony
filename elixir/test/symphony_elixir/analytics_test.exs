@@ -1022,6 +1022,84 @@ defmodule SymphonyElixir.AnalyticsTest do
     assert report.history == %{per_day: [], north_star: []}
   end
 
+  test "record_event drops events before the configured analytics epoch" do
+    path = tmp_path("epoch.ndjson")
+    previous = Application.get_env(:symphony_elixir, :analytics_epoch)
+    Application.put_env(:symphony_elixir, :analytics_epoch, ~D[2026-06-25])
+
+    on_exit(fn ->
+      if is_nil(previous) do
+        Application.delete_env(:symphony_elixir, :analytics_epoch)
+      else
+        Application.put_env(:symphony_elixir, :analytics_epoch, previous)
+      end
+    end)
+
+    # Pre-epoch by occurred_at: dropped even though recorded now.
+    :ok =
+      Analytics.record_event(
+        %{event_type: :human_comment, event_id: "human-comment-old", occurred_at: "2026-06-10T09:00:00Z"},
+        path: path
+      )
+
+    # Pre-epoch by recorded_at (no occurred_at): dropped.
+    :ok =
+      Analytics.record_event(
+        %{event_type: :run_started, issue_id: "issue-old"},
+        path: path,
+        recorded_at: "2026-06-20T09:00:00Z"
+      )
+
+    # Epoch day and later: kept. Undatable events: kept.
+    :ok =
+      Analytics.record_event(
+        %{event_type: :human_comment, event_id: "human-comment-new", occurred_at: "2026-06-25T00:00:00Z"},
+        path: path
+      )
+
+    :ok = Analytics.record_event(%{event_type: :run_started, issue_id: "issue-live"}, path: path)
+
+    events = Analytics.read_events(path: path).events
+    assert Enum.map(events, &Map.get(&1, "event_type")) == ["human_comment", "run_started"]
+    assert Enum.map(events, &Map.get(&1, "event_id")) == ["human-comment-new", nil]
+  end
+
+  test "analytics epoch resolves from app env then SYMPHONY_ANALYTICS_EPOCH" do
+    alias SymphonyElixir.Config
+
+    previous_env = System.get_env("SYMPHONY_ANALYTICS_EPOCH")
+
+    on_exit(fn ->
+      if is_nil(previous_env) do
+        System.delete_env("SYMPHONY_ANALYTICS_EPOCH")
+      else
+        System.put_env("SYMPHONY_ANALYTICS_EPOCH", previous_env)
+      end
+    end)
+
+    System.delete_env("SYMPHONY_ANALYTICS_EPOCH")
+    assert Config.analytics_epoch() == nil
+
+    System.put_env("SYMPHONY_ANALYTICS_EPOCH", "2026-06-25")
+    assert Config.analytics_epoch() == ~D[2026-06-25]
+
+    System.put_env("SYMPHONY_ANALYTICS_EPOCH", "junk")
+    assert Config.analytics_epoch() == nil
+
+    previous_app = Application.get_env(:symphony_elixir, :analytics_epoch)
+    Application.put_env(:symphony_elixir, :analytics_epoch, ~D[2026-07-01])
+
+    on_exit(fn ->
+      if is_nil(previous_app) do
+        Application.delete_env(:symphony_elixir, :analytics_epoch)
+      else
+        Application.put_env(:symphony_elixir, :analytics_epoch, previous_app)
+      end
+    end)
+
+    assert Config.analytics_epoch() == ~D[2026-07-01]
+  end
+
   defp panel(summary, id) do
     Enum.find(summary.panels, &(&1.id == id))
   end
