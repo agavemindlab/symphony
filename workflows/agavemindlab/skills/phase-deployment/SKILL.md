@@ -59,6 +59,9 @@ listed in the `cleanup` field.
 ## Land (merge entry only)
 
 Open and follow `.agents/skills/symphony-land/SKILL.md` to merge the PR.
+The current PR's own post-merge CI/deploy run completion is part of that land
+gate; do not post `## Deployment` until it reaches success, failure,
+cancelled, or a land-skill timeout/risk decision.
 
 ## Verification
 
@@ -109,26 +112,41 @@ When a post-merge acceptance check requires logged-in user state:
    health, error-rate baseline), and any `延迟验收` whose window has already
    elapsed (run its recorded `待验证项` query against the production log and
    judge it against the predicate — never weaken the predicate to pass it).
-2. **Leave genuinely-pending items `⚠️ 待观察`** with a concrete reason:
+2. **Leave genuinely-pending items `⚠️ 待观察`** with a concrete reason and a
+   concrete way to make the condition happen:
+   - Do not use `⚠️ 待观察` for the current PR's own post-merge CI/deploy run
+     completion; that is the merge-entry land gate above.
    - `延迟验收` whose window is still open — on **merge entry** the deploy
      **starts** the window: carry the runnable spec forward from
      `## Implementation` 的 `Merge 后验证`, stamp the **window-end date**
      (deploy date + window length), and record it in `待验证项`. On a re-entry,
      if the window still has not elapsed, note `窗口未满，剩余 <N> 天`.
    - any other check not yet runnable (an external signal not yet readable).
+     State the trigger action/event, owner, observable signal, and the human's
+     next step once the signal appears. Do not use an abstract future event like
+     "the next real handoff" unless you also name the issue/source, triggering
+     action, and fallback if it never happens. If no one can cause it and no
+     signal can be watched, this is not a useful pending item. If a human/admin
+     action is needed to create the signal, first research the repo, PR,
+     configured service, and public docs, then write the exact runbook: where
+     to act, what to configure, where secret values come from without printing
+     them, how to rerun verification, and the pass predicate. If that cannot be
+     determined, ask `[NEEDS CLARIFICATION]`.
 3. **Hand off `需人工判定` `S<N>`** (only a human can confirm). Note it in
    后续事项; spin off genuine follow-up work as a separate ticket via the
    `symphony-issue` skill (autonomous `follow-up`) and cite its identifier
    (e.g. `ENG-123`); do not expand this issue.
 
 A `❌ 失败` means the shipped change did not meet its criterion — a real
-regression. Do not auto-fix it from here: state it plainly, `@`-mention the
-issue's `creator`, and leave it for the human to route to `Rework`.
+regression. If the fix is agent-actionable, immediately follow Cross-phase
+rework below; use `⚠️ 待观察` only for checks that are not runnable yet.
 
 ## `## Deployment` artifact template
 
 ```md
 ## Deployment
+
+<用人话先说明结论和影响，再列证据。>
 
 **PR**: [#NNNN](URL) · **Merge commit**: [`<sha>`](URL) · **Deploy**: [pipeline](URL)
 
@@ -144,13 +162,13 @@ issue's `creator`, and leave it for the human to route to `Rework`.
   - 证据: 见待验证项
 
 ### 待验证项（omit when none pending; one per still-`⚠️ 待观察` S<N>）
-- S<N>: **查询** `<runnable query>` · **通过判据** `<predicate>` · **何时可验** `窗口末 <YYYY-MM-DD>` / `<其它前置条件>`
+- S<N>: **等待条件** `<condition>` · **触发动作/责任方** `<who/what causes it>` · **人工操作** `<exact runbook if human/admin action is needed; otherwise n/a>` · **可观测信号** `<log/comment/run/metadata>` · **查询** `<runnable query once signal exists>` · **通过判据** `<predicate>` · **何时可验** `<only after signal exists>` / `窗口末 <YYYY-MM-DD>` · **信号出现后人工动作** `<issue status/action>`
 
 ### 后续事项（optional）
 - <follow-up issues, rollback path; omit if none>
 
 > 👉 **需要人工处理**：确认部署结果符合预期。
-> - 若仍有「待验证项」：把 issue 留在 `Human Review`（或任何 Symphony 不处理的状态）直到「何时可验」满足，然后将其移回 `In Progress` —— Deployment 会重入、把剩余验收跑完并回报；全部 `✅` 后由你置 `Done`。
+> - 若仍有「待验证项」：把 issue 留在 `Human Review`（或任何 Symphony 不处理的状态）直到「可观测信号」已经出现且「何时可验」满足，然后将其移回 `In Progress` —— Deployment 会重入、把剩余验收跑完并回报；全部 `✅` 后由你置 `Done`。
 > - 若验收已全部完成：直接将 issue 置为 `Done`；如有问题置为 `Rework`。
 
 >>> 🛠️ 本次激活的 skills
@@ -170,8 +188,11 @@ and production-log access alone.
 ## Cross-phase rework
 
 If post-deploy verification reveals the implementation was fundamentally
-wrong and a new PR is required, follow the cross-phase rework protocol in your workflow instructions: resolve `## Deployment`, update workpad
-`current_phase: Implementation`, and open `phase-implementation`.
+wrong and a new PR is required, follow the workflow's Cross-phase rework
+protocol in this run: resolve `## Deployment`, update workpad
+`current_phase: Implementation`, and open `phase-implementation`. If the root
+cause belongs to Design or Requirements, target that earlier phase instead. Do
+not create a fix PR while `current_phase` remains Deployment.
 
 ## Exit
 
@@ -180,6 +201,9 @@ After posting or updating the `## Deployment` artifact:
 1. Move the issue back to `Human Review`.
 2. Stop. Do **not** move the issue to `Done`.
 
+If Cross-phase rework opened an earlier phase, follow that phase's Exit instead
+of this Deployment Exit.
+
 The posted `> 👉` callout tells the human how to proceed: close on all-resolved,
-move back to `In Progress` to re-enter verification while items remain
-`⚠️ 待观察`, or `Rework` on failure.
+move back to `In Progress` only after a pending item's observable signal exists,
+or `Rework` on failure.

@@ -288,12 +288,13 @@ defmodule SymphonyElixir.Config.Schema do
       field(:dashboard_enabled, :boolean, default: true)
       field(:refresh_ms, :integer, default: 1_000)
       field(:render_interval_ms, :integer, default: 16)
+      field(:analytics_path, :string)
     end
 
     @spec changeset(%__MODULE__{}, map()) :: Ecto.Changeset.t()
     def changeset(schema, attrs) do
       schema
-      |> cast(attrs, [:dashboard_enabled, :refresh_ms, :render_interval_ms], empty_values: [])
+      |> cast(attrs, [:dashboard_enabled, :refresh_ms, :render_interval_ms, :analytics_path], empty_values: [])
       |> validate_number(:refresh_ms, greater_than: 0)
       |> validate_number(:render_interval_ms, greater_than: 0)
     end
@@ -485,7 +486,15 @@ defmodule SymphonyElixir.Config.Schema do
         turn_sandbox_policy: normalize_optional_map(settings.codex.turn_sandbox_policy)
     }
 
-    %{settings | tracker: tracker, workspace: workspace, codex: codex}
+    observability = %{
+      settings.observability
+      | analytics_path:
+          settings.observability.analytics_path
+          |> resolve_path_value(nil)
+          |> expand_user_path()
+    }
+
+    %{settings | tracker: tracker, workspace: workspace, codex: codex, observability: observability}
   end
 
   defp normalize_keys(value) when is_map(value) do
@@ -524,6 +533,8 @@ defmodule SymphonyElixir.Config.Schema do
     end
   end
 
+  defp resolve_path_value(nil, default), do: default
+
   defp resolve_path_value(value, default) when is_binary(value) do
     case normalize_path_token(value) do
       :missing ->
@@ -536,6 +547,14 @@ defmodule SymphonyElixir.Config.Schema do
         path
     end
   end
+
+  defp expand_user_path(nil), do: nil
+
+  defp expand_user_path("~" <> _ = path) do
+    Path.expand(path)
+  end
+
+  defp expand_user_path(path), do: path
 
   defp resolve_env_value(value, fallback) when is_binary(value) do
     case env_reference_name(value) do

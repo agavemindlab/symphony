@@ -55,6 +55,7 @@ defmodule SymphonyElixir.TestSupport.Snapshot do
       raw_ansi_content
       |> strip_ansi()
       |> normalize_content()
+      |> trim_line_padding()
       |> String.trim_trailing("\n")
 
     "```text\n#{plain}\n```\n"
@@ -75,4 +76,6 @@ defmodule SymphonyElixir.TestSupport.Snapshot do
     |> String.trim_trailing("\n")
     |> Kernel.<>("\n")
   end
+
+  defp trim_line_padding(content), do: Regex.replace(~r/[ \t]+$/m, content, "")
 end
