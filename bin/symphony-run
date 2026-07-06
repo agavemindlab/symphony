@@ -88,4 +88,7 @@ printf 'symphony-run: starting project=%s profile=%s workflow=%s logs=%s\n' \
 
 cd "$repo_root/elixir"
 mise exec -- mix escript.build >/dev/null
-exec mise exec -- ./bin/symphony --i-understand-that-this-will-be-running-without-the-usual-guardrails "$workflow_file"
+symphony_args=(--i-understand-that-this-will-be-running-without-the-usual-guardrails)
+[ -z "${SYMPHONY_PORT:-}" ] || symphony_args+=(--port "$SYMPHONY_PORT")
+symphony_args+=("$workflow_file")
+exec mise exec -- ./bin/symphony "${symphony_args[@]}"

@@ -74,12 +74,13 @@ to the CLI, without resolving through symlinks.
 `hooks.after_create` keeps one bare Git cache per fork/repo under
 `$SYMPHONY_WORKSPACE_ROOT/.cache/git/`, then adds each issue directory as a
 detached worktree at `upstream/$SYMPHONY_BASE_BRANCH`. It runs the project
-`setup.sh` if it exists, then installs shared skills from
-`$SYMPHONY_WORKFLOW_DIR/skills/` into the workspace `.agents/skills/` directory.
-If the target repository already contains `.agents/skills/<name>/`, the
-installer skips that skill and leaves the repository version in place. Only
-newly installed skills are added to `.git/info/exclude`; the committed
-`.gitignore` is not modified.
+`setup.sh` if it exists, creates `.issue-secrets/` with mode `700`, then
+symlinks shared skills from `$SYMPHONY_WORKFLOW_DIR/skills/` into the workspace
+`.agents/skills/` directory. If the target repository already contains
+`.agents/skills/<name>/`, the installer skips that skill and leaves the
+repository version in place. Only newly linked skills are added to
+`.git/info/exclude`; the committed `.gitignore` is not modified. The hook also
+local-excludes `.issue-secrets/` for human-provided, issue-scoped secret files.
 
 `codex.command` exports a shared uv cache at
 `$SYMPHONY_WORKSPACE_ROOT/.cache/uv`, hardlink mode, and a stable per-workspace

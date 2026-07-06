@@ -297,6 +297,8 @@ and runs once checkable (re-entered via `In Progress` — see your workflow inst
 ```md
 ## Requirements
 
+<用人话先说明结论和影响，再列证据。>
+
 Primary: Type:<Bug|Feature|Refactor|Performance|Migration|Chore|Spike|Other>
 
 要解决的问题（what）:
@@ -346,7 +348,7 @@ When a batched `[NEEDS CLARIFICATION]` block remains after honest analysis:
 
 ### On resume
 
-Read the human's reply in the artifact thread and apply the consent convention:
+Read the human's reply in the artifact thread and apply the consent convention. Fold answers into the revised artifact content, not the old comment body:
 
 - For each **resolved** question, fold the chosen answer into the artifact
   (into `要解决的问题` / `为什么解决` / `验收标准` / `关键假设` as fitting) and

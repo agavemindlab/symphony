@@ -155,8 +155,11 @@ defmodule SymphonyElixir.CoreTest do
     assert is_map(hooks)
     assert Map.get(hooks, "after_create") =~ "project_workflow_dir="
     assert Map.get(hooks, "after_create") =~ ".cache/git"
+    assert Map.get(hooks, "after_create") =~ "repo_lock="
+    assert Map.get(hooks, "after_create") =~ "Timed out waiting for Git cache lock"
     assert Map.get(hooks, "after_create") =~ "worktree add --detach"
     refute Map.get(hooks, "after_create") =~ "gh repo clone"
+    assert Map.get(hooks, "after_create") =~ ".issue-secrets/"
     assert Map.get(hooks, "after_create") =~ "\"$project_workflow_dir/setup.sh\""
     assert Map.get(hooks, "after_create") =~ "\"$project_workflow_dir/skills\""
     assert Map.get(hooks, "after_create") =~ "--git-path info/exclude"
@@ -192,12 +195,25 @@ defmodule SymphonyElixir.CoreTest do
     assert prompt =~ "retain each comment's `parent { id }`"
     assert prompt =~ "reply node as standalone top-level feedback"
     assert prompt =~ "## Phase Artifact Protocol"
+    assert prompt =~ "Each phase artifact version is a top-level Linear comment"
+    assert prompt =~ "clarification-answer resume"
+    assert prompt =~ "fresh top-level artifact"
+    refute prompt =~ "posts or updates its own artifact"
+    refute prompt =~ "exactly one top-level comment"
+    refute prompt =~ "updates the existing one in place via `commentUpdate`"
     assert prompt =~ "## Workpad"
-    assert prompt =~ "✅ 已批准，进入 [Next Phase]"
     assert prompt =~ "⏩ 自动进入 [Next Phase]"
+    assert prompt =~ "✅ 已批准，进入 [Next Phase]"
+    assert prompt =~ ">>> 🛠️ 本次激活的 skills"
+    assert prompt =~ "Implementation never auto-advances"
     assert prompt =~ "Deployment only via `Merging`"
+    assert prompt =~ "## 建议新建 issue"
+    assert prompt =~ "Do **not** use GitHub-style"
+    assert prompt =~ "Phase Artifact Protocol"
+    assert prompt =~ "Rework cycle"
+    assert prompt =~ "Cross-phase rework"
+    assert prompt =~ "Agent never moves to `Done`"
     assert prompt =~ "**`Human Review` is not an agent state**"
-    assert prompt =~ "Do **not** use GitHub-style `> [!NOTE]`"
     assert prompt =~ "collapsible sections (`>>>`)"
     assert prompt =~ "Skills-activated footer"
     assert prompt =~ "Codex session id"
@@ -222,14 +238,111 @@ defmodule SymphonyElixir.CoreTest do
   end
 
   test "requirements skill publishes reworked clarification artifacts through workflow protocol" do
+    workflow =
+      File.read!(Path.expand("../workflows/agavemindlab/WORKFLOW.md", File.cwd!()))
+
     skill =
       File.read!(Path.expand("../workflows/agavemindlab/skills/phase-requirements/SKILL.md", File.cwd!()))
 
-    assert skill =~ ~r/same-phase Rework\s+cycle/
+    assert workflow =~ "clarification-answer resume"
+    assert workflow =~ "same-phase Rework cycle"
+    assert workflow =~ "even if the Linear state is `In Progress`"
+    assert workflow =~ "post a fresh top-level artifact"
     assert skill =~ "workflow artifact protocol"
+    assert skill =~ "not the old comment body"
     refute skill =~ "Post (or update) the `## Requirements` artifact"
     refute skill =~ "Post or update the artifact comment."
     refute skill =~ "Post or update the `## Requirements` artifact"
+  end
+
+  test "design skill publishes reworked clarification artifacts through workflow protocol" do
+    skill =
+      File.read!(Path.expand("../workflows/agavemindlab/skills/phase-design/SKILL.md", File.cwd!()))
+
+    assert skill =~ "workflow artifact protocol"
+    assert skill =~ "not the old comment body"
+    refute skill =~ "Post or update the artifact comment."
+    refute skill =~ "Post or update the `## Design` artifact"
+  end
+
+  test "cross-phase rollback supersedes stale target-through-awaiting artifacts" do
+    workflow = shared_workflow_prompt()
+
+    implementation_skill =
+      File.read!(Path.expand("../workflows/agavemindlab/skills/phase-implementation/SKILL.md", File.cwd!()))
+
+    artifacts = [
+      %{id: "stale-requirements", phase: "Requirements", kind: :phase_artifact, invalidated?: true},
+      %{id: "stale-design", phase: "Design", kind: :phase_artifact, invalidated?: true},
+      %{
+        id: "approved-still-referenced-design",
+        phase: "Design",
+        kind: :phase_artifact,
+        invalidated?: false
+      },
+      %{id: "stale-implementation", phase: "Implementation", kind: :phase_artifact, invalidated?: true},
+      %{id: "standalone-human-feedback", kind: :human_feedback, invalidated?: true}
+    ]
+
+    calls = dry_run_artifact_calls(workflow, :cross_phase_rollback, "Requirements", "Implementation", artifacts)
+    resolved_ids = resolved_comment_ids(calls)
+
+    assert resolved_ids == ["stale-requirements", "stale-design", "stale-implementation"]
+    refute "approved-still-referenced-design" in resolved_ids
+    refute "standalone-human-feedback" in resolved_ids
+    assert {:commentCreate, :top_level_phase_artifact, "## Requirements"} in calls
+
+    active_requirements =
+      calls
+      |> active_artifacts_after_rollback(artifacts, %{
+        id: "new-requirements",
+        phase: "Requirements",
+        kind: :phase_artifact
+      })
+      |> Enum.filter(&(&1.phase == "Requirements"))
+
+    assert Enum.map(active_requirements, & &1.id) == ["new-requirements"]
+    assert implementation_skill =~ "target phase through Implementation"
+    assert implementation_skill =~ "including stale same-phase target artifacts"
+  end
+
+  test "DEV-5321 style clarification resume fixture publishes a fresh artifact version" do
+    workflow = shared_workflow_prompt()
+
+    old_artifact = %{
+      id: "80905809-e1e6-4ff6-a275-c94c2415e7ce",
+      created_at: ~U[2026-06-20 01:00:00Z]
+    }
+
+    for phase <- ["Requirements", "Design"] do
+      new_artifact = fresh_artifact_version(old_artifact)
+      calls = dry_run_artifact_calls(workflow, :clarification_answer, phase, old_artifact)
+
+      assert calls == [
+               {:commentResolve, old_artifact.id},
+               {:commentCreate, :top_level_phase_artifact, "## #{phase}"},
+               {:commentCreate, {:reply_to_new_artifact, new_artifact.id}, "clarification summary"}
+             ]
+
+      assert new_artifact.id != old_artifact.id
+      assert DateTime.compare(new_artifact.created_at, old_artifact.created_at) == :gt
+      refute_called_comment_update_for_artifact(calls, old_artifact.id)
+    end
+  end
+
+  test "DEV-5338 style question discussion fixture replies without rewriting artifacts" do
+    workflow = shared_workflow_prompt()
+    artifact = %{id: "requirements-question-thread", created_at: ~U[2026-06-23 01:00:00Z]}
+
+    calls = dry_run_artifact_calls(workflow, :question_discussion, "Requirements", artifact)
+
+    assert calls == [{:commentCreate, {:reply_to_artifact, artifact.id}, "answer Requirements question"}]
+    refute Enum.any?(calls, fn {operation, _, _} -> operation in [:commentResolve, :commentUpdate] end)
+
+    refute Enum.any?(calls, fn
+             {:commentCreate, :top_level_phase_artifact, _body} -> true
+             _ -> false
+           end)
   end
 
   test "aggregate dispatch ordering interleaves projects" do
@@ -272,11 +385,11 @@ defmodule SymphonyElixir.CoreTest do
       File.read!(Path.expand("../workflows/agavemindlab/skills/phase-implementation/SKILL.md", File.cwd!()))
 
     for section <- [
-          "### 当前对象",
-          "### Root cause",
+          "### 结论",
+          "### Root cause / recommendation",
           "### Rework 已回应",
-          "### Code changes",
-          "### Verification",
+          "### 本轮变化",
+          "### 验证结论",
           "### Acceptance mapping",
           "### Human action needed"
         ] do
@@ -317,6 +430,90 @@ defmodule SymphonyElixir.CoreTest do
           "request changes"
         ] do
       assert reviewer =~ contract
+    end
+  end
+
+  test "maestro reviewer challenges undersized retention windows for trend claims" do
+    reviewer =
+      File.read!(Path.expand("../.codex/skills/maestro/agents/maestro-reviewer.md", File.cwd!()))
+
+    for contract <- [
+          "retention window",
+          "long-term",
+          "large enough",
+          "request changes or ask clarification"
+        ] do
+      assert reviewer =~ contract
+    end
+  end
+
+  test "maestro resumes human answers to clarification markers through active state" do
+    launcher = File.read!(Path.expand("../.codex/skills/maestro/SKILL.md", File.cwd!()))
+
+    reviewer =
+      File.read!(Path.expand("../.codex/skills/maestro/agents/maestro-reviewer.md", File.cwd!()))
+
+    assert launcher =~ "clarification-answer resume"
+    assert launcher =~ "set the issue to `In Progress`"
+    assert reviewer =~ "clarification answer already exists"
+    assert reviewer =~ "not phase approval"
+  end
+
+  test "maestro reviewer does not overstate readback as regression verification" do
+    reviewer =
+      File.read!(Path.expand("../.codex/skills/maestro/agents/maestro-reviewer.md", File.cwd!()))
+
+    for contract <- [
+          "merged-file readback",
+          "Linear relation checks",
+          "regression verification/evidence",
+          "command, log, test, or manual exercise"
+        ] do
+      assert reviewer =~ contract
+    end
+  end
+
+  test "maestro reviewer blocks Done when required regression validation is missing" do
+    reviewer =
+      File.read!(Path.expand("../.codex/skills/maestro/agents/maestro-reviewer.md", File.cwd!()))
+
+    for contract <- [
+          "required regression validation",
+          "回归例",
+          "historical issue",
+          "sole evidence",
+          "workflow path",
+          "existing Linear state",
+          "readback satisfies",
+          "readback-only risk",
+          "bundled `S1-S6`",
+          "separate evidence",
+          "close-test gap",
+          "request changes",
+          "not completion",
+          "Readback cannot satisfy it",
+          "manual exercise of the affected behavior"
+        ] do
+      assert reviewer =~ contract
+    end
+  end
+
+  test "maestro launcher task repeats required regression validation gate" do
+    skill = File.read!(Path.expand("../.codex/skills/maestro/SKILL.md", File.cwd!()))
+
+    for contract <- [
+          "required",
+          "regression validation",
+          "回归例",
+          "historical issue",
+          "workflow path",
+          "readback-only risk",
+          "bundled `S1-S6`",
+          "command, log, test, or manual exercise",
+          "request changes instead of completion",
+          "confirmation"
+        ] do
+      assert skill =~ contract
     end
   end
 
@@ -526,6 +723,85 @@ defmodule SymphonyElixir.CoreTest do
     after
       File.rm_rf(test_root)
     end
+  end
+
+  test "human review reconcile starts maestro pre-review before stopping active agent" do
+    write_workflow_file!(Workflow.workflow_file_path(), tracker_required_labels: ["symphony"])
+    SymphonyElixir.MaestroPreReview.reset_handoff_claims_for_test()
+
+    parent = self()
+    issue_id = "issue-human-review-reconcile"
+
+    agent_pid =
+      spawn(fn ->
+        receive do
+          :stop -> :ok
+        end
+      end)
+
+    pre_review_runner = fn issue, opts ->
+      send(parent, {:maestro_pre_review, issue.identifier, issue.state, opts[:worker_host]})
+      :ok
+    end
+
+    state =
+      %Orchestrator.State{
+        running: %{
+          issue_id => %{
+            pid: agent_pid,
+            ref: nil,
+            identifier: "MT-HUMAN-REVIEW",
+            issue: %Issue{
+              id: issue_id,
+              identifier: "MT-HUMAN-REVIEW",
+              state: "In Progress",
+              labels: ["symphony"]
+            },
+            worker_host: nil,
+            started_at: DateTime.utc_now()
+          }
+        },
+        claimed: MapSet.new([issue_id]),
+        codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
+        retry_attempts: %{}
+      }
+      |> Map.put(:maestro_pre_review_runner, pre_review_runner)
+
+    issue = %Issue{
+      id: issue_id,
+      identifier: "MT-HUMAN-REVIEW",
+      state: "Human Review",
+      title: "Ready for review",
+      description: "Stopped by reconciliation",
+      labels: ["symphony"]
+    }
+
+    updated_state = Orchestrator.reconcile_issue_states_for_test([issue], state)
+
+    assert_receive {:maestro_pre_review, "MT-HUMAN-REVIEW", "Human Review", nil}
+    refute Map.has_key?(updated_state.running, issue_id)
+    refute MapSet.member?(updated_state.claimed, issue_id)
+    refute Process.alive?(agent_pid)
+  end
+
+  test "maestro pre-review handoff claim is shared across launch paths" do
+    SymphonyElixir.MaestroPreReview.reset_handoff_claims_for_test()
+
+    handoff_at = DateTime.from_naive!(~N[2026-06-25 10:00:00], "Etc/UTC")
+
+    issue = %Issue{
+      id: "issue-shared-maestro-claim",
+      identifier: "MT-SHARED-MAESTRO",
+      state: "Human Review",
+      labels: ["symphony"],
+      updated_at: handoff_at
+    }
+
+    assert SymphonyElixir.MaestroPreReview.claim_handoff_for_test(issue)
+    refute SymphonyElixir.MaestroPreReview.claim_handoff_for_test(issue)
+
+    next_handoff = %{issue | updated_at: DateTime.add(handoff_at, 60)}
+    assert SymphonyElixir.MaestroPreReview.claim_handoff_for_test(next_handoff)
   end
 
   test "terminal issue state stops running agent and cleans workspace" do
@@ -932,6 +1208,34 @@ defmodule SymphonyElixir.CoreTest do
       title: "Retry opted out",
       state: "In Progress",
       labels: []
+    }
+
+    updated_state =
+      Orchestrator.handle_retry_issue_lookup_for_test(issue, state, issue_id, 1, %{
+        identifier: issue.identifier,
+        error: "agent exited"
+      })
+
+    refute MapSet.member?(updated_state.claimed, issue_id)
+    refute Map.has_key?(updated_state.retry_attempts, issue_id)
+  end
+
+  test "retry releases its claim when issue has a non-terminal blocker" do
+    issue_id = "retry-blocked"
+
+    state = %Orchestrator.State{
+      max_concurrent_agents: 0,
+      running: %{},
+      claimed: MapSet.new([issue_id]),
+      retry_attempts: %{}
+    }
+
+    issue = %Issue{
+      id: issue_id,
+      identifier: "MT-566",
+      title: "Retry blocked by dependency",
+      state: "In Progress",
+      blocked_by: [%{id: "blocker-4", identifier: "MT-567", state: "In Progress"}]
     }
 
     updated_state =
@@ -1937,6 +2241,8 @@ defmodule SymphonyElixir.CoreTest do
     assert prompt =~ "This is an unattended Symphony orchestration session."
     assert prompt =~ "Stop early only for a true blocker"
     assert prompt =~ "Do not include generic \"next steps for user\""
+    assert prompt =~ "unresolved Phase artifacts"
+    assert prompt =~ "most recent unresolved artifact with no closing reply"
     assert prompt =~ "Open and follow `.agents/skills/symphony-linear/SKILL.md`"
     assert prompt =~ "When the target phase is a rework of its own artifact"
     assert prompt =~ "Requirements rework must also state"
@@ -1953,6 +2259,11 @@ defmodule SymphonyElixir.CoreTest do
     assert prompt =~ "retain each comment's `parent { id }`"
     assert prompt =~ "reply node as standalone top-level feedback"
     assert prompt =~ "feedback keeps the phase intent of that artifact"
+    assert prompt =~ "Implementation → Deployment is gated by `Merging`"
+    assert prompt =~ "open the matching phase skill"
+    assert prompt =~ ".agents/skills/symphony-linear/SKILL.md"
+    assert prompt =~ "## Phase Map"
+    assert prompt =~ "## Main Flow"
     assert prompt =~ "Continuation context:"
     assert prompt =~ "retry attempt #2"
 
@@ -2144,6 +2455,395 @@ defmodule SymphonyElixir.CoreTest do
                      500
 
       assert session_id == "thread-live-turn-live"
+    after
+      File.rm_rf(test_root)
+    end
+  end
+
+  test "maestro pre-review prompt preserves human review gate semantics" do
+    issue = %Issue{
+      id: "issue-maestro-prompt",
+      identifier: "MT-5316",
+      title: "Use Maestro before human review",
+      description: "Pre-review handoff",
+      state: "Human Review",
+      url: "https://example.org/issues/MT-5316",
+      labels: ["symphony"]
+    }
+
+    prompt = SymphonyElixir.MaestroPreReview.build_prompt_for_test(issue)
+
+    assert prompt =~ "$maestro MT-5316"
+    assert prompt =~ "fresh Codex session"
+    assert prompt =~ "Do not reuse the working agent"
+    assert prompt =~ "dedicated Maestro Linear OAuth app"
+    assert prompt =~ "without using any fallback identity"
+    assert prompt =~ "request changes"
+    assert prompt =~ "Rework"
+    assert prompt =~ "approve"
+    assert prompt =~ "0-10"
+    assert prompt =~ "keep the issue in `Human Review`"
+    assert prompt =~ "same current artifact/head"
+    assert prompt =~ "already contains a Maestro pre-review reply"
+    assert prompt =~ "record a short no-action reason"
+    assert prompt =~ "evidence is unavailable"
+    refute prompt =~ "✅ 已批准"
+
+    assert SymphonyElixir.MaestroPreReview.workspace_identifier_for_test(issue) == "MT-5316-maestro"
+    assert SymphonyElixir.MaestroPreReview.prepare_main_branch_command_for_test() =~ "upstream/$base_branch"
+  end
+
+  test "maestro pre-review fails closed without dedicated Linear auth" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-maestro-pre-review-missing-auth-#{System.unique_integer([:positive])}"
+      )
+
+    try do
+      workspace_root = Path.join(test_root, "workspaces")
+      previous_maestro_linear_api_key = System.get_env("MAESTRO_LINEAR_API_KEY")
+      on_exit(fn -> restore_env("MAESTRO_LINEAR_API_KEY", previous_maestro_linear_api_key) end)
+      System.delete_env("MAESTRO_LINEAR_API_KEY")
+
+      write_workflow_file!(Workflow.workflow_file_path(),
+        tracker_kind: "memory",
+        workspace_root: workspace_root
+      )
+
+      Application.put_env(:symphony_elixir, :memory_tracker_recipient, self())
+
+      issue = %Issue{
+        id: "issue-maestro-failure",
+        identifier: "MT-5318",
+        title: "Record pre-review failure",
+        description: "The fallback should leave the issue in Human Review",
+        state: "Human Review",
+        url: "https://example.org/issues/MT-5318",
+        labels: ["symphony"]
+      }
+
+      assert {:error, :missing_maestro_linear_api_key} =
+               SymphonyElixir.MaestroPreReview.run(issue,
+                 linear_client: fn _query, _variables, _opts ->
+                   flunk("missing dedicated auth must not preflight Linear")
+                 end,
+                 app_server_runner: fn _workspace, _prompt, _issue, _opts ->
+                   flunk("missing dedicated auth must not start Maestro")
+                 end
+               )
+
+      refute_received {:memory_tracker_comment, "issue-maestro-failure", _body}
+      refute_received {:memory_tracker_state_update, "issue-maestro-failure", _state}
+    after
+      File.rm_rf(test_root)
+    end
+  end
+
+  test "maestro pre-review fails closed when dedicated Linear auth is invalid" do
+    write_workflow_file!(Workflow.workflow_file_path(), tracker_kind: "memory")
+    Application.put_env(:symphony_elixir, :memory_tracker_recipient, self())
+
+    issue = %Issue{
+      id: "issue-maestro-invalid-auth",
+      identifier: "MT-5320",
+      title: "Reject invalid Maestro Linear auth",
+      description: "The fallback must not use Symphony auth",
+      state: "Human Review",
+      url: "https://example.org/issues/MT-5320",
+      labels: ["symphony"]
+    }
+
+    assert {:error, :invalid_maestro_linear_api_key} =
+             SymphonyElixir.MaestroPreReview.run(issue,
+               maestro_linear_api_key: "bad-token",
+               linear_client: fn _query, _variables, opts ->
+                 assert opts == [api_key: "bad-token"]
+                 {:error, {:linear_api_status, 401}}
+               end,
+               app_server_runner: fn _workspace, _prompt, _issue, _opts ->
+                 flunk("invalid dedicated auth must not start Maestro")
+               end
+             )
+
+    refute_received {:memory_tracker_comment, "issue-maestro-invalid-auth", _body}
+    refute_received {:memory_tracker_state_update, "issue-maestro-invalid-auth", _state}
+  end
+
+  test "maestro pre-review does not write Symphony-auth no-action comments after startup failure" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-maestro-pre-review-startup-failure-#{System.unique_integer([:positive])}"
+      )
+
+    try do
+      write_workflow_file!(Workflow.workflow_file_path(),
+        tracker_kind: "memory",
+        workspace_root: Path.join(test_root, "workspaces")
+      )
+
+      Application.put_env(:symphony_elixir, :memory_tracker_recipient, self())
+
+      issue = %Issue{
+        id: "issue-maestro-startup-failure",
+        identifier: "MT-5321",
+        title: "Do not fallback-comment startup failures",
+        description: "Only dedicated Maestro auth may write Maestro review notes",
+        state: "Human Review",
+        url: "https://example.org/issues/MT-5321",
+        labels: ["symphony"]
+      }
+
+      assert {:error, {:maestro_main_branch_prepare_failed, _status, _output}} =
+               SymphonyElixir.MaestroPreReview.run(issue,
+                 maestro_linear_api_key: "maestro-token",
+                 linear_client: fn _query, _variables, opts ->
+                   assert opts == [api_key: "maestro-token"]
+                   {:ok, %{"data" => %{"viewer" => %{"id" => "usr_maestro"}}}}
+                 end
+               )
+
+      refute_received {:memory_tracker_comment, "issue-maestro-startup-failure", _body}
+      refute_received {:memory_tracker_state_update, "issue-maestro-startup-failure", _state}
+    after
+      File.rm_rf(test_root)
+    end
+  end
+
+  test "maestro pre-review injects the dedicated Linear api key into fresh session tools" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-maestro-pre-review-dedicated-auth-#{System.unique_integer([:positive])}"
+      )
+
+    try do
+      workspace_root = Path.join(test_root, "workspaces")
+      upstream_repo = Path.join(test_root, "upstream")
+
+      File.mkdir_p!(upstream_repo)
+      System.cmd("git", ["-C", upstream_repo, "init", "-b", "main"])
+      System.cmd("git", ["-C", upstream_repo, "config", "user.name", "Test User"])
+      System.cmd("git", ["-C", upstream_repo, "config", "user.email", "test@example.com"])
+      File.write!(Path.join(upstream_repo, "README.md"), "# upstream")
+      System.cmd("git", ["-C", upstream_repo, "add", "README.md"])
+      System.cmd("git", ["-C", upstream_repo, "commit", "-m", "initial"])
+
+      write_workflow_file!(Workflow.workflow_file_path(),
+        workspace_root: workspace_root,
+        hook_after_create: "git init -b main . && git remote add upstream #{upstream_repo}"
+      )
+
+      issue = %Issue{
+        id: "issue-maestro-dedicated-auth",
+        identifier: "MT-5319",
+        title: "Use dedicated Maestro Linear auth",
+        description: "Maestro tool calls must not use Symphony auth",
+        state: "Human Review",
+        url: "https://example.org/issues/MT-5319",
+        labels: ["symphony"]
+      }
+
+      parent = self()
+
+      linear_client = fn query, variables, opts ->
+        send(parent, {:linear_client_called, query, variables, opts})
+        {:ok, %{"data" => %{"viewer" => %{"id" => "usr_maestro"}}}}
+      end
+
+      app_server_runner = fn _workspace, _prompt, _issue, opts ->
+        result = opts[:tool_executor].("linear_graphql", %{"query" => "query Viewer { viewer { id } }"})
+        send(parent, {:tool_result, result})
+        {:ok, %{id: "turn-maestro"}}
+      end
+
+      assert :ok =
+               SymphonyElixir.MaestroPreReview.run(issue,
+                 maestro_linear_api_key: "maestro-token",
+                 linear_client: linear_client,
+                 app_server_runner: app_server_runner
+               )
+
+      assert_receive {:linear_client_called, "query SymphonyLinearViewer" <> _, %{}, [api_key: "maestro-token"]}
+      assert_receive {:linear_client_called, "query Viewer { viewer { id } }", %{}, [api_key: "maestro-token"]}
+      assert_receive {:tool_result, %{"success" => true}}
+      refute_received {:memory_tracker_comment, "issue-maestro-dedicated-auth", _body}
+    after
+      File.rm_rf(test_root)
+    end
+  end
+
+  test "agent runner runs maestro pre-review after a human review handoff" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-agent-runner-maestro-human-review-#{System.unique_integer([:positive])}"
+      )
+
+    try do
+      template_repo = Path.join(test_root, "source")
+      workspace_root = Path.join(test_root, "workspaces")
+      codex_binary = Path.join(test_root, "fake-codex")
+
+      File.mkdir_p!(template_repo)
+      File.write!(Path.join(template_repo, "README.md"), "# test")
+      System.cmd("git", ["-C", template_repo, "init", "-b", "main"])
+      System.cmd("git", ["-C", template_repo, "config", "user.name", "Test User"])
+      System.cmd("git", ["-C", template_repo, "config", "user.email", "test@example.com"])
+      System.cmd("git", ["-C", template_repo, "add", "README.md"])
+      System.cmd("git", ["-C", template_repo, "commit", "-m", "initial"])
+
+      File.write!(codex_binary, """
+      #!/bin/sh
+      while IFS= read -r line; do
+        case "$line" in
+          *'"method":"initialize"'*)
+            printf '%s\\n' '{"id":1,"result":{}}'
+            ;;
+          *'"method":"thread/start"'*)
+            printf '%s\\n' '{"id":2,"result":{"thread":{"id":"thread-maestro"}}}'
+            ;;
+          *'"method":"turn/start"'*)
+            printf '%s\\n' '{"id":3,"result":{"turn":{"id":"turn-maestro"}}}'
+            printf '%s\\n' '{"method":"turn/completed"}'
+            exit 0
+            ;;
+        esac
+      done
+      """)
+
+      File.chmod!(codex_binary, 0o755)
+
+      write_workflow_file!(Workflow.workflow_file_path(),
+        workspace_root: workspace_root,
+        hook_after_create: "cp #{Path.join(template_repo, "README.md")} README.md",
+        codex_command: "#{codex_binary} app-server"
+      )
+
+      parent = self()
+
+      issue = %Issue{
+        id: "issue-maestro-human-review",
+        identifier: "MT-5316",
+        title: "Pre-review Human Review",
+        description: "Run Maestro after handoff",
+        state: "In Progress",
+        url: "https://example.org/issues/MT-5316",
+        labels: ["symphony"]
+      }
+
+      pre_review_runner = fn refreshed_issue, opts ->
+        send(parent, {:maestro_pre_review, self(), refreshed_issue.identifier, refreshed_issue.state, opts[:worker_host]})
+
+        receive do
+          :finish_maestro_pre_review -> :ok
+        after
+          5_000 -> :ok
+        end
+
+        :ok
+      end
+
+      runner_task =
+        Task.async(fn ->
+          AgentRunner.run(
+            issue,
+            nil,
+            issue_state_fetcher: fn [_issue_id] ->
+              {:ok, [%{issue | state: "Human Review"}]}
+            end,
+            maestro_pre_review_runner: pre_review_runner
+          )
+        end)
+
+      assert_receive {:maestro_pre_review, maestro_pid, "MT-5316", "Human Review", nil}, 5_000
+      runner_result = Task.yield(runner_task, 200)
+      maestro_ref = Process.monitor(maestro_pid)
+
+      send(maestro_pid, :finish_maestro_pre_review)
+      assert runner_result == {:ok, :ok}
+      assert_receive {:DOWN, ^maestro_ref, :process, ^maestro_pid, :normal}, 1_000
+    after
+      File.rm_rf(test_root)
+    end
+  end
+
+  test "agent runner skips maestro pre-review for non human review terminal handoff" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-agent-runner-maestro-done-#{System.unique_integer([:positive])}"
+      )
+
+    try do
+      template_repo = Path.join(test_root, "source")
+      workspace_root = Path.join(test_root, "workspaces")
+      codex_binary = Path.join(test_root, "fake-codex")
+
+      File.mkdir_p!(template_repo)
+      File.write!(Path.join(template_repo, "README.md"), "# test")
+      System.cmd("git", ["-C", template_repo, "init", "-b", "main"])
+      System.cmd("git", ["-C", template_repo, "config", "user.name", "Test User"])
+      System.cmd("git", ["-C", template_repo, "config", "user.email", "test@example.com"])
+      System.cmd("git", ["-C", template_repo, "add", "README.md"])
+      System.cmd("git", ["-C", template_repo, "commit", "-m", "initial"])
+
+      File.write!(codex_binary, """
+      #!/bin/sh
+      while IFS= read -r line; do
+        case "$line" in
+          *'"method":"initialize"'*)
+            printf '%s\\n' '{"id":1,"result":{}}'
+            ;;
+          *'"method":"thread/start"'*)
+            printf '%s\\n' '{"id":2,"result":{"thread":{"id":"thread-done"}}}'
+            ;;
+          *'"method":"turn/start"'*)
+            printf '%s\\n' '{"id":3,"result":{"turn":{"id":"turn-done"}}}'
+            printf '%s\\n' '{"method":"turn/completed"}'
+            exit 0
+            ;;
+        esac
+      done
+      """)
+
+      File.chmod!(codex_binary, 0o755)
+
+      write_workflow_file!(Workflow.workflow_file_path(),
+        workspace_root: workspace_root,
+        hook_after_create: "cp #{Path.join(template_repo, "README.md")} README.md",
+        codex_command: "#{codex_binary} app-server"
+      )
+
+      parent = self()
+
+      issue = %Issue{
+        id: "issue-maestro-done",
+        identifier: "MT-5317",
+        title: "No pre-review after done",
+        description: "Do not run Maestro for Done",
+        state: "In Progress",
+        url: "https://example.org/issues/MT-5317",
+        labels: ["symphony"]
+      }
+
+      pre_review_runner = fn refreshed_issue, _opts ->
+        send(parent, {:unexpected_maestro_pre_review, refreshed_issue.state})
+        :ok
+      end
+
+      assert :ok =
+               AgentRunner.run(
+                 issue,
+                 nil,
+                 issue_state_fetcher: fn [_issue_id] ->
+                   {:ok, [%{issue | state: "Done"}]}
+                 end,
+                 maestro_pre_review_runner: pre_review_runner
+               )
+
+      refute_received {:unexpected_maestro_pre_review, _state}
     after
       File.rm_rf(test_root)
     end
@@ -2943,5 +3643,112 @@ defmodule SymphonyElixir.CoreTest do
       labels: ["symphony"],
       created_at: created_at
     }
+  end
+
+  defp shared_workflow_prompt do
+    File.read!(Path.expand("../workflows/agavemindlab/WORKFLOW.md", File.cwd!()))
+  end
+
+  defp dry_run_artifact_calls(workflow, :clarification_answer, phase, old_artifact) do
+    required_contracts = [
+      "clarification-answer resume",
+      "even if the Linear state is `In Progress`",
+      "resolve the old artifact",
+      "post a fresh top-level artifact",
+      "do not `commentUpdate` the old artifact",
+      "resolves the old artifact with `commentResolve`",
+      "fresh top-level artifact with `commentCreate`"
+    ]
+
+    if Enum.all?(required_contracts, &String.contains?(workflow, &1)) do
+      new_artifact = fresh_artifact_version(old_artifact)
+
+      [
+        {:commentResolve, old_artifact.id},
+        {:commentCreate, :top_level_phase_artifact, "## #{phase}"},
+        {:commentCreate, {:reply_to_new_artifact, new_artifact.id}, "clarification summary"}
+      ]
+    else
+      [{:commentUpdate, old_artifact.id, "## #{phase}"}]
+    end
+  end
+
+  defp dry_run_artifact_calls(workflow, :question_discussion, phase, artifact) do
+    required_contracts = [
+      "**Question / discussion**",
+      "answer in that artifact's thread",
+      "Do **not** write an approval reply, advance, resolve, or re-post the artifact"
+    ]
+
+    if Enum.all?(required_contracts, &String.contains?(workflow, &1)) do
+      [{:commentCreate, {:reply_to_artifact, artifact.id}, "answer #{phase} question"}]
+    else
+      [{:commentUpdate, artifact.id, "## #{phase}"}]
+    end
+  end
+
+  defp dry_run_artifact_calls(workflow, :cross_phase_rollback, target_phase, awaiting_phase, artifacts) do
+    required_contracts = [
+      "from the target phase through the awaiting-review phase",
+      "including stale same-phase target artifacts",
+      "phase artifact comments invalidated by the rollback",
+      "Do not resolve standalone human comments",
+      "new source of truth explicitly keeps"
+    ]
+
+    artifacts_to_resolve =
+      artifacts
+      |> Enum.filter(&phase_artifact_invalidated_between?(&1, target_phase, awaiting_phase))
+      |> then(fn invalidated ->
+        if Enum.all?(required_contracts, &String.contains?(workflow, &1)) do
+          invalidated
+        else
+          Enum.reject(invalidated, &(&1.phase == target_phase))
+        end
+      end)
+
+    Enum.map(artifacts_to_resolve, &{:commentResolve, &1.id}) ++
+      [{:commentCreate, :top_level_phase_artifact, "## #{target_phase}"}]
+  end
+
+  defp phase_artifact_invalidated_between?(artifact, target_phase, awaiting_phase) do
+    artifact.kind == :phase_artifact and artifact.invalidated? and
+      phase_between?(artifact.phase, target_phase, awaiting_phase)
+  end
+
+  defp phase_between?(phase, target_phase, awaiting_phase) do
+    phase_order = ["Requirements", "Design", "Implementation", "Deployment"]
+    phase_index = Enum.find_index(phase_order, &(&1 == phase))
+    target_index = Enum.find_index(phase_order, &(&1 == target_phase))
+    awaiting_index = Enum.find_index(phase_order, &(&1 == awaiting_phase))
+
+    phase_index >= target_index and phase_index <= awaiting_index
+  end
+
+  defp resolved_comment_ids(calls) do
+    for {:commentResolve, id} <- calls, do: id
+  end
+
+  defp active_artifacts_after_rollback(calls, artifacts, replacement_artifact) do
+    resolved_ids = MapSet.new(resolved_comment_ids(calls))
+
+    artifacts
+    |> Enum.concat([replacement_artifact])
+    |> Enum.filter(&(&1.kind == :phase_artifact))
+    |> Enum.reject(&MapSet.member?(resolved_ids, &1.id))
+  end
+
+  defp fresh_artifact_version(old_artifact) do
+    %{
+      id: "fresh-#{old_artifact.id}",
+      created_at: DateTime.add(old_artifact.created_at, 1, :second)
+    }
+  end
+
+  defp refute_called_comment_update_for_artifact(calls, artifact_id) do
+    refute Enum.any?(calls, fn
+             {:commentUpdate, ^artifact_id, _body} -> true
+             _ -> false
+           end)
   end
 end

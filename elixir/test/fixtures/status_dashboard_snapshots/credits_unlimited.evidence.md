@@ -9,7 +9,7 @@
 │ Next refresh: n/a
 ├─ Running
 │
-│   ID       PROJECT        STAGE          PID      AGE / TURN   TOKENS     SESSION        EVENT                   
+│   ID       PROJECT        STAGE          PID      AGE / TURN   TOKENS     SESSION        EVENT
 │   ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
 │ ● MT-777   n/a            running        4242     1m 15s / 7        3,200 thre...567890  thread token usage up...
 │

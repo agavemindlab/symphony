@@ -326,6 +326,120 @@ pre,
   font-size: 0.94rem;
 }
 
+.analytics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 0.85rem;
+  margin-top: 1rem;
+}
+
+.analytics-card {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.72);
+  padding: 0.95rem;
+}
+
+.analytics-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.analytics-title {
+  margin: 0;
+  font-size: 0.98rem;
+  line-height: 1.25;
+}
+
+.analytics-question {
+  margin: 0.55rem 0 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+.analytics-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.55rem;
+  border-radius: 999px;
+  padding: 0.22rem 0.54rem;
+  border: 1px solid var(--line);
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.15;
+  text-align: center;
+}
+
+.analytics-status-direct {
+  background: var(--accent-soft);
+  border-color: rgba(16, 163, 127, 0.18);
+  color: var(--accent-ink);
+}
+
+.analytics-status-partial {
+  background: #fff7e8;
+  border-color: #f1d8a6;
+  color: #8a5a00;
+}
+
+.analytics-status-gap {
+  background: var(--danger-soft);
+  border-color: #f6d3cf;
+  color: var(--danger);
+}
+
+.analytics-metrics {
+  display: grid;
+  gap: 0.52rem;
+  margin: 0.85rem 0 0;
+}
+
+.analytics-metric {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.75rem;
+  align-items: baseline;
+}
+
+.analytics-metric dt {
+  min-width: 0;
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.analytics-metric dd {
+  display: grid;
+  gap: 0.25rem;
+  justify-items: end;
+  margin: 0;
+  max-width: 12rem;
+  overflow-wrap: anywhere;
+  text-align: right;
+  font-size: 0.88rem;
+  font-weight: 650;
+}
+
+.analytics-metric-status {
+  max-width: 100%;
+  min-height: 1.2rem;
+  padding: 0.16rem 0.44rem;
+  font-size: 0.64rem;
+  font-weight: 700;
+}
+
+.quality-list {
+  display: grid;
+  gap: 0.35rem;
+  margin: 1rem 0 0;
+  padding-left: 1.15rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
 .issue-stack,
 .session-stack,
 .detail-stack,
