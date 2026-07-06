@@ -42,7 +42,7 @@ defmodule SymphonyElixir.SymphonyRunTest do
   test "allows aggregate projects to use project names without a singular repo" do
     capture = run_launcher!("grandline")
 
-    assert capture["SYMPHONY_PROJECT_NAMES"] == "grotto,gl-infra,gl-skills,symphony,voxvault"
+    assert capture["SYMPHONY_PROJECT_NAMES"] == "grotto,gl-infra,gl-skills,symphony,voxvault,tuneframe"
     assert capture["SYMPHONY_REPO"] == ""
     assert capture["SYMPHONY_BASE_BRANCH"] == ""
   end
@@ -130,6 +130,7 @@ defmodule SymphonyElixir.SymphonyRunTest do
       "gl-skills" => "1ecc8649e9da",
       "grotto" => "bb8f9b7a6364",
       "symphony" => "977d7a7b6c0e",
+      "tuneframe" => "8d3ce7cdbdea",
       "voxvault" => "25c113bb4717"
     }
 

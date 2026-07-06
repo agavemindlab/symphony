@@ -259,7 +259,7 @@ Symphony only starts the agent when the issue is in an active state (`Todo`, `In
 6. Set the workpad `current_phase` to the target phase and open the matching phase skill (per the Phase Map). The skill does its phase work, publishes its artifact through the Phase Artifact Protocol, and on a **clean** exit hands back one of two outcomes — the skill alone decides which (see its "Exit"); only the Requirements and Design skills ever choose `advance`:
 
    - **`advance`** → write the `⏩ 自动进入 [Next Phase]` reply on the just-posted artifact, set the workpad `current_phase` to the next phase, keep the issue in `In Progress`, persist the agent state, create `.symphony/stop-after-turn`, and stop this agent run. Do **not** open the next phase skill in this session; the next Symphony dispatch targets the saved phase.
-   - **`stop`** → for a clean awaiting-review artifact, add the `symphony:maestro` label before moving the issue to `Human Review`, then stop. Do not add `symphony:maestro` for blocked `[NEEDS CLARIFICATION]`, question/discussion replies, Deployment pending-observation waits, or other handoffs that are not ordinary phase review.
+   - **`stop`** → add the `symphony:maestro` label before moving the issue to `Human Review`, then stop.
 
    (A skill that stops **blocked** — unresolved `[NEEDS CLARIFICATION]` / escalated high-impact decision — moves the issue to `Human Review` itself; the session ends there.)
 
@@ -368,6 +368,7 @@ Canonical project routing registry for spawned issues:
 | `gl-infra` | Operational infrastructure | clusters/namespaces, DB/Redis/PVC/storage, secrets, NetworkPolicy, RBAC, GitHub protected environments, operator profiles, runtime accounts, reset/seed, feature-flag allowlists |
 | `gl-skills` | Reusable agent capability packages | standalone skills/plugins/tools that are not specific to the Symphony workflow itself or one product repo |
 | `voxvault` | VoxVault repository delivery | app/repo code, repo CI, release workflow, repo-owned runbooks, repo-owned environment gate logic |
+| `tuneframe` | TuneFrame repository delivery | app/repo code, repo CI, release workflow, repo-owned runbooks, repo-owned environment gate logic |
 
 Known Linear projects that are not spawned-issue targets in this workflow:
 `grandline` is the multi-project launcher/profile, and `lain` has no workflow
