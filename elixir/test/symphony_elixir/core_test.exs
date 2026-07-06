@@ -154,10 +154,28 @@ defmodule SymphonyElixir.CoreTest do
     hooks = Map.get(config, "hooks", %{})
     assert is_map(hooks)
     assert Map.get(hooks, "after_create") =~ "project_workflow_dir="
+    assert Map.get(hooks, "after_create") =~ ".cache/git"
+    assert Map.get(hooks, "after_create") =~ "repo_lock="
+    assert Map.get(hooks, "after_create") =~ "Timed out waiting for Git cache lock"
+    assert Map.get(hooks, "after_create") =~ "worktree add --detach"
+    refute Map.get(hooks, "after_create") =~ "gh repo clone"
+    assert Map.get(hooks, "after_create") =~ ".issue-secrets/"
     assert Map.get(hooks, "after_create") =~ "\"$project_workflow_dir/setup.sh\""
     assert Map.get(hooks, "after_create") =~ "\"$project_workflow_dir/skills\""
-    assert Map.get(hooks, "after_create") =~ ".git/info/exclude"
+    assert Map.get(hooks, "after_create") =~ "--git-path info/exclude"
     assert Map.get(hooks, "before_remove") =~ "\"$project_workflow_dir/teardown.sh\""
+    assert Map.get(hooks, "before_remove") =~ "com.docker.compose.project="
+    assert Map.get(hooks, "before_remove") =~ "docker container"
+    assert Map.get(hooks, "before_remove") =~ "docker network"
+    refute Map.get(hooks, "before_remove") =~ "--volumes"
+    refute Map.get(hooks, "before_remove") =~ "docker volume"
+    refute Map.get(hooks, "before_remove") =~ "--rmi"
+
+    codex = Map.get(config, "codex", %{})
+    assert Map.get(codex, "command") =~ "UV_CACHE_DIR"
+    assert Map.get(codex, "command") =~ "UV_LINK_MODE"
+    assert Map.get(codex, "command") =~ "SYMPHONY_COMPOSE_PROJECT"
+    assert Map.get(codex, "command") =~ "COMPOSE_PROJECT_NAME"
 
     assert String.trim(prompt) != ""
     assert is_binary(Config.workflow_prompt())
@@ -367,11 +385,11 @@ defmodule SymphonyElixir.CoreTest do
       File.read!(Path.expand("../workflows/agavemindlab/skills/phase-implementation/SKILL.md", File.cwd!()))
 
     for section <- [
-          "### 当前对象",
-          "### Root cause",
+          "### 结论",
+          "### Root cause / recommendation",
           "### Rework 已回应",
-          "### Code changes",
-          "### Verification",
+          "### 本轮变化",
+          "### 验证结论",
           "### Acceptance mapping",
           "### Human action needed"
         ] do

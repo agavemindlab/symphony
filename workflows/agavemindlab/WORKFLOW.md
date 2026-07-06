@@ -34,22 +34,52 @@ hooks:
 
     fork_owner="${GITHUB_FORK_OWNER:-$(gh api user -q .login)}"
     : "${SYMPHONY_REPO:?SYMPHONY_REPO is not set}"
-    fork_repo="$fork_owner/$SYMPHONY_REPO"
     base_branch="${SYMPHONY_BASE_BRANCH:-main}"
+    workspace_root="${SYMPHONY_WORKSPACE_ROOT:-$(cd .. && pwd -P)}"
+    repo_cache="$workspace_root/.cache/git/$fork_owner/$SYMPHONY_REPO.git"
+    repo_lock="$repo_cache.lock"
 
-    gh repo clone "$fork_repo" .
+    mkdir -p "$(dirname "$repo_cache")"
+    lock_wait=0
+    until mkdir "$repo_lock" 2>/dev/null; do
+      lock_wait=$((lock_wait + 1))
+      if [ "$lock_wait" -ge 60 ]; then
+        echo "Timed out waiting for Git cache lock: $repo_lock" >&2
+        exit 1
+      fi
+      sleep 1
+    done
+    cleanup_repo_lock() {
+      rmdir "$repo_lock" 2>/dev/null || true
+    }
+    trap cleanup_repo_lock EXIT INT TERM
+
+    if [ ! -d "$repo_cache" ]; then
+      git init --bare "$repo_cache"
+    fi
+
+    git -C "$repo_cache" remote get-url origin >/dev/null 2>&1 ||
+      git -C "$repo_cache" remote add origin "https://github.com/$fork_owner/$SYMPHONY_REPO.git"
+    git -C "$repo_cache" remote set-url origin "https://github.com/$fork_owner/$SYMPHONY_REPO.git"
+
+    git -C "$repo_cache" remote get-url upstream >/dev/null 2>&1 ||
+      git -C "$repo_cache" remote add upstream "https://github.com/agavemindlab/$SYMPHONY_REPO.git"
+    git -C "$repo_cache" remote set-url upstream "https://github.com/agavemindlab/$SYMPHONY_REPO.git"
+
+    git -C "$repo_cache" fetch origin --prune
+    git -C "$repo_cache" fetch upstream "$base_branch" --prune
+    git -C "$repo_cache" worktree prune
+    git -C "$repo_cache" worktree add --detach "$(pwd -P)" "upstream/$base_branch"
+    cleanup_repo_lock
+    trap - EXIT INT TERM
 
     mkdir -p .issue-secrets
     chmod 700 .issue-secrets
-    if [ -d .git/info ]; then
-      grep -Fxq ".issue-secrets/" .git/info/exclude 2>/dev/null || printf '%s\n' ".issue-secrets/" >> .git/info/exclude
+    git_exclude="$(git rev-parse --git-path info/exclude 2>/dev/null || true)"
+    if [ -n "$git_exclude" ]; then
+      mkdir -p "$(dirname "$git_exclude")"
+      grep -Fxq ".issue-secrets/" "$git_exclude" 2>/dev/null || printf '%s\n' ".issue-secrets/" >> "$git_exclude"
     fi
-
-    if ! git remote get-url upstream >/dev/null 2>&1; then
-      git remote add upstream "https://github.com/agavemindlab/$SYMPHONY_REPO.git"
-    fi
-
-    git fetch upstream "$base_branch" --prune
 
     if [ -f "$project_workflow_dir/setup.sh" ]; then
       "$project_workflow_dir/setup.sh"
@@ -66,9 +96,11 @@ hooks:
         fi
         skill_path="$(cd "$skill" && pwd -P)"
         ln -s "$skill_path" "$target"
-        if [ -d .git/info ]; then
+        git_exclude="$(git rev-parse --git-path info/exclude 2>/dev/null || true)"
+        if [ -n "$git_exclude" ]; then
+          mkdir -p "$(dirname "$git_exclude")"
           exclude_entry=".agents/skills/$name"
-          grep -Fxq "$exclude_entry" .git/info/exclude 2>/dev/null || printf '%s\n' "$exclude_entry" >> .git/info/exclude
+          grep -Fxq "$exclude_entry" "$git_exclude" 2>/dev/null || printf '%s\n' "$exclude_entry" >> "$git_exclude"
         fi
       done
     fi
@@ -80,10 +112,40 @@ hooks:
     fi
 
     project_workflow_dir="${SYMPHONY_PROJECT_DIR:-$SYMPHONY_WORKFLOW_DIR}"
+    workspace_name="$(basename "$PWD" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9_-]/-/g; s/^[-_]*//; s/[-_]*$//')"
+    repo_slug="$(printf '%s' "${SYMPHONY_REPO:-symphony}" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9_-]/-/g; s/^[-_]*//; s/[-_]*$//')"
+    compose_project="${SYMPHONY_COMPOSE_PROJECT:-$repo_slug-$workspace_name}"
+    legacy_compose_project="$workspace_name"
 
+    export SYMPHONY_COMPOSE_PROJECT="$compose_project"
+    export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-$compose_project}"
+
+    cleanup_compose_project() {
+      project="$1"
+      [ -n "$project" ] || return 0
+      command -v docker >/dev/null 2>&1 || return 0
+
+      docker container ls -aq --filter "label=com.docker.compose.project=$project" |
+        while IFS= read -r container; do
+          [ -n "$container" ] || continue
+          docker container rm -f "$container" >/dev/null 2>&1 || true
+        done
+
+      docker network ls -q --filter "label=com.docker.compose.project=$project" |
+        while IFS= read -r network; do
+          [ -n "$network" ] || continue
+          docker network rm "$network" >/dev/null 2>&1 || true
+        done
+    }
+
+    teardown_status=0
     if [ -f "$project_workflow_dir/teardown.sh" ]; then
-      "$project_workflow_dir/teardown.sh"
+      "$project_workflow_dir/teardown.sh" || teardown_status=$?
     fi
+
+    cleanup_compose_project "$compose_project"
+    cleanup_compose_project "$legacy_compose_project"
+    exit "$teardown_status"
   issue_running: |
     set -e
     : "${SYMPHONY_WORKFLOW_DIR:?SYMPHONY_WORKFLOW_DIR is not set}"
@@ -96,7 +158,18 @@ agent:
   max_concurrent_agents: 5
   max_turns: 20
 codex:
-  command: codex --config shell_environment_policy.inherit=all --config 'model="gpt-5.5"' --config model_reasoning_effort=xhigh app-server
+  command: |
+    set -e
+    workspace_root="${SYMPHONY_WORKSPACE_ROOT:-$(cd .. && pwd -P)}"
+    workspace_name="$(basename "$PWD" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9_-]/-/g; s/^[-_]*//; s/[-_]*$//')"
+    repo_slug="$(printf '%s' "${SYMPHONY_REPO:-symphony}" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9_-]/-/g; s/^[-_]*//; s/[-_]*$//')"
+    compose_project="${SYMPHONY_COMPOSE_PROJECT:-$repo_slug-$workspace_name}"
+    export SYMPHONY_WORKSPACE_ROOT="$workspace_root"
+    export UV_CACHE_DIR="${UV_CACHE_DIR:-$workspace_root/.cache/uv}"
+    export UV_LINK_MODE="${UV_LINK_MODE:-hardlink}"
+    export SYMPHONY_COMPOSE_PROJECT="$compose_project"
+    export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-$compose_project}"
+    exec codex --config shell_environment_policy.inherit=all --config 'model="gpt-5.5"' --config model_reasoning_effort=xhigh app-server
   approval_policy: never
   thread_sandbox: workspace-write
   turn_sandbox_policy:

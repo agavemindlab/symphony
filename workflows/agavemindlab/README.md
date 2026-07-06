@@ -71,18 +71,24 @@ The shared `WORKFLOW.md` expects Symphony to expose `SYMPHONY_WORKFLOW_DIR` to
 local hooks. The value is the directory that contains the workflow file passed
 to the CLI, without resolving through symlinks.
 
-`hooks.after_create` clones `$GITHUB_FORK_OWNER/$SYMPHONY_REPO`, configures the
-`agavemindlab/$SYMPHONY_REPO` upstream remote, fetches
-`$SYMPHONY_BASE_BRANCH`, runs the project `setup.sh` if it exists, then
+`hooks.after_create` keeps one bare Git cache per fork/repo under
+`$SYMPHONY_WORKSPACE_ROOT/.cache/git/`, then adds each issue directory as a
+detached worktree at `upstream/$SYMPHONY_BASE_BRANCH`. It runs the project
+`setup.sh` if it exists, creates `.issue-secrets/` with mode `700`, then
 symlinks shared skills from `$SYMPHONY_WORKFLOW_DIR/skills/` into the workspace
 `.agents/skills/` directory. If the target repository already contains
 `.agents/skills/<name>/`, the installer skips that skill and leaves the
 repository version in place. Only newly linked skills are added to
 `.git/info/exclude`; the committed `.gitignore` is not modified. The hook also
-creates `.issue-secrets/` with mode `700` and local-excludes it for
-human-provided, issue-scoped secret files.
+local-excludes `.issue-secrets/` for human-provided, issue-scoped secret files.
 
-`hooks.before_remove` runs the project `teardown.sh` if it exists.
+`codex.command` exports a shared uv cache at
+`$SYMPHONY_WORKSPACE_ROOT/.cache/uv`, hardlink mode, and a stable per-workspace
+Compose project name before launching `codex app-server`.
+
+`hooks.before_remove` runs the project `teardown.sh` if it exists, then removes
+Docker containers and networks with the current or legacy Compose project label.
+It does not remove Docker volumes or images.
 
 When an issue comes from Linear, hooks and Codex startup receive
 `SYMPHONY_LINEAR_PROJECT_ID`, `SYMPHONY_LINEAR_PROJECT_SLUG`, and
