@@ -180,6 +180,100 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     end
   end
 
+  test "remote workspace marker failure does not leave a reusable directory" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-remote-marker-fail-#{System.unique_integer([:positive])}"
+      )
+
+    previous_path = System.get_env("PATH")
+    previous_trace = System.get_env("SYMP_TEST_SSH_TRACE")
+
+    on_exit(fn ->
+      restore_env("PATH", previous_path)
+      restore_env("SYMP_TEST_SSH_TRACE", previous_trace)
+    end)
+
+    try do
+      trace_file = Path.join(test_root, "ssh.trace")
+      fake_ssh = Path.join(test_root, "ssh")
+      workspace_root = "/remote/home/workspaces"
+      workspace_path = Path.join(workspace_root, "MT-REMOTE-MARKER")
+      prepare_count_file = Path.join(test_root, "prepare.count")
+      remote_state_file = Path.join(test_root, "remote.state")
+      hook_count_file = Path.join(test_root, "hook.count")
+
+      File.mkdir_p!(test_root)
+      System.put_env("SYMP_TEST_SSH_TRACE", trace_file)
+      System.put_env("PATH", test_root <> ":" <> (previous_path || ""))
+
+      File.write!(fake_ssh, """
+      #!/bin/sh
+      trace_file="${SYMP_TEST_SSH_TRACE:-/tmp/symphony-fake-ssh.trace}"
+      prepare_count_file="#{prepare_count_file}"
+      remote_state_file="#{remote_state_file}"
+      hook_count_file="#{hook_count_file}"
+      command_text="$*"
+      printf 'ARGV:%s\\n' "$command_text" >> "$trace_file"
+
+      case "$command_text" in
+        *"__SYMPHONY_WORKSPACE__"*)
+          count=$(cat "$prepare_count_file" 2>/dev/null || printf 0)
+          count=$((count + 1))
+          printf '%s' "$count" > "$prepare_count_file"
+
+          if [ "$count" -eq 1 ]; then
+            case "$command_text" in
+              *'mkdir -p "$workspace"'*': > "$workspace_init_pending_marker"'*)
+                printf 'dir_without_marker' > "$remote_state_file"
+                ;;
+            esac
+
+            printf 'marker write failed\\n'
+            exit 17
+          fi
+
+          state=$(cat "$remote_state_file" 2>/dev/null || printf none)
+
+          if [ "$state" = "dir_without_marker" ]; then
+            printf '%s\\t%s\\t%s\\n' '__SYMPHONY_WORKSPACE__' '0' '#{workspace_path}'
+          else
+            printf '%s\\t%s\\t%s\\n' '__SYMPHONY_WORKSPACE__' '1' '#{workspace_path}'
+          fi
+
+          exit 0
+          ;;
+        *"after-create-sentinel"*)
+          count=$(cat "$hook_count_file" 2>/dev/null || printf 0)
+          count=$((count + 1))
+          printf '%s' "$count" > "$hook_count_file"
+          exit 0
+          ;;
+        *)
+          exit 0
+          ;;
+      esac
+      """)
+
+      File.chmod!(fake_ssh, 0o755)
+
+      write_workflow_file!(Workflow.workflow_file_path(),
+        workspace_root: workspace_root,
+        worker_ssh_hosts: ["worker-01"],
+        hook_after_create: "printf after-create-sentinel"
+      )
+
+      assert {:error, {:workspace_prepare_failed, "worker-01", 17, "marker write failed\n"}} =
+               Workspace.create_for_issue("MT-REMOTE-MARKER", "worker-01")
+
+      assert {:ok, ^workspace_path} = Workspace.create_for_issue("MT-REMOTE-MARKER", "worker-01")
+      assert File.read!(hook_count_file) == "1"
+    after
+      File.rm_rf(test_root)
+    end
+  end
+
   test "workspace replaces stale non-directory paths" do
     workspace_root =
       Path.join(

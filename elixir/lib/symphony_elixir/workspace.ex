@@ -55,22 +55,21 @@ defmodule SymphonyElixir.Workspace do
         "set -eu",
         remote_shell_assign("workspace", workspace),
         remote_shell_assign("workspace_init_pending_marker", workspace_init_pending_marker(workspace)),
+        "workspace_parent=$(dirname \"$workspace\")",
         "if [ -f \"$workspace_init_pending_marker\" ]; then",
-        "  rm -rf \"$workspace\"",
-        "  mkdir -p \"$workspace\"",
         "  created=1",
         "elif [ -d \"$workspace\" ]; then",
         "  created=0",
         "elif [ -e \"$workspace\" ]; then",
-        "  rm -rf \"$workspace\"",
-        "  mkdir -p \"$workspace\"",
         "  created=1",
         "else",
-        "  mkdir -p \"$workspace\"",
         "  created=1",
         "fi",
         "if [ \"$created\" = \"1\" ]; then",
+        "  mkdir -p \"$workspace_parent\"",
         "  : > \"$workspace_init_pending_marker\"",
+        "  rm -rf \"$workspace\"",
+        "  mkdir -p \"$workspace\"",
         "fi",
         "cd \"$workspace\"",
         "printf '%s\\t%s\\t%s\\n' '#{@remote_workspace_marker}' \"$created\" \"$(pwd -P)\""
@@ -92,14 +91,14 @@ defmodule SymphonyElixir.Workspace do
 
   defp create_workspace(workspace) do
     File.rm_rf!(workspace)
-    File.mkdir_p!(workspace)
+    File.mkdir_p!(Path.dirname(workspace))
 
     case write_workspace_init_pending_marker(workspace, nil) do
       :ok ->
+        File.mkdir_p!(workspace)
         {:ok, workspace, true}
 
       {:error, _reason} = error ->
-        File.rm_rf(workspace)
         error
     end
   end
