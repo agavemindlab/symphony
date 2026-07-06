@@ -208,7 +208,7 @@ defmodule SymphonyElixir.Linear.Client do
     payload = build_graphql_payload(query, variables, Keyword.get(opts, :operation_name))
     request_fun = Keyword.get(opts, :request_fun, &post_graphql_request/2)
 
-    with {:ok, headers} <- graphql_headers(),
+    with {:ok, headers} <- graphql_headers(opts),
          {:ok, %{status: 200, body: body}} <- request_fun.(payload, headers) do
       {:ok, body}
     else
@@ -531,19 +531,22 @@ defmodule SymphonyElixir.Linear.Client do
     end
   end
 
-  defp graphql_headers do
-    case Config.settings!().tracker.api_key do
-      nil ->
-        {:error, :missing_linear_api_token}
-
-      token ->
-        {:ok,
-         [
-           {"Authorization", token},
-           {"Content-Type", "application/json"}
-         ]}
+  defp graphql_headers(opts) do
+    case Keyword.fetch(opts, :api_key) do
+      {:ok, token} -> graphql_headers_from_token(token)
+      :error -> graphql_headers_from_token(Config.settings!().tracker.api_key)
     end
   end
+
+  defp graphql_headers_from_token(token) when is_binary(token) and token != "" do
+    {:ok,
+     [
+       {"Authorization", token},
+       {"Content-Type", "application/json"}
+     ]}
+  end
+
+  defp graphql_headers_from_token(_token), do: {:error, :missing_linear_api_token}
 
   defp post_graphql_request(payload, headers) do
     Req.post(Config.settings!().tracker.endpoint,
