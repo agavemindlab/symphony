@@ -1356,6 +1356,38 @@ defmodule SymphonyElixir.CoreTest do
              AgentRunner.continue_with_issue_for_test(issue, fetcher)
   end
 
+  test "agent runner does not continue while the issue is blocked by a non-terminal relation" do
+    write_workflow_file!(Workflow.workflow_file_path(), tracker_required_labels: ["symphony"])
+
+    issue = %Issue{
+      id: "issue-blocked-continuation",
+      identifier: "MT-564",
+      title: "Parent parked while children run",
+      state: "Todo",
+      labels: ["symphony"]
+    }
+
+    blocked_issue = %{
+      issue
+      | blocked_by: [%{id: "child-1", identifier: "MT-565", state: "In Progress"}]
+    }
+
+    fetcher = fn ["issue-blocked-continuation"] -> {:ok, [blocked_issue]} end
+
+    assert {:done, ^blocked_issue} =
+             AgentRunner.continue_with_issue_for_test(issue, fetcher)
+
+    unblocked_issue = %{
+      issue
+      | blocked_by: [%{id: "child-1", identifier: "MT-565", state: "Done"}]
+    }
+
+    unblocked_fetcher = fn ["issue-blocked-continuation"] -> {:ok, [unblocked_issue]} end
+
+    assert {:continue, ^unblocked_issue} =
+             AgentRunner.continue_with_issue_for_test(issue, unblocked_fetcher)
+  end
+
   test "dispatch writes issue running marker hook after claim" do
     marker =
       Path.join(
