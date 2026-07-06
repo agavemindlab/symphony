@@ -237,36 +237,20 @@ defmodule SymphonyElixir.Codex.AppServer do
   end
 
   defp project_env_source_prefix(issue) do
-    case issue_project(issue) do
-      %{slug_id: slug_id} = project when is_binary(slug_id) and slug_id != "" ->
-        workflow_dir = Path.dirname(Workflow.workflow_file_path())
+    case Workflow.resolve_project_env(issue) do
+      {:ok, %{env: env}} ->
+        env
+        |> Enum.sort_by(fn {name, _value} -> name end)
+        |> Enum.map_join("\n", fn {name, value} -> env_export(name, value) end)
 
+      {:error, reason} ->
         [
-          env_export("SYMPHONY_WORKFLOW_DIR", workflow_dir),
-          env_export("SYMPHONY_LINEAR_PROJECT_ID", Map.get(project, :id)),
-          env_export("SYMPHONY_LINEAR_PROJECT_SLUG", slug_id),
-          env_export("SYMPHONY_LINEAR_PROJECT_NAME", Map.get(project, :name)),
-          ~s(if [ -f "$SYMPHONY_WORKFLOW_DIR/project-for-linear-project.sh" ]; then),
-          ~s(  . "$SYMPHONY_WORKFLOW_DIR/project-for-linear-project.sh"),
-          "fi"
+          "printf '%s\\n' #{shell_escape("failed to resolve Symphony project env: #{inspect(reason)}")} >&2",
+          "exit 66"
         ]
-        |> Enum.reject(&(&1 == ""))
         |> Enum.join("\n")
-
-      _ ->
-        ""
     end
   end
-
-  defp issue_project(%{project: project}) when is_map(project) do
-    %{
-      id: Map.get(project, :id) || Map.get(project, "id"),
-      slug_id: Map.get(project, :slug_id) || Map.get(project, "slugId") || Map.get(project, "slug_id"),
-      name: Map.get(project, :name) || Map.get(project, "name")
-    }
-  end
-
-  defp issue_project(_issue), do: nil
 
   defp env_export(_name, nil), do: ""
   defp env_export(name, value) when is_binary(value), do: "export #{name}=#{shell_escape(value)}"
