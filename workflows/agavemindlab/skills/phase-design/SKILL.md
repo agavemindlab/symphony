@@ -44,6 +44,12 @@ related-issue evidence, or design discovery shows the close test needs to
 change, use Cross-phase rework to Requirements before writing a new Design
 artifact.
 
+If the approved Requirements or current issue context contains a Linear
+`sourceType: sentry` attachment, or the approach depends on Sentry event detail
+/ stack traces / issue events, invoke `symphony-sentry` before designing from
+that evidence. Do not downgrade a Sentry web login redirect into "no Sentry
+evidence" unless the skill's CLI/API paths also failed.
+
 If this run is a rework of `## Design` (the artifact has unresolved human
 feedback in its thread), follow the same-phase Rework cycle in your workflow instructions.
 

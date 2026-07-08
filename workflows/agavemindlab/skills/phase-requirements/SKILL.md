@@ -45,7 +45,11 @@ Requirements is the target phase. Two cases:
 ## Discovery
 
 Read all issue context first (description, comments, attachments, linked
-issues, labels).
+issues, labels). If any attachment has `sourceType: sentry`, or the issue
+needs Sentry event detail / stack trace / issue events, invoke
+`symphony-sentry` before deciding the evidence is unavailable. Do not treat a
+Sentry web `/auth/login/...` redirect as proof that no CLI/API Sentry evidence
+can be read.
 
 Then decide whether to **invoke the `office-hours` skill** to interrogate
 intent, surface hidden assumptions, and stress-test the problem statement.
