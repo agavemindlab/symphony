@@ -83,9 +83,6 @@ same-phase Rework cycle in your workflow instructions when re-posting the artifa
 - `symphony-issue` (.agents/skills) — spin off a separate ticket for any
   out-of-scope / deferred / blocking work discovered during implementation,
   instead of expanding this issue.
-- `symphony-sentry` (.agents/skills) — read Sentry issue/event evidence before
-  coding when approved artifacts or Linear attachments include
-  `sourceType: sentry`, Sentry stack traces, or Sentry issue-event context.
 - `verification-before-completion` (superpowers) — gate before claiming work
   is done.
 - `review` (gstack) — pre-landing PR review; for ORM / migration changes,
