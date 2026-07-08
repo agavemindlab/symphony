@@ -49,37 +49,50 @@ evidence summary for Requirements, Design, Implementation, or Deployment.
    sentry_token="${SENTRY_AUTH_TOKEN:-${SENTRY_TOKEN:-}}"
    ```
 
-   If the CLI exists but global CLI auth failed, retry CLI auth with the env
-   token before falling back to raw API calls:
+   If the CLI exists but global CLI auth failed, retry CLI auth with a
+   temporary environment variable before falling back to REST calls. Do not pass
+   the token via `--auth-token`; that puts the secret in process arguments.
 
    ```sh
-   sentry-cli --auth-token "$sentry_token" info
-   sentry-cli --auth-token "$sentry_token" issues list -o "$org" -p "$project" --all |
+   SENTRY_AUTH_TOKEN="$sentry_token" sentry-cli info
+   SENTRY_AUTH_TOKEN="$sentry_token" sentry-cli issues list -o "$org" -p "$project" --all |
      awk -v issue_id="$issue_id" -v short_id="${short_id:-}" '
        $0 ~ "\\|[[:space:]]*" issue_id "[[:space:]]*\\|" ||
        (short_id != "" && $0 ~ "\\|[[:space:]]*" short_id "[[:space:]]*\\|")
      '
    ```
 
-   Then call only the needed REST endpoints, and never print raw API JSON. Pipe
-   responses through a selector that emits only fields safe for the phase
+   Then call only the needed REST endpoints, and never print raw API JSON. Keep
+   the bearer value out of process arguments by using a mode-600 curl config
+   file under `.issue-secrets/`, and delete it before persisting agent state:
+
+   ```sh
+   mkdir -p .issue-secrets
+   chmod 700 .issue-secrets
+   sentry_curl_cfg="$(mktemp .issue-secrets/sentry-curl.XXXXXX)"
+   chmod 600 "$sentry_curl_cfg"
+   trap 'rm -f "$sentry_curl_cfg"; unset sentry_token sentry_curl_cfg' EXIT
+   printf 'header = "Authorization: Bearer %s"\n' "$sentry_token" >"$sentry_curl_cfg"
+   ```
+
+   Pipe responses through a selector that emits only fields safe for the phase
    artifact:
 
    ```sh
-   curl -fsS "https://sentry.io/api/0/organizations/$org/issues/$issue_id/" \
-     -H "Authorization: Bearer $sentry_token" |
+   curl -fsS --config "$sentry_curl_cfg" \
+     "https://sentry.io/api/0/organizations/$org/issues/$issue_id/" |
      jq '{id, shortId, title, status, lastSeen, project: .project.slug}'
 
-   curl -fsS "https://sentry.io/api/0/organizations/$org/issues/$issue_id/events/?full=1&per_page=5" \
-     -H "Authorization: Bearer $sentry_token" |
+   curl -fsS --config "$sentry_curl_cfg" \
+     "https://sentry.io/api/0/organizations/$org/issues/$issue_id/events/?full=1&per_page=5" |
      jq '[.[] | {eventID, title, dateCreated, location, culprit}]'
 
-   curl -fsS "https://sentry.io/api/0/organizations/$org/issues/$issue_id/events/${event_id:-latest}/" \
-     -H "Authorization: Bearer $sentry_token" |
+   curl -fsS --config "$sentry_curl_cfg" \
+     "https://sentry.io/api/0/organizations/$org/issues/$issue_id/events/${event_id:-latest}/" |
      jq '{eventID, title, dateReceived, dateCreated, error: .metadata, stack: ([.entries[]? | select(.type=="exception") | .data.values[]?.stacktrace.frames[]? | {function, filename, absPath, lineNo, inApp}] | .[-8:])}'
 
-   curl -fsS "https://sentry.io/api/0/projects/$org/$project/events/$event_id/" \
-     -H "Authorization: Bearer $sentry_token" |
+   curl -fsS --config "$sentry_curl_cfg" \
+     "https://sentry.io/api/0/projects/$org/$project/events/$event_id/" |
      jq '{eventID, title, dateReceived, dateCreated, error: .metadata, stack: ([.entries[]? | select(.type=="exception") | .data.values[]?.stacktrace.frames[]? | {function, filename, absPath, lineNo, inApp}] | .[-8:])}'
    ```
 
@@ -120,6 +133,10 @@ from the Linear project name.
   read.
 - For REST API, prefer `SENTRY_AUTH_TOKEN`, then `SENTRY_TOKEN`. Do not extract
   a token from `sentry-cli` config files.
+- Do not pass bearer values through command-line arguments such as
+  `sentry-cli --auth-token ...` or `curl -H "Authorization: Bearer ..."`. Use
+  temporary env for CLI and a mode-600 curl config/header file that is deleted
+  after use.
 - In the `grandline` aggregate workflow, do not assume a child project's
   `workflows/<project>/project.env.local` was sourced. Put shared Sentry auth
   in the selected operator profile, the aggregate workflow env, or the global
@@ -138,7 +155,7 @@ Sentry evidence unavailable through CLI/API.
 - Tried: `sentry-cli info` -> <result>
 - CLI issue lookup: <matched issue row|not found in listing|not attempted>
 - CLI detail capability: <no issue-event detail command in this sentry-cli|available command + result>
-- Tried: `sentry-cli --auth-token "$sentry_token" info` -> <result|not attempted>
+- Tried: env-token `sentry-cli info` -> <result|not attempted>
 - Tried: REST token env -> `SENTRY_AUTH_TOKEN` <present|absent>, `SENTRY_TOKEN` <present|absent>
 - API result: <401|403|missing token|not attempted because org/issue missing>
 - Web fallback: <not attempted|redirected to /auth/login/...>
