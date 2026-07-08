@@ -399,6 +399,28 @@ defmodule SymphonyElixir.CoreTest do
       assert implementation_skill =~ folded_marker
     end
 
+    for evidence <- [
+          "Source comment:",
+          "Automated review:",
+          "不等于人工批准",
+          "S2 direct verification",
+          "S1 post-deploy close test",
+          "Current-main compatibility"
+        ] do
+      assert implementation_skill =~ evidence
+    end
+
+    for merge_risk_contract <- [
+          "### 合并风险判断",
+          "required: 2-3 bullets",
+          "漏 bug 最坏影响",
+          "服务故障 / 数据损坏 / 权限隐私 / 不可逆状态",
+          "低风险也必须说明为什么低风险",
+          "缓解措施或 Deployment 验证"
+        ] do
+      assert implementation_skill =~ merge_risk_contract
+    end
+
     design_skill =
       File.read!(Path.expand("../workflows/agavemindlab/skills/phase-design/SKILL.md", File.cwd!()))
 
@@ -408,6 +430,7 @@ defmodule SymphonyElixir.CoreTest do
       |> hd()
 
     assert design_visible =~ "### 图示"
+    assert design_visible =~ "### 风险/注意"
     refute design_visible =~ "### 验收方案"
     assert design_skill =~ ">>> 🧩 设计细节（默认折叠）"
     assert design_skill =~ ">>> ✅ 验收方案（默认折叠）"

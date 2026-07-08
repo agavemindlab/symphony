@@ -300,12 +300,12 @@ input, key steps, output, and blocking point（触发者 / 输入 / 关键步骤
 <diagram>
 ```
 
+### 风险/注意（risks; omit if none）
+- <one sentence per item>
+
 >>> 🧩 设计细节（默认折叠）
 ### 仓库改动 / 文件影响（repository changes）
 - `<path>`: <what changes and why>
-
-### 风险/注意（risks; omit if none）
-- <one sentence per item>
 >>>
 
 >>> ✅ 验收方案（默认折叠）
