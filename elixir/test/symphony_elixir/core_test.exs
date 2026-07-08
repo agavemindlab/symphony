@@ -362,20 +362,41 @@ defmodule SymphonyElixir.CoreTest do
     refute design_skill =~ "opens `phase-implementation` in the same session"
   end
 
-  test "implementation artifact template is readable and preserves Maestro evidence" do
-    phase_skill =
+  test "phase artifact templates keep decisions visible and details folded" do
+    implementation_skill =
       File.read!(Path.expand("../workflows/agavemindlab/skills/phase-implementation/SKILL.md", File.cwd!()))
 
+    implementation_visible =
+      implementation_skill
+      |> String.split(">>> 🧩 本轮实现细节（默认折叠）", parts: 2)
+      |> hd()
+
     for section <- [
-          "### 当前对象",
-          "### Root cause",
-          "### Rework 已回应",
-          "### Code changes",
-          "### Verification",
-          "### Acceptance mapping",
+          "### 结论",
+          "### Root cause / recommendation",
           "### Human action needed"
         ] do
-      assert phase_skill =~ section
+      assert implementation_visible =~ section
+    end
+
+    for folded_section <- [
+          "### 本轮变化",
+          "### Rework 已回应",
+          "### 验证结论",
+          "### Acceptance mapping",
+          "### 合并风险判断",
+          "### Merge 后验证"
+        ] do
+      refute implementation_visible =~ folded_section
+      assert implementation_skill =~ folded_section
+    end
+
+    for folded_marker <- [
+          ">>> 🧩 本轮实现细节（默认折叠）",
+          ">>> ✅ 验证与验收（默认折叠）",
+          ">>> 🔎 审计证据（默认折叠）"
+        ] do
+      assert implementation_skill =~ folded_marker
     end
 
     for evidence <- [
@@ -386,7 +407,7 @@ defmodule SymphonyElixir.CoreTest do
           "S1 post-deploy close test",
           "Current-main compatibility"
         ] do
-      assert phase_skill =~ evidence
+      assert implementation_skill =~ evidence
     end
 
     for merge_risk_contract <- [
@@ -397,8 +418,22 @@ defmodule SymphonyElixir.CoreTest do
           "低风险也必须说明为什么低风险",
           "缓解措施或 Deployment 验证"
         ] do
-      assert phase_skill =~ merge_risk_contract
+      assert implementation_skill =~ merge_risk_contract
     end
+
+    design_skill =
+      File.read!(Path.expand("../workflows/agavemindlab/skills/phase-design/SKILL.md", File.cwd!()))
+
+    design_visible =
+      design_skill
+      |> String.split(">>> 🧩 设计细节（默认折叠）", parts: 2)
+      |> hd()
+
+    assert design_visible =~ "### 图示"
+    assert design_visible =~ "### 风险/注意"
+    refute design_visible =~ "### 验收方案"
+    assert design_skill =~ ">>> 🧩 设计细节（默认折叠）"
+    assert design_skill =~ ">>> ✅ 验收方案（默认折叠）"
   end
 
   test "maestro reviewer requests changes for missing or stale merge risk judgment" do

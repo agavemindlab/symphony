@@ -202,6 +202,16 @@ comfort.
 <用中文说明 accepted root cause / chosen approach。讲清楚为什么这个改动能解决
 问题；Type:Spike 写 findings/recommendation。不要把 PR 状态、验证输出和根因混在同一段。>
 
+### Human action needed
+
+> 👉 **需要人工处理**：<正常审查：审查 PR；无异议请将 issue 移至 `Merging`，需要修改则移至 `Rework`。>
+> - 若 blocked：写成可执行 runbook，包含操作系统/账号/项目/workspace、要配置的 key/权限/变量及类型或 sensitive 标记、secret 值从哪里取得或生成但不贴值、配置后如何重跑验证、通过判据。
+
+### 风险/注意（optional: non-merge caveats only）
+
+- <只列不属于合并风险判断、但仍影响 review 的事项；没有就省略>
+
+>>> 🧩 本轮实现细节（默认折叠）
 ### 本轮变化
 
 - `path/file`: <中文说明该文件改了什么和为什么>
@@ -213,7 +223,9 @@ comfort.
 - Current-main compatibility: <当前 head 是否已刷新到 current `main`，以及
   mergeability / 冲突状态；完整 git hygiene 放在 `>>> 🔎 审计证据`>
 - <逐条说明旧证据、旧 head、旧假设或 reviewer feedback 如何被替换 / 回应>
+>>>
 
+>>> ✅ 验证与验收（默认折叠）
 ### 验证结论
 
 - <命令 / CI / reviewer signal 的结论；完整命令、输出和 check metadata 放在
@@ -238,15 +250,7 @@ comfort.
 
 - S<N>: **查询** `<exact runnable query/command>` · **通过判据**
   `<pass/fail predicate, e.g. 匹配条数 == 0>` · **观察窗口** `<length>`
-
-### Human action needed
-
-> 👉 **需要人工处理**：<正常审查：审查 PR；无异议请将 issue 移至 `Merging`，需要修改则移至 `Rework`。>
-> - 若 blocked：写成可执行 runbook，包含操作系统/账号/项目/workspace、要配置的 key/权限/变量及类型或 sensitive 标记、secret 值从哪里取得或生成但不贴值、配置后如何重跑验证、通过判据。
-
-### 风险/注意（optional: non-merge caveats only）
-
-- <只列不属于合并风险判断、但仍影响 review 的事项；没有就省略>
+>>>
 
 >>> 🔎 审计证据（默认折叠）
 - Spec: <source issue/comment, e.g. DEV-123 `## Design` or Source comment: URL>
