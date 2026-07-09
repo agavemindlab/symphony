@@ -54,7 +54,13 @@ defmodule SymphonyElixir.AnalyticsTest do
         event_type: :cost_snapshot,
         issue_id: "issue-1",
         issue_identifier: "DEV-1",
-        tokens: %{input_tokens: 10, output_tokens: 4, total_tokens: 14, cached_input_tokens: 4, reasoning_output_tokens: 2},
+        tokens: %{
+          input_tokens: 10,
+          output_tokens: 4,
+          total_tokens: 14,
+          cached_input_tokens: 4,
+          reasoning_output_tokens: 2
+        },
         recorded_at: "2026-06-15T10:00:05Z"
       },
       %{
