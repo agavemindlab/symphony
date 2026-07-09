@@ -1,6 +1,11 @@
 ---
 name: symphony-sentry
-description: Read Sentry evidence for Symphony issues. Use when a Linear issue has a `sourceType: sentry` attachment, a phase needs Sentry issue/event detail, stack traces, issue events, or recent Sentry status, or the user explicitly asks Codex to inspect Sentry. Prefer authenticated `sentry-cli` or Sentry REST API evidence over unauthenticated Sentry web URLs.
+description: >-
+  Read Sentry evidence for Symphony issues. Use when a Linear issue has a
+  `sourceType: sentry` attachment, a phase needs Sentry issue/event detail,
+  stack traces, issue events, or recent Sentry status, or the user explicitly
+  asks Codex to inspect Sentry. Prefer authenticated `sentry-cli` or Sentry REST
+  API evidence over unauthenticated Sentry web URLs.
 ---
 
 # Symphony Sentry Evidence
