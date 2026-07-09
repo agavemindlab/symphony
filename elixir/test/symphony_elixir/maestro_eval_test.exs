@@ -150,12 +150,26 @@ defmodule SymphonyElixir.MaestroEvalTest do
         "issue_id" => "i2",
         "artifact_comment_id" => "a2",
         "occurred_at" => "2026-06-15T09:00:00Z"
-      })
+      }),
+      phase_event("phase_approved", %{
+        "event_id" => "bad-time",
+        "issue_id" => "i3",
+        "artifact_comment_id" => "a3",
+        "occurred_at" => nil,
+        "recorded_at" => 123
+      }),
+      phase_event("phase_approved", %{
+        "event_id" => "missing-artifact-signal",
+        "issue_id" => "i3",
+        "artifact_comment_id" => "a3"
+      }),
+      review_event(%{"event_id" => "d3", "issue_id" => "i3"})
     ]
 
-    assert [dispatch_pair, pending_pair] = MaestroEval.pairs(events)
+    assert [dispatch_pair, pending_pair, missing_artifact_pair] = MaestroEval.pairs(events)
     assert %{agreement: :agreed, verdict_source: "dispatch", signal_event_id: nil} = dispatch_pair
     assert %{agreement: :pending, verdict_source: nil, signal_event_id: nil, verdict_state: nil} = pending_pair
+    assert %{agreement: :pending, signal_event_id: nil} = missing_artifact_pair
   end
 
   test "pairs joins on parsed timestamps with recorded_at fallback and event_id dedup" do

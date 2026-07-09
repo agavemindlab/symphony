@@ -234,7 +234,6 @@ defmodule SymphonyElixir.MaestroEval do
       "phase_approved" -> same_artifact?(event, review)
       "phase_reworked" -> same_artifact?(event, review) or same_issue_phase?(event, "phase", review)
       "phase_rollback" -> same_issue_phase?(event, "from_phase", review)
-      _event_type -> false
     end
   end
 

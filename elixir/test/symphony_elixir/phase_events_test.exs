@@ -14,6 +14,7 @@ defmodule SymphonyElixir.PhaseEventsTest do
     assert PhaseEvents.phase_of_artifact("普通评论，提到 ## Requirements 也不算") == nil
     assert PhaseEvents.phase_of_artifact("") == nil
     assert PhaseEvents.phase_of_artifact(nil) == nil
+    assert PhaseEvents.reply_marker(nil) == nil
   end
 
   test "derives ordered events for a realistic multi-round thread regardless of input order" do

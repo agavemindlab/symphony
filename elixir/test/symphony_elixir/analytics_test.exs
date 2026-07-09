@@ -1048,6 +1048,12 @@ defmodule SymphonyElixir.AnalyticsTest do
         path: path
       )
 
+    :ok =
+      Analytics.record_event(
+        %{event_type: :human_comment, event_id: "human-comment-old-datetime", occurred_at: ~U[2026-06-10 09:00:00Z]},
+        path: path
+      )
+
     # Pre-epoch by recorded_at (no occurred_at): dropped.
     :ok =
       Analytics.record_event(

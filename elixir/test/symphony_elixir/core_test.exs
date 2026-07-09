@@ -1737,9 +1737,8 @@ defmodule SymphonyElixir.CoreTest do
     end)
 
     send(pid, {:DOWN, ref, :process, self(), :normal})
-    Process.sleep(50)
 
-    assert File.read!(marker) == "stopped|agent_down_normal|MT-STOPPED"
+    assert eventually_read_file!(marker) == "stopped|agent_down_normal|MT-STOPPED"
     refute Map.has_key?(:sys.get_state(pid).running, issue_id)
   end
 
@@ -3702,6 +3701,24 @@ defmodule SymphonyElixir.CoreTest do
       id: "fresh-#{old_artifact.id}",
       created_at: DateTime.add(old_artifact.created_at, 1, :second)
     }
+  end
+
+  defp eventually_read_file!(path, deadline_ms \\ System.monotonic_time(:millisecond) + 1_000) do
+    case File.read(path) do
+      {:ok, contents} ->
+        contents
+
+      {:error, :enoent} ->
+        if System.monotonic_time(:millisecond) < deadline_ms do
+          Process.sleep(10)
+          eventually_read_file!(path, deadline_ms)
+        else
+          File.read!(path)
+        end
+
+      {:error, reason} ->
+        raise File.Error, reason: reason, action: "read file", path: path
+    end
   end
 
   defp refute_called_comment_update_for_artifact(calls, artifact_id) do

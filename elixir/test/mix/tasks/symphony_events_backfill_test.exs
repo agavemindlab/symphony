@@ -15,6 +15,20 @@ defmodule Mix.Tasks.Symphony.Events.BackfillTest do
     def fetch_issue_comments(_issue_id), do: {:error, :comment_fetch_failed}
   end
 
+  defmodule FailingIssuesClient do
+    def fetch_issues_by_states(_state_names), do: {:error, :issue_fetch_failed}
+  end
+
+  defmodule RaisingCommentsClient do
+    alias SymphonyElixir.Linear.Issue
+
+    def fetch_issues_by_states(_state_names) do
+      {:ok, [:not_an_issue, %Issue{id: "issue-raise", identifier: "DEV-501", url: "https://linear.app/DEV-501", state: "Done"}]}
+    end
+
+    def fetch_issue_comments(_issue_id), do: raise("comment fetch exploded")
+  end
+
   setup do
     previous_linear_client_module = Application.get_env(:symphony_elixir, :linear_client_module)
 
@@ -113,6 +127,37 @@ defmodule Mix.Tasks.Symphony.Events.BackfillTest do
     refute File.exists?(analytics_path)
   end
 
+  test "issue fetch errors abort with the fetched state list" do
+    dir = tmp_dir!()
+    workflow_path = Path.join(dir, "WORKFLOW.md")
+
+    write_workflow_file!(workflow_path, tracker_kind: "linear")
+    Application.put_env(:symphony_elixir, :linear_client_module, FailingIssuesClient)
+
+    assert_raise Mix.Error, ~r/Unable to fetch issues by states/, fn ->
+      Backfill.run(["--workflow", workflow_path, "--analytics", Path.join(dir, "analytics.ndjson")])
+    end
+  end
+
+  test "comment fetch raises are logged per issue and counted" do
+    dir = tmp_dir!()
+    workflow_path = Path.join(dir, "WORKFLOW.md")
+    analytics_path = Path.join(dir, "analytics.ndjson")
+
+    write_workflow_file!(workflow_path, tracker_kind: "linear")
+    Application.put_env(:symphony_elixir, :linear_client_module, RaisingCommentsClient)
+
+    stderr =
+      capture_io(:stderr, fn ->
+        output = capture_io(fn -> Backfill.run(["--workflow", workflow_path, "--analytics", analytics_path]) end)
+        assert output =~ "backfill: 1 issues scanned, 0 events appended (0 already present, 1 fetch failures)"
+      end)
+
+    assert stderr =~ "DEV-501"
+    assert stderr =~ "comment fetch exploded"
+    refute File.exists?(analytics_path)
+  end
+
   test "rejects missing --workflow and invalid options" do
     assert_raise Mix.Error, ~r/--workflow PATH is required/, fn -> Backfill.run([]) end
     assert_raise Mix.Error, ~r/Invalid option/, fn -> Backfill.run(["--wat"]) end
@@ -135,7 +180,8 @@ defmodule Mix.Tasks.Symphony.Events.BackfillTest do
       %Issue{id: "issue-done", identifier: "DEV-201", url: "https://linear.app/DEV-201", state: "Done", labels: ["SYMPHONY"]},
       %Issue{id: "issue-active", identifier: "DEV-202", url: "https://linear.app/DEV-202", state: "In Progress", labels: ["symphony"]},
       %Issue{id: "issue-unlabeled", identifier: "DEV-203", url: "https://linear.app/DEV-203", state: "Done", labels: ["other"]},
-      %Issue{id: "issue-backlog", identifier: "DEV-204", url: "https://linear.app/DEV-204", state: "Backlog", labels: ["symphony"]}
+      %Issue{id: "issue-backlog", identifier: "DEV-204", url: "https://linear.app/DEV-204", state: "Backlog", labels: ["symphony"]},
+      :not_an_issue
     ]
 
     Application.put_env(:symphony_elixir, :memory_tracker_issues, issues)
