@@ -118,7 +118,21 @@ defmodule SymphonyElixir.PhaseEventsTest do
 
   test "marks artifacts blocked on human input and keeps events for resolved artifacts" do
     comments = [
-      comment("req-1", "## Requirements\n\n[NEEDS CLARIFICATION: 哪个 Linear project 归属这项工作？]",
+      comment(
+        "req-1",
+        """
+        ## Requirements
+
+        ___
+
+        ### NEEDS CLARIFICATION
+
+        > This needs an explicit human decision before the workflow can continue.
+
+        Question: 哪个 Linear project 归属这项工作？
+
+        ___
+        """,
         created_at: "2026-07-01T10:00:00Z",
         resolved_at: "2026-07-02T00:00:00Z"
       ),
@@ -138,6 +152,13 @@ defmodule SymphonyElixir.PhaseEventsTest do
              occurred_at: "2026-07-02T09:00:00Z",
              author_name: "Bob"
            }
+  end
+
+  test "needs_clarification? keeps legacy bracket marker compatibility" do
+    assert PhaseEvents.needs_clarification?("## Design\n\n### NEEDS CLARIFICATION\n\nQuestion: 选哪个？")
+    assert PhaseEvents.needs_clarification?("## Design\n\n[NEEDS CLARIFICATION: 选哪个？]")
+    refute PhaseEvents.needs_clarification?("## Design\n\nQuestion: 选哪个？")
+    refute PhaseEvents.needs_clarification?(nil)
   end
 
   test "tolerates leading whitespace and markdown decoration around markers" do

@@ -67,7 +67,23 @@ defmodule SymphonyElixir.RoutingBriefTest do
         author_name: "symphony-agent",
         author_is_bot: true
       ),
-      comment("impl-1", "## Implementation\n\nPR: https://github.com/x/y/pull/1\n\n[NEEDS CLARIFICATION: 部署到哪个环境？]",
+      comment(
+        "impl-1",
+        """
+        ## Implementation
+
+        PR: https://github.com/x/y/pull/1
+
+        ___
+
+        ### NEEDS CLARIFICATION
+
+        > This needs an explicit human decision before the workflow can continue.
+
+        Question: 部署到哪个环境？
+
+        ___
+        """,
         created_at: "2026-07-01T14:00:00Z",
         author_name: "symphony-agent",
         author_is_bot: true

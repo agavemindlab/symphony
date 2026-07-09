@@ -132,7 +132,7 @@ yet>` and, when a confidence score exists, `置信度：<N>/10`.
   `MAESTRO_AUTO_APPROVE` is `true`/`1`; the awaiting phase is Requirements or
   Design (never Implementation, Deployment, or Spike findings); confidence >=
   `MAESTRO_AUTO_APPROVE_MIN_CONFIDENCE` (default 9) out of 10; and the
-  artifact has no unresolved `[NEEDS CLARIFICATION]` marker and no 🔴
+  artifact has no unresolved clarification gate and no 🔴
   high-impact open question — end the reply with the line
   `🤖 auto: 已自动批准，置为 In Progress` and move the issue to `In Progress`.
   Otherwise keep the issue in `Human Review`. Then remove `symphony:maestro`.

@@ -150,7 +150,7 @@ defmodule SymphonyElixir.RoutingBrief do
       created_at: artifact.created_at,
       status: artifact_status(closing),
       closed_at: closing && closing.created_at,
-      needs_clarification: String.contains?(artifact.body, "[NEEDS CLARIFICATION"),
+      needs_clarification: PhaseEvents.needs_clarification?(artifact.body),
       new_replies: new_replies
     }
   end
