@@ -224,6 +224,8 @@ Symphony only starts the agent when the issue is in an active state (`Todo`, `In
 2. Ensure the feature branch exists and restore agent state:
    - Read the issue's `branchName` field from Linear.
    - If already on that branch, continue. Otherwise check it out — preferring an existing branch on `origin`, then a local branch, then creating a new one from `upstream/${SYMPHONY_BASE_BRANCH:-main}`.
+     Rebuilding a branch from `origin/main` does not change the PR target repo;
+     `symphony-pr` still creates the PR against `upstream` when that remote exists.
    - Restore the latest `Symphony agent state` Linear issue attachment into
      `.symphony/` when present. If no attachment exists, continue with a new
      workpad. Never require `.symphony/` to be tracked on the PR branch.

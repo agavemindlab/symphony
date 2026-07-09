@@ -362,6 +362,30 @@ defmodule SymphonyElixir.CoreTest do
     refute design_skill =~ "opens `phase-implementation` in the same session"
   end
 
+  @tag :prompt_contract
+  test "shared symphony-pr contract targets upstream repo when upstream exists" do
+    repo_root = Path.expand("..", File.cwd!())
+    workflow = File.read!(Path.join(repo_root, "workflows/agavemindlab/WORKFLOW.md"))
+
+    symphony_pr_skill =
+      File.read!(Path.join(repo_root, "workflows/agavemindlab/skills/symphony-pr/SKILL.md"))
+
+    assert symphony_pr_skill =~
+             "When an `upstream` remote exists, the PR target repo is `upstream_repo`"
+
+    assert symphony_pr_skill =~ "the PR head is `<origin_owner>:<branch>`"
+    assert symphony_pr_skill =~ "gh pr create --repo \"$upstream_repo\""
+    assert symphony_pr_skill =~ "--head \"$pr_head\""
+
+    assert symphony_pr_skill =~
+             "Shared workflow agents must not create PRs with `--repo \"$origin_repo\"`"
+
+    assert symphony_pr_skill =~ "concrete origin/fork repositories such as `--repo hongqn/symphony`"
+
+    assert workflow =~ "Rebuilding a branch from `origin/main` does not change the PR target repo"
+    assert workflow =~ "`symphony-pr` still creates the PR against `upstream` when that remote exists"
+  end
+
   test "phase artifact templates keep decisions visible and details folded" do
     implementation_skill =
       File.read!(Path.expand("../workflows/agavemindlab/skills/phase-implementation/SKILL.md", File.cwd!()))
