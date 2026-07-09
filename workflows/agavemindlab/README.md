@@ -88,7 +88,13 @@ When an issue comes from Linear, hooks and Codex startup receive
 `SYMPHONY_LINEAR_PROJECT_ID`, `SYMPHONY_LINEAR_PROJECT_SLUG`, and
 `SYMPHONY_LINEAR_PROJECT_NAME`. Aggregate workflows can source
 `project-for-linear-project.sh` to select the per-project `project.env`,
-repository, setup script, and teardown path.
+repository, setup script, and teardown path. That script is a thin wrapper
+around the shared `workflows/resolve-project-dir.sh`, which reads the
+aggregate's `projects.tsv` (slug → workflows/ dir registry; a `-lite`
+aggregate sets `SYMPHONY_PROJECT_DIR_SUFFIX` and symlinks the same registry).
+Adding a project to an aggregate = one `projects.tsv` row + its name in
+`SYMPHONY_PROJECT_NAMES` in `project.env` (+ the WORKFLOW.md routing
+registry for spawned-issue routing).
 
 ## Shared Skills
 

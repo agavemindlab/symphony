@@ -3,7 +3,7 @@
 `bin/symphony-run <project>` is the operator entry point for running Symphony
 against a project workflow under `workflows/<project>/`. It composes the
 environment, selects the profile, validates required variables, then execs the
-Elixir Symphony binary with the project's `WORKFLOW.md`.
+Elixir Symphony binary with the selected workflow file.
 
 ```sh
 bin/symphony-run <project>
@@ -66,7 +66,28 @@ After all layers load, the launcher additionally exports:
 
 - `GH_PROMPT_DISABLED=true` (unless already set)
 - `SYMPHONY_WORKSPACE_ROOT` (defaults to `$HOME/symphony-workspaces` if unset)
+- `SYMPHONY_MAESTRO_WORKSPACE_ROOT` (defaults to
+  `$SYMPHONY_WORKSPACE_ROOT-maestro` if unset)
 - `SYMPHONY_PROFILE` (the resolved profile name)
+
+Set `SYMPHONY_WORKFLOW_FILE` to a file name such as `MAESTRO_WORKFLOW.md` to run
+an alternate workflow from the same `workflows/<project>/` directory.
+
+## The Maestro reviewer instance
+
+```sh
+bin/symphony-run <project> --maestro
+```
+
+`--maestro` is shorthand for `SYMPHONY_WORKFLOW_FILE=MAESTRO_WORKFLOW.md` +
+`SYMPHONY_PROFILE=maestro` (explicit caller env still wins). It additionally
+replaces `SYMPHONY_PORT` with `SYMPHONY_MAESTRO_PORT` (unset → no dashboard),
+so the reviewer instance never fights the main instance for its port. The
+`maestro` profile env's `LINEAR_API_KEY` is the Maestro OAuth identity;
+workspaces go under `SYMPHONY_MAESTRO_WORKSPACE_ROOT` (default
+`$SYMPHONY_WORKSPACE_ROOT-maestro`). Both instances share
+`elixir/log/symphony.log` and the analytics NDJSON (locked appends;
+readers dedup by event_id).
 
 Set `SYMPHONY_PORT` in any environment layer to pass `--port` to the Symphony
 CLI and enable the dashboard.

@@ -66,6 +66,16 @@ to send the reply for them, e.g. "帮我回复", then:
    PR comments, merge, deploy, or move to `Done` unless the recommendation says
    `Done` and the user explicitly asked you to act.
 
+Maestro pre-review sessions execute their request-changes verdict by default:
+the pre-review reply ends with a `🤖 auto: 已自动将 issue 置为 Rework` line and
+the issue is moved to `Rework` (reversible; a human can move it back with a
+reason). Setting the operator env `MAESTRO_AUTO_REWORK=false` downgrades the
+session to recommendation-only. With the operator env `MAESTRO_AUTO_APPROVE=true`
+(default off), a pre-review approve verdict on a Requirements or Design artifact
+also moves the issue to `In Progress` the same reversible way, gated on
+confidence reaching `MAESTRO_AUTO_APPROVE_MIN_CONFIDENCE` (default 9).
+`Merging` and `Done` are always the human's call.
+
 ## Subagent Task
 
 Send the subagent a prompt shaped like this, after the contents of

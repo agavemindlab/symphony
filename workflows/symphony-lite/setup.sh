@@ -1,0 +1,1 @@
+../symphony/setup.sh

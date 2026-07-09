@@ -2,7 +2,10 @@ import Config
 
 if config_env() == :test do
   config :symphony_elixir,
-    workflow_file_path: Path.expand("../../workflows/symphony/WORKFLOW.md", __DIR__)
+    workflow_file_path: Path.expand("../../workflows/symphony/WORKFLOW.md", __DIR__),
+    # Keep test-run engine logs out of the production log/symphony.log*
+    # rotation (test fixtures were interleaving with live-instance logs).
+    log_file: Path.join(System.tmp_dir!(), "symphony-elixir-test/symphony.log")
 end
 
 config :phoenix, :json_library, Jason
