@@ -188,6 +188,22 @@ The agent must be able to talk to Linear, either via a configured Linear MCP ser
   `.symphony/` because Symphony state attachments may archive `.symphony`
   files.
 
+## Sentry Evidence
+
+When issue context includes a Linear `sourceType: sentry` attachment, or a
+phase needs Sentry event detail / stack trace / issue events, invoke the shared
+`symphony-sentry` skill. Use authenticated `sentry-cli` or Sentry REST API
+evidence before checking the Sentry web URL; a web `/auth/login/...` redirect
+is only a fallback failure signal after CLI/API auth paths have been tried.
+
+Aggregate workflows such as `grandline` do not automatically source a child
+project's `workflows/<project>/project.env.local`. Sentry auth for aggregate
+runs must come from the selected operator profile, aggregate env, explicit
+runtime env, or global `sentry-cli` login. Never paste tokens, cookies, or full
+Sentry payloads into Linear artifacts, PRs, commit messages, or logs; summarize
+only the issue/event ids, title, last seen, and key stack/function/path/error
+evidence needed for the phase decision.
+
 ## Phase Map
 
 The workflow progresses through four sequential phases. Each phase has a dedicated skill.

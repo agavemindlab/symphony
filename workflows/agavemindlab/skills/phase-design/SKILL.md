@@ -327,13 +327,20 @@ input, key steps, output, and blocking point（触发者 / 输入 / 关键步骤
 ### 原型预览（UI-facing designs only; omit otherwise）
 <embedded 截屏 previews of key prototype states> · 本地打开: `.symphony/prototype/`（见 agent state）
 
+### 风险/注意（risks; omit if none）
+- <one sentence per item>
+
+>>> 🧩 设计细节（默认折叠）
+### 仓库改动 / 文件影响（repository changes）
+- `<path>`: <what changes and why>
+>>>
+
+>>> ✅ 验收方案（默认折叠）
 ### 验收方案（每个 S<N> 两道关；指定证据形式，长文本用列表）
 - **S1: <criterion>**
   - Pre-PR 本地验收: <如何本地验> → <可重跑命令 + 通过判据；视觉类为 截屏 / 录屏>
   - Post-Merge 最终验收: <如何线上验> → <即时信号 / 查询+判据+窗口 / 人工判定>
-
-### 风险/注意（risks; omit if none）
-- <one sentence per item>
+>>>
 
 ### 待确认（omit if none; the batched [NEEDS CLARIFICATION] block — see Batched clarification）
 
