@@ -166,6 +166,11 @@ Reply locations:
   reviews, comments, and status rollup; run `gh pr diff`; run `gh pr checks`
   when available. Exclude bot/configured automated reviewer feedback when
   judging human intent.
+- For shared workflow PR target checks: when the issue/artifact/PR evidence
+  indicates the shared workflow and the repo has an `upstream` remote, the PR
+  must target the upstream repo and use head `<origin_owner>:<branch>`. Request
+  changes when the PR targets `origin_repo`, `hongqn/symphony`, or an
+  equivalent origin/fork repo instead.
 - For `## Implementation`, audit the awaiting artifact body itself for an
   explicit merge-risk judgment tied to the current PR head. PR metadata,
   check/review facts, prior artifacts, or an older head's risk judgment do not

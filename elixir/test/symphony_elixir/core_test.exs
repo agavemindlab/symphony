@@ -386,6 +386,24 @@ defmodule SymphonyElixir.CoreTest do
     assert workflow =~ "`symphony-pr` still creates the PR against `upstream` when that remote exists"
   end
 
+  @tag :prompt_contract
+  test "maestro reviewer requests changes for shared workflow origin-target PRs" do
+    repo_root = Path.expand("..", File.cwd!())
+    reviewer = File.read!(Path.join(repo_root, ".codex/skills/maestro/agents/maestro-reviewer.md"))
+
+    for contract <- [
+          "shared workflow PR target",
+          "`upstream` remote",
+          "target the upstream repo",
+          "head `<origin_owner>:<branch>`",
+          "`origin_repo`",
+          "`hongqn/symphony`",
+          "request changes"
+        ] do
+      assert reviewer =~ contract
+    end
+  end
+
   test "phase artifact templates keep decisions visible and details folded" do
     implementation_skill =
       File.read!(Path.expand("../workflows/agavemindlab/skills/phase-implementation/SKILL.md", File.cwd!()))
