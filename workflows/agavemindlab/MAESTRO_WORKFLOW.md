@@ -68,7 +68,7 @@ agent:
   max_concurrent_agents: 5
   max_turns: 1
 codex:
-  command: codex --config shell_environment_policy.inherit=all --config 'model="gpt-5.5"' --config model_reasoning_effort=xhigh app-server
+  command: codex --config shell_environment_policy.inherit=all --config 'model="gpt-5.6-sol"' --config model_reasoning_effort=high app-server
   # The session blocks silently on the $maestro reviewer subagent for 10-20
   # minutes; the default 5m stall detector would kill every review mid-wait.
   stall_timeout_ms: 1800000
