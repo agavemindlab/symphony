@@ -94,8 +94,8 @@ the artifact:
   inventing parallel ones; add new `S<N>` only for behavior unique to this
   child.
 - If the slice conflicts with the parent's framing, that is a real ambiguity —
-  raise it as `[NEEDS CLARIFICATION]` instead of silently overriding the
-  parent.
+  use the visible `### NEEDS CLARIFICATION` block instead of silently
+  overriding the parent.
 
 ## `验收标准` — 5 rules
 
@@ -191,7 +191,7 @@ investigation the agent can actually perform (only a human can answer), do not
 run the pipeline: state this in the `## Requirements` artifact, `@`-mention the
 issue's `creator`, move the issue to `Human Review`, and stop.
 
-## Batched clarification (`[NEEDS CLARIFICATION]`)
+## Batched clarification (`### NEEDS CLARIFICATION`)
 
 Because the agent cannot interview the human turn by turn, ambiguities are
 resolved in **one batch** with a recommended answer per question, so the human
@@ -226,8 +226,12 @@ preserve it here — do not flatten the reasoning down to a bare question.
 **Batched format** — one block at the foot of the `## Requirements` artifact:
 
 ```md
-### 待确认（一次性审阅：认可全部推荐请回复「同意默认」，否则逐条说明）
-[NEEDS CLARIFICATION]
+___
+
+### NEEDS CLARIFICATION
+
+> 需要人工决定后 workflow 才能继续。认可全部推荐请回复「同意默认」，否则逐条说明。
+
 **Q1. <question> 〔影响：低〕**
   背景: <一句：歧义在哪 + 选错的代价>
   - A（推荐）: <answer> — <这样选的后果 / 为什么是安全选择>
@@ -238,6 +242,8 @@ preserve it here — do not flatten the reasoning down to a bare question.
   - A（推荐）: <answer> — <后果>
   - B: <answer> — <后果>
   - C: <answer> — <后果>
+
+___
 ```
 
 Give each question as many concrete branches as the decision genuinely has
@@ -317,7 +323,7 @@ Primary: Type:<Bug|Feature|Refactor|Performance|Migration|Chore|Spike|Other>
 风险/注意（secondary concerns; omit if none）:
 - <one sentence per item>
 
-### 待确认（omit if none; the batched [NEEDS CLARIFICATION] block — see Batched clarification）
+### 待确认（omit if none; use the visible `### NEEDS CLARIFICATION` block — see Batched clarification）
 
 >>> 🛠️ 本次激活的 skills
 - Codex session id: `<session_id | n/a>`
@@ -327,7 +333,7 @@ Primary: Type:<Bug|Feature|Refactor|Performance|Migration|Chore|Spike|Other>
 
 ## When blocked
 
-When a batched `[NEEDS CLARIFICATION]` block remains after honest analysis:
+When a batched clarification block remains after honest analysis:
 
 1. Write the batched block at the foot of the `## Requirements` artifact.
 2. Publish the artifact through the workflow artifact protocol.
@@ -382,7 +388,7 @@ about form, not correctness:
   close the issue (the set-falsification test holds: all-green ⟹ closeable).
 - Type-specific writing emphasis satisfied for `Primary:` (e.g. a Bug carries
   its required bug-specific `S<N>`).
-- No unresolved `[NEEDS CLARIFICATION]` markers.
+- No unresolved clarification gates.
 
 Publish the `## Requirements` artifact through the workflow artifact protocol
 and set the workpad `current_phase: Requirements`. Do **not** move the issue
@@ -417,7 +423,7 @@ for the `Rework` state, and for the **complete-but-not-confident** case: a
 key interpretation could reasonably go another way, or you resolved a
 material ambiguity with a judgment call a human might overturn. When you stop
 for a specific uncertain interpretation, prefer surfacing it as a batched
-`[NEEDS CLARIFICATION]` question carrying your recommended reading (so the
+`### NEEDS CLARIFICATION` block carrying your recommended reading (so the
 human can one-click `同意默认`) rather than only a passive `风险/注意` note;
 record `confidence: review` in the notes. Because a stop now costs the human a
 single approval, **when in doubt, stop** — auto-advance is for the unambiguous
@@ -425,5 +431,5 @@ case. After a stop, the human approves by moving the issue back to an active
 state and the next session advances to Design.
 
 (The "When blocked" path above is the harder stop: an unresolved
-`[NEEDS CLARIFICATION]` means the artifact is not even safe to build on, so
+`### NEEDS CLARIFICATION` means the artifact is not even safe to build on, so
 it moves to `Human Review` directly.)

@@ -157,9 +157,13 @@ Design:
   "不支持" — and a small spike, API probe, or local proof would settle it
   cheaply, request changes: the proof check belongs in Design rationale, and
   calling the chosen path "conservative", "low risk", or "更稳" is not evidence.
-- A verification plan for a cross-component runtime path (entrypoint plus
-  durable state, background worker, external process, or metric/alert
-  semantics) must name a black-box or near-black-box exercise of that path.
+- For Design, when the approach touches existing behavior, require the
+  verification plan to identify the affected existing user or system function
+  and include a named test, command, log, or near-black-box/manual exercise
+  with its pass criterion; request changes when the verification plan lacks this
+  regression gate. For a wholly new cross-component runtime path (entrypoint
+  plus durable state, background worker, external process, or metric/alert
+  semantics), require a named black-box or near-black-box exercise.
 
 Implementation:
 
@@ -176,6 +180,14 @@ Implementation:
   With multiple open PRs, identify the current merge target and classify the
   rest; request changes or clarification when the target is ambiguous or
   another open PR carries unmerged scope, feedback, or unresolved checks.
+- Before recommending an Implementation `merge nudge`, inspect the current PR
+  commit list. If it contains fixup/squash commits, WIP commits,
+  review-iteration commits, late lint/test repair commits, repeated "address
+  review" commits, or several small adjustments in the same logical scope, recommend
+  `request changes` / `Rework` so Symphony reorganizes commits first. If the
+  history is already clean, cite `commit organization: no organization needed`
+  in `依据`; clean single-commit or clean logical multi-commit histories must
+  not be rewritten.
 - shared workflow PR target: when issue/artifact/PR evidence shows the shared
   workflow and the repo has an `upstream` remote, require the PR to target the upstream repo
   and use head `<origin_owner>:<branch>`. Recommend request changes when the PR
@@ -204,12 +216,15 @@ Implementation:
   authorization — including applying the PR's committed secret/vault/env
   changes and running runtime smoke — instead of handing off to `Merging` /
   Deployment needs rework; carry post-merge checks as `Merge 后验证`.
-- For a cross-component runtime path whose core value crosses a boundary no
-  named test touches, require an artifact-cited black-box or near-black-box
-  runtime exercise (command, log, or manual run), or an explicit statement
-  that the exercise is impossible plus named tests mapped to each runtime
-  boundary. When targeted tests demonstrably cover each changed boundary,
-  judge as a strict human would instead of demanding the exercise ritually.
+- For Implementation, acceptance evidence must cover both the
+  requested change and regression risk: when the PR touches existing behavior,
+  require artifact-cited evidence that the affected existing user or system
+  function still works. Proving only the new fix, metric, or code path is not
+  enough; request changes when related touched behavior lacks named test,
+  command, log, or near-black-box/manual evidence. For wholly new behavior
+  whose core value crosses a runtime boundary no named test touches, require a
+  black-box or near-black-box exercise, or explicit impossibility plus named
+  tests mapped to each boundary.
 - An Implementation rework artifact need not restate already-evidenced
   acceptance items from an earlier unresolved artifact; judge whether it
   closes the actual rework request.
@@ -300,10 +315,11 @@ Spawned and related issues:
   once the answer exists, recommend `In Progress` (clarification-answer
   resume, not approval).
 - Merge nudge only when the awaiting-review artifact is `## Implementation`,
-  no prerequisite blocker exists, and normal Implementation appears accepted
-  but the workflow needs the human to set `Merging`. For a no-PR `Type:Spike`
-  with accepted findings, the draft must say the issue goes straight to
-  `Done`, not `Merging`.
+  no prerequisite blocker exists, the current PR commit history is already
+  clean or has been reorganized, and normal Implementation appears accepted but
+  the workflow needs the human to set `Merging`. For a no-PR `Type:Spike` with
+  accepted findings, the draft must say the issue goes straight to `Done`, not
+  `Merging`.
 - Completion confirmation only when Deployment waits for proof that merge,
   deployment, or post-merge validation completed, that proof is checkable
   now, and no material outcome-proof gap remains untracked.

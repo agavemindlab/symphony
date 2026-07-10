@@ -11,7 +11,7 @@ Do:
 - Read the current `## Requirements` artifact and relevant code/docs.
 - Prefer deleting, correcting, or reusing existing behavior before adding new structure.
 - State the chosen approach, touched areas, validation plan, and tradeoffs.
-- If requirements are unclear or wrong, route back with `[NEEDS CLARIFICATION: ...]`.
+- If requirements are unclear or wrong, route back with a visible `### NEEDS CLARIFICATION` block; keep the question expanded.
 - Otherwise publish `## Design` with conclusion, evidence, acceptance checks, and material risks.
 
 Exit after posting the artifact. Do not implement in this phase unless the issue is clearly trivial and the workflow already allows continuing.

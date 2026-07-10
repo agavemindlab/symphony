@@ -447,6 +447,67 @@ defmodule SymphonyElixir.CoreTest do
     end
   end
 
+  @tag :prompt_contract
+  test "shared workflow renders a visible expanded clarification gate" do
+    repo_root = Path.expand("..", File.cwd!())
+    workflow_path = Path.join(repo_root, "workflows/agavemindlab/WORKFLOW.md")
+    original_workflow_path = Workflow.workflow_file_path()
+
+    Workflow.set_workflow_file_path(workflow_path)
+    on_exit(fn -> Workflow.set_workflow_file_path(original_workflow_path) end)
+
+    prompt =
+      PromptBuilder.build_prompt(%Issue{
+        id: "dev-5464-replay",
+        identifier: "DEV-5464",
+        title: "Deployment needs a human coverage-gate decision",
+        description: "Ask whether to expand scope or wait for a separate baseline fix.",
+        state: "Rework",
+        labels: ["symphony", "Type:Bug"]
+      })
+
+    assert [gate] =
+             Regex.run(
+               ~r/___\n\n### NEEDS CLARIFICATION\n\n> This needs an explicit human decision before the workflow can continue\.\n\nQuestion: <question>\n\n___/,
+               prompt
+             )
+
+    refute gate =~ ">>>"
+    refute prompt =~ "[NEEDS CLARIFICATION:"
+  end
+
+  @tag :prompt_contract
+  test "commit organization gate preserves clean history and binds rewritten heads safely" do
+    repo_root = Path.expand("..", File.cwd!())
+
+    land_skill =
+      File.read!(Path.join(repo_root, "workflows/agavemindlab/skills/symphony-land/SKILL.md"))
+
+    maestro_workflow =
+      File.read!(Path.join(repo_root, "workflows/agavemindlab/MAESTRO_WORKFLOW.md"))
+
+    reviewer =
+      File.read!(Path.join(repo_root, ".codex/skills/maestro/agents/maestro-reviewer.md"))
+
+    for contract <- [
+          "Commit organization gate",
+          "no organization needed",
+          "reorganized",
+          "--force-with-lease=refs/heads/<branch>:<expected-old-sha>",
+          "case \"$gate_decision\" in",
+          "test \"$(git rev-parse HEAD)\" = \"$expected_old_sha\"",
+          "tree hash",
+          "--match-head-commit"
+        ] do
+      assert land_skill =~ contract
+    end
+
+    for prompt <- [land_skill, maestro_workflow, reviewer] do
+      assert prompt =~ "clean logical"
+      assert prompt =~ "same logical scope"
+    end
+  end
+
   test "workflow defines the status card as a non-routing digest" do
     repo_root = Path.expand("..", File.cwd!())
     workflow = File.read!(Path.join(repo_root, "workflows/agavemindlab/WORKFLOW.md"))
@@ -644,15 +705,36 @@ defmodule SymphonyElixir.CoreTest do
     assert reviewer =~ "not phase approval"
   end
 
-  test "maestro reviewer does not overstate readback as regression verification" do
+  test "maestro reviewer requires real regression evidence for affected behavior" do
     reviewer =
       File.read!(Path.expand("../.codex/skills/maestro/agents/maestro-reviewer.md", File.cwd!()))
+
+    normalized_reviewer = String.replace(reviewer, ~r/\s+/, " ")
+
+    assert normalized_reviewer =~
+             "For Implementation, acceptance evidence must cover both the requested change and regression risk"
 
     for contract <- [
           "merged-file readback",
           "Linear relation checks",
           "regression verification/evidence",
-          "command, log, test, or manual exercise"
+          "command, log, test, or manual exercise",
+          "For Design, when the approach touches existing behavior",
+          "affected existing user or system function",
+          "include a named test, command, log, or near-black-box/manual exercise",
+          "pass criterion",
+          "request changes when the verification plan",
+          "regression gate",
+          "requested change and regression risk",
+          "affected existing user or system",
+          "function still works",
+          "Proving only the new fix, metric, or code path is not",
+          "request changes when related touched behavior lacks named test",
+          "command, log, or near-black-box/manual evidence",
+          "wholly new behavior",
+          "runtime boundary no named test touches",
+          "explicit impossibility plus named",
+          "tests mapped to each boundary"
         ] do
       assert reviewer =~ contract
     end

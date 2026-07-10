@@ -71,7 +71,23 @@ defmodule SymphonyElixir.RoutingBriefTest do
         author_name: "symphony-agent",
         author_is_bot: true
       ),
-      comment("impl-1", "## Implementation\n\nPR: https://github.com/x/y/pull/1\n\n[NEEDS CLARIFICATION: 部署到哪个环境？]",
+      comment(
+        "impl-1",
+        """
+        ## Implementation
+
+        PR: https://github.com/x/y/pull/1
+
+        ___
+
+        ### NEEDS CLARIFICATION
+
+        > This needs an explicit human decision before the workflow can continue.
+
+        Question: 部署到哪个环境？
+
+        ___
+        """,
         created_at: "2026-07-01T14:00:00Z",
         author_name: "symphony-agent",
         author_is_bot: true
@@ -190,7 +206,7 @@ defmodule SymphonyElixir.RoutingBriefTest do
 
     assert markdown =~ "确定性计算"
     assert markdown =~ "- 待审阶段：Implementation（artifact `impl-1`，发布于 2026-07-01T14:00:00Z）"
-    assert markdown =~ "- 待审 artifact 内含未决 `[NEEDS CLARIFICATION]` 标记"
+    assert markdown =~ "- 待审 artifact 含未决澄清 gate"
     assert markdown =~ "| Requirements | `req-2` | closed_approved | 2026-07-01T12:10:00Z | 2026-07-01T13:00:00Z | 2 |"
     assert markdown =~ "| Design | `design-1` | closed_auto | 2026-07-01T13:30:00Z | 2026-07-01T13:35:00Z | 1 |"
     assert markdown =~ "| Implementation | `impl-1` | awaiting | 2026-07-01T14:00:00Z | — | 1 |"

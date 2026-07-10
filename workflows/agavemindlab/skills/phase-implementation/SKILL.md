@@ -102,7 +102,7 @@ Invoke when the issue's type calls for it, to produce the acceptance evidence
 the `## Design` 验收方案 named (recorded into `验收对照`); skip and record
 `Skipped <skill>: <reason>` otherwise. These run autonomously — they do not
 interview a human; any decision only a human can make follows the workflow's
-`[NEEDS CLARIFICATION]` handling.
+clarification-gate handling.
 
 - **Feature / UI behavior** → `qa` (gstack — QA the running web app and fix what
   it finds) or `qa-only` (report-only) — exercise the critical-path flow and
@@ -327,8 +327,8 @@ enough that a human, or an authorized agent, can unblock it without redoing
 research. Before handoff, inspect the repo, PR, configured services, and public
 docs needed to identify where and how to perform the operation. For secrets,
 name the source or generation path, never the value. If the operation is still
-unclear after that research, ask `[NEEDS CLARIFICATION]` instead of writing a
-vague blocker.
+unclear after that research, use a visible `### NEEDS CLARIFICATION` gate
+instead of writing a vague blocker.
 
 Reflect this in the artifact's `风险/注意` and include:
 ```
