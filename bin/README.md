@@ -94,8 +94,9 @@ CLI and enable the dashboard.
 
 ## GitHub App authentication
 
-If all three GitHub App variables are set after the environment layers load,
-the launcher mints a short-lived installation token before starting Symphony:
+If `GITHUB_APP_ENABLED=true` and all three GitHub App variables are set after
+the environment layers load, the launcher mints a short-lived installation
+token before starting Symphony:
 
 - `GITHUB_APP_ID`
 - `GITHUB_APP_INSTALLATION_ID`
@@ -114,9 +115,10 @@ In GitHub App mode, the launcher:
   `GIT_AUTHOR_EMAIL`, `GIT_COMMITTER_NAME`, and `GIT_COMMITTER_EMAIL`.
 
 `GITHUB_APP_BOT_NAME` and `GITHUB_APP_BOT_EMAIL` may override the default commit
-identity. If any required GitHub App variable is missing while another is set,
-the launcher exits instead of silently falling back, because partial app config
-usually means the bot identity rollout is broken.
+identity. In an App-enabled project, if any required GitHub App variable is
+missing while another is set, the launcher exits instead of silently falling
+back, because partial app config usually means the bot identity rollout is
+broken.
 
 GitHub App repository access and API permissions are configured on the GitHub
 App installation, not in repo env files. The current `gl-symphony` installation
@@ -129,10 +131,16 @@ outside the installation or needs a permission the installation does not grant,
 GitHub returns an API error; fix the installation instead of adding a PAT
 fallback in app mode.
 
-When none of the GitHub App variables are set, the launcher keeps the existing
-profile/PAT behavior. Existing Symphony processes and workspaces keep the
-tokens they were started with; restart them with `bin/symphony-run <project>`
-after adding or changing GitHub App env so new GitHub operations use the app.
+When `GITHUB_APP_ENABLED` is unset or not `true`, the launcher keeps the
+existing profile/PAT behavior even if the shared profile contains GitHub App
+credentials. The committed rollout currently enables the app only in
+`workflows/symphony/project.env`; aggregate `grandline` and other project
+launchers continue using their profile identity.
+
+Existing Symphony processes and workspaces keep the tokens they were started
+with. Restart the `bin/symphony-run symphony` process after changing the switch
+or App env; restart other project launchers only when changing their own auth
+mode.
 
 ## Manual run (without the launcher)
 

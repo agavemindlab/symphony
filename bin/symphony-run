@@ -83,6 +83,7 @@ github_app_api() {
 }
 
 configure_github_app_auth() {
+  [ "${GITHUB_APP_ENABLED:-}" = "true" ] || return 0
   github_app_configured || return 0
 
   [ -r "$GITHUB_APP_PRIVATE_KEY_PATH" ] || die "GITHUB_APP_PRIVATE_KEY_PATH is not readable: $GITHUB_APP_PRIVATE_KEY_PATH"

@@ -169,6 +169,8 @@ defmodule SymphonyElixir.SymphonyRunTest do
         GH_TOKEN="profile-pat"
         GITHUB_TOKEN="profile-pat"
         GITHUB_FORK_OWNER="hongqn"
+        GIT_AUTHOR_NAME="hongqn-bot"
+        GIT_COMMITTER_NAME="hongqn-bot"
         GITHUB_APP_ID="4075542"
         GITHUB_APP_INSTALLATION_ID="140846909"
         GITHUB_APP_PRIVATE_KEY_PATH="{PRIVATE_KEY_PATH}"
@@ -178,6 +180,31 @@ defmodule SymphonyElixir.SymphonyRunTest do
     assert capture["GH_TOKEN"] == "test-installation-token"
     assert capture["GITHUB_TOKEN"] == "test-installation-token"
     assert capture["GITHUB_FORK_OWNER"] == "agavemindlab"
+  end
+
+  test "keeps profile GitHub credentials when the project has not enabled the app" do
+    capture =
+      run_launcher!("gl-infra",
+        github_app: true,
+        profile_env: """
+        LINEAR_API_KEY="test-token"
+        GH_TOKEN="profile-pat"
+        GITHUB_TOKEN="profile-pat"
+        GITHUB_FORK_OWNER="hongqn"
+        GIT_AUTHOR_NAME="hongqn-bot"
+        GIT_COMMITTER_NAME="hongqn-bot"
+        GITHUB_APP_ID="4075542"
+        GITHUB_APP_INSTALLATION_ID="140846909"
+        GITHUB_APP_PRIVATE_KEY_PATH="{PRIVATE_KEY_PATH}"
+        """
+      )
+
+    assert capture["GH_TOKEN"] == "profile-pat"
+    assert capture["GITHUB_TOKEN"] == "profile-pat"
+    assert capture["GITHUB_FORK_OWNER"] == "hongqn"
+    assert capture["GIT_AUTHOR_NAME"] == "hongqn-bot"
+    assert capture["GIT_COMMITTER_NAME"] == "hongqn-bot"
+    assert capture["GITHUB_APP_API_CALLS"] == ""
   end
 
   test "skips GitHub App API calls when app credentials are absent" do
@@ -255,9 +282,7 @@ defmodule SymphonyElixir.SymphonyRunTest do
     File.write!(Path.join(fake_bin, "curl"), fake_curl_script())
     File.chmod!(Path.join(fake_bin, "curl"), 0o755)
 
-    if Keyword.get(opts, :github_app, false) do
-      File.write!(private_key_path, test_private_key())
-    end
+    maybe_write_private_key!(opts, private_key_path)
 
     env = [
       {"HOME", home},
@@ -290,6 +315,7 @@ defmodule SymphonyElixir.SymphonyRunTest do
       {"GH_TOKEN", nil},
       {"GITHUB_TOKEN", nil},
       {"GITHUB_FORK_OWNER", nil},
+      {"GITHUB_APP_ENABLED", nil},
       {"GIT_AUTHOR_NAME", nil},
       {"GIT_AUTHOR_EMAIL", nil},
       {"GIT_COMMITTER_NAME", nil},
@@ -322,6 +348,10 @@ defmodule SymphonyElixir.SymphonyRunTest do
     else
       "LINEAR_API_KEY=\"test-token\"\n"
     end
+  end
+
+  defp maybe_write_private_key!(opts, path) do
+    if Keyword.get(opts, :github_app, false), do: File.write!(path, test_private_key())
   end
 
   defp setup_workflow_fixture!(fake_repo_root, project, workflow_name) do
