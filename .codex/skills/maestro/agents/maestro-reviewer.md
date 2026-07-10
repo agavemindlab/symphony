@@ -176,6 +176,14 @@ Implementation:
   With multiple open PRs, identify the current merge target and classify the
   rest; request changes or clarification when the target is ambiguous or
   another open PR carries unmerged scope, feedback, or unresolved checks.
+- Before recommending an Implementation `merge nudge`, inspect the current PR
+  commit list. If it contains fixup/squash commits, WIP commits,
+  review-iteration commits, late lint/test repair commits, repeated "address
+  review" commits, or several small adjustments in the same logical scope, recommend
+  `request changes` / `Rework` so Symphony reorganizes commits first. If the
+  history is already clean, cite `commit organization: no organization needed`
+  in `依据`; clean single-commit or clean logical multi-commit histories must
+  not be rewritten.
 - shared workflow PR target: when issue/artifact/PR evidence shows the shared
   workflow and the repo has an `upstream` remote, require the PR to target the upstream repo
   and use head `<origin_owner>:<branch>`. Recommend request changes when the PR
@@ -300,10 +308,11 @@ Spawned and related issues:
   once the answer exists, recommend `In Progress` (clarification-answer
   resume, not approval).
 - Merge nudge only when the awaiting-review artifact is `## Implementation`,
-  no prerequisite blocker exists, and normal Implementation appears accepted
-  but the workflow needs the human to set `Merging`. For a no-PR `Type:Spike`
-  with accepted findings, the draft must say the issue goes straight to
-  `Done`, not `Merging`.
+  no prerequisite blocker exists, the current PR commit history is already
+  clean or has been reorganized, and normal Implementation appears accepted but
+  the workflow needs the human to set `Merging`. For a no-PR `Type:Spike` with
+  accepted findings, the draft must say the issue goes straight to `Done`, not
+  `Merging`.
 - Completion confirmation only when Deployment waits for proof that merge,
   deployment, or post-merge validation completed, that proof is checkable
   now, and no material outcome-proof gap remains untracked.

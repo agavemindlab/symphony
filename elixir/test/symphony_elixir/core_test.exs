@@ -476,6 +476,38 @@ defmodule SymphonyElixir.CoreTest do
     refute prompt =~ "[NEEDS CLARIFICATION:"
   end
 
+  @tag :prompt_contract
+  test "commit organization gate preserves clean history and binds rewritten heads safely" do
+    repo_root = Path.expand("..", File.cwd!())
+
+    land_skill =
+      File.read!(Path.join(repo_root, "workflows/agavemindlab/skills/symphony-land/SKILL.md"))
+
+    maestro_workflow =
+      File.read!(Path.join(repo_root, "workflows/agavemindlab/MAESTRO_WORKFLOW.md"))
+
+    reviewer =
+      File.read!(Path.join(repo_root, ".codex/skills/maestro/agents/maestro-reviewer.md"))
+
+    for contract <- [
+          "Commit organization gate",
+          "no organization needed",
+          "reorganized",
+          "--force-with-lease=refs/heads/<branch>:<expected-old-sha>",
+          "case \"$gate_decision\" in",
+          "test \"$(git rev-parse HEAD)\" = \"$expected_old_sha\"",
+          "tree hash",
+          "--match-head-commit"
+        ] do
+      assert land_skill =~ contract
+    end
+
+    for prompt <- [land_skill, maestro_workflow, reviewer] do
+      assert prompt =~ "clean logical"
+      assert prompt =~ "same logical scope"
+    end
+  end
+
   test "workflow defines the status card as a non-routing digest" do
     repo_root = Path.expand("..", File.cwd!())
     workflow = File.read!(Path.join(repo_root, "workflows/agavemindlab/WORKFLOW.md"))
