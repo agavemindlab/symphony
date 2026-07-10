@@ -4,6 +4,13 @@ defmodule SymphonyElixir.SymphonyRunTest do
   @repo_root Path.expand("../../..", __DIR__)
   @launcher Path.join(@repo_root, "bin/symphony-run")
 
+  test "launcher is implemented in Python without a Ruby runtime" do
+    launcher = File.read!(@launcher)
+
+    assert String.starts_with?(launcher, "#!/usr/bin/env python3\n")
+    refute launcher =~ "ruby"
+  end
+
   test "loads the Agavemindlab automated reviewer default" do
     capture = run_launcher!("gl-infra")
 
@@ -351,7 +358,10 @@ defmodule SymphonyElixir.SymphonyRunTest do
   end
 
   defp maybe_write_private_key!(opts, path) do
-    if Keyword.get(opts, :github_app, false), do: File.write!(path, test_private_key())
+    if Keyword.get(opts, :github_app, false) do
+      assert {_, 0} =
+               System.cmd("openssl", ["genrsa", "-out", path, "2048"], stderr_to_stdout: true)
+    end
   end
 
   defp setup_workflow_fixture!(fake_repo_root, project, workflow_name) do
@@ -490,13 +500,6 @@ defmodule SymphonyElixir.SymphonyRunTest do
 
     printf '%s' "$status"
     """
-  end
-
-  defp test_private_key do
-    {pem, 0} =
-      System.cmd("ruby", ["-ropenssl", "-e", "puts OpenSSL::PKey::RSA.new(2048).to_pem"])
-
-    pem
   end
 
   defp read_if_exists(path) do

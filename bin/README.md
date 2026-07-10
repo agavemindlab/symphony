@@ -3,7 +3,8 @@
 `bin/symphony-run <project>` is the operator entry point for running Symphony
 against a project workflow under `workflows/<project>/`. It composes the
 environment, selects the profile, validates required variables, then execs the
-Elixir Symphony binary with the selected workflow file.
+Elixir Symphony binary with the selected workflow file. The launcher requires
+Python 3; GitHub App mode additionally requires `openssl` and `curl`.
 
 ```sh
 bin/symphony-run <project>
