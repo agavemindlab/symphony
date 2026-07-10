@@ -676,15 +676,36 @@ defmodule SymphonyElixir.CoreTest do
     assert reviewer =~ "not phase approval"
   end
 
-  test "maestro reviewer does not overstate readback as regression verification" do
+  test "maestro reviewer requires real regression evidence for affected behavior" do
     reviewer =
       File.read!(Path.expand("../.codex/skills/maestro/agents/maestro-reviewer.md", File.cwd!()))
+
+    normalized_reviewer = String.replace(reviewer, ~r/\s+/, " ")
+
+    assert normalized_reviewer =~
+             "For Implementation, acceptance evidence must cover both the requested change and regression risk"
 
     for contract <- [
           "merged-file readback",
           "Linear relation checks",
           "regression verification/evidence",
-          "command, log, test, or manual exercise"
+          "command, log, test, or manual exercise",
+          "For Design, when the approach touches existing behavior",
+          "affected existing user or system function",
+          "include a named test, command, log, or near-black-box/manual exercise",
+          "pass criterion",
+          "request changes when the verification plan",
+          "regression gate",
+          "requested change and regression risk",
+          "affected existing user or system",
+          "function still works",
+          "Proving only the new fix, metric, or code path is not",
+          "request changes when related touched behavior lacks named test",
+          "command, log, or near-black-box/manual evidence",
+          "wholly new behavior",
+          "runtime boundary no named test touches",
+          "explicit impossibility plus named",
+          "tests mapped to each boundary"
         ] do
       assert reviewer =~ contract
     end
