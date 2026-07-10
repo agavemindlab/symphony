@@ -206,7 +206,7 @@ defmodule SymphonyElixir.RoutingBriefTest do
 
     assert markdown =~ "确定性计算"
     assert markdown =~ "- 待审阶段：Implementation（artifact `impl-1`，发布于 2026-07-01T14:00:00Z）"
-    assert markdown =~ "- 待审 artifact 内含未决 `[NEEDS CLARIFICATION]` 标记"
+    assert markdown =~ "- 待审 artifact 含未决澄清 gate"
     assert markdown =~ "| Requirements | `req-2` | closed_approved | 2026-07-01T12:10:00Z | 2026-07-01T13:00:00Z | 2 |"
     assert markdown =~ "| Design | `design-1` | closed_auto | 2026-07-01T13:30:00Z | 2026-07-01T13:35:00Z | 1 |"
     assert markdown =~ "| Implementation | `impl-1` | awaiting | 2026-07-01T14:00:00Z | — | 1 |"
