@@ -648,6 +648,11 @@ defmodule SymphonyElixir.CoreTest do
     reviewer =
       File.read!(Path.expand("../.codex/skills/maestro/agents/maestro-reviewer.md", File.cwd!()))
 
+    normalized_reviewer = String.replace(reviewer, ~r/\s+/, " ")
+
+    assert normalized_reviewer =~
+             "For Implementation, acceptance evidence must cover both the requested change and regression risk"
+
     for contract <- [
           "merged-file readback",
           "Linear relation checks",
