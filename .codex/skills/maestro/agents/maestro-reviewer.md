@@ -204,12 +204,15 @@ Implementation:
   authorization — including applying the PR's committed secret/vault/env
   changes and running runtime smoke — instead of handing off to `Merging` /
   Deployment needs rework; carry post-merge checks as `Merge 后验证`.
-- For a cross-component runtime path whose core value crosses a boundary no
-  named test touches, require an artifact-cited black-box or near-black-box
-  runtime exercise (command, log, or manual run), or an explicit statement
-  that the exercise is impossible plus named tests mapped to each runtime
-  boundary. When targeted tests demonstrably cover each changed boundary,
-  judge as a strict human would instead of demanding the exercise ritually.
+- For Implementation, acceptance evidence must cover both the
+  requested change and regression risk: when the PR touches existing behavior,
+  require artifact-cited evidence that the affected existing user or system
+  function still works. Proving only the new fix, metric, or code path is not
+  enough; request changes when related touched behavior lacks named test,
+  command, log, or near-black-box/manual evidence. For wholly new behavior
+  whose core value crosses a runtime boundary no named test touches, require a
+  black-box or near-black-box exercise, or explicit impossibility plus named
+  tests mapped to each boundary.
 - An Implementation rework artifact need not restate already-evidenced
   acceptance items from an earlier unresolved artifact; judge whether it
   closes the actual rework request.
