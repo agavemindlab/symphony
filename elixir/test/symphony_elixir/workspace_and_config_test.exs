@@ -993,6 +993,31 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert log =~ "status=17"
   end
 
+  test "issue run hook keeps failures ignored when analytics recording raises" do
+    previous_analytics_file = Application.get_env(:symphony_elixir, :analytics_file)
+    Application.put_env(:symphony_elixir, :analytics_file, :bad_path)
+
+    on_exit(fn ->
+      if is_nil(previous_analytics_file) do
+        Application.delete_env(:symphony_elixir, :analytics_file)
+      else
+        Application.put_env(:symphony_elixir, :analytics_file, previous_analytics_file)
+      end
+    end)
+
+    write_workflow_file!(Workflow.workflow_file_path(), hook_issue_running: "exit 17")
+
+    issue = %Issue{id: "issue-hook-analytics-fail", identifier: "MT-HOOK-ANALYTICS-FAIL"}
+
+    log =
+      capture_log(fn ->
+        assert :ok = SymphonyElixir.IssueRunHook.run(:running, issue, reason: "dispatch")
+      end)
+
+    assert log =~ "Failed to record hook_failed analytics event"
+    assert log =~ "hook=issue_running"
+  end
+
   test "issue run hook ignores unsupported events" do
     issue = %Issue{
       id: "issue-hook-unsupported",

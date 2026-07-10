@@ -405,6 +405,48 @@ defmodule SymphonyElixir.CoreTest do
     refute design_skill =~ "opens `phase-implementation` in the same session"
   end
 
+  @tag :prompt_contract
+  test "shared symphony-pr contract targets upstream repo when upstream exists" do
+    repo_root = Path.expand("..", File.cwd!())
+    workflow = File.read!(Path.join(repo_root, "workflows/agavemindlab/WORKFLOW.md"))
+
+    symphony_pr_skill =
+      File.read!(Path.join(repo_root, "workflows/agavemindlab/skills/symphony-pr/SKILL.md"))
+
+    assert symphony_pr_skill =~
+             "When an `upstream` remote exists, the PR target repo is `upstream_repo`"
+
+    assert symphony_pr_skill =~ "the PR head is `<origin_owner>:<branch>`"
+    assert symphony_pr_skill =~ "gh pr create --repo \"$upstream_repo\""
+    assert symphony_pr_skill =~ "--head \"$pr_head\""
+
+    assert symphony_pr_skill =~
+             "Shared workflow agents must not create PRs with `--repo \"$origin_repo\"`"
+
+    assert symphony_pr_skill =~ "concrete origin/fork repositories such as `--repo hongqn/symphony`"
+
+    assert workflow =~ "Rebuilding a branch from `origin/main` does not change the PR target repo"
+    assert workflow =~ "`symphony-pr` still creates the PR against `upstream` when that remote exists"
+  end
+
+  @tag :prompt_contract
+  test "maestro reviewer requests changes for shared workflow origin-target PRs" do
+    repo_root = Path.expand("..", File.cwd!())
+    reviewer = File.read!(Path.join(repo_root, ".codex/skills/maestro/agents/maestro-reviewer.md"))
+
+    for contract <- [
+          "shared workflow PR target",
+          "`upstream` remote",
+          "target the upstream repo",
+          "head `<origin_owner>:<branch>`",
+          "`origin_repo`",
+          "`hongqn/symphony`",
+          "request changes"
+        ] do
+      assert reviewer =~ contract
+    end
+  end
+
   test "workflow defines the status card as a non-routing digest" do
     repo_root = Path.expand("..", File.cwd!())
     workflow = File.read!(Path.join(repo_root, "workflows/agavemindlab/WORKFLOW.md"))
@@ -1695,9 +1737,8 @@ defmodule SymphonyElixir.CoreTest do
     end)
 
     send(pid, {:DOWN, ref, :process, self(), :normal})
-    Process.sleep(50)
 
-    assert File.read!(marker) == "stopped|agent_down_normal|MT-STOPPED"
+    assert eventually_read_file!(marker) == "stopped|agent_down_normal|MT-STOPPED"
     refute Map.has_key?(:sys.get_state(pid).running, issue_id)
   end
 
@@ -3660,6 +3701,24 @@ defmodule SymphonyElixir.CoreTest do
       id: "fresh-#{old_artifact.id}",
       created_at: DateTime.add(old_artifact.created_at, 1, :second)
     }
+  end
+
+  defp eventually_read_file!(path, deadline_ms \\ System.monotonic_time(:millisecond) + 1_000) do
+    case File.read(path) do
+      {:ok, contents} ->
+        contents
+
+      {:error, :enoent} ->
+        if System.monotonic_time(:millisecond) < deadline_ms do
+          Process.sleep(10)
+          eventually_read_file!(path, deadline_ms)
+        else
+          File.read!(path)
+        end
+
+      {:error, reason} ->
+        raise File.Error, reason: reason, action: "read file", path: path
+    end
   end
 
   defp refute_called_comment_update_for_artifact(calls, artifact_id) do

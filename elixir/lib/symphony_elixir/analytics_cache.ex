@@ -109,10 +109,6 @@ defmodule SymphonyElixir.AnalyticsCache do
     # exists, and stamp the debounce so persistent failures are not retried
     # on every call.
     _error -> serve_last_known_good(window, state)
-  catch
-    # Config/WorkflowStore resolution inside refresh is itself a GenServer
-    # call; a stalled peer process exits rather than raises.
-    :exit, _reason -> serve_last_known_good(window, state)
   end
 
   defp serve_last_known_good(window, state) do

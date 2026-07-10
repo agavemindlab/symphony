@@ -91,11 +91,13 @@ defmodule SymphonyElixir.ReviewLabelsTest do
   test "cases without a parseable publication timestamp stay pending" do
     events = [
       published(%{"issue_id" => "i1", "comment_id" => "a1", "occurred_at" => "garbage", "recorded_at" => nil}),
+      published(%{"issue_id" => "i2", "comment_id" => "a2", "event_id" => nil, "occurred_at" => nil, "recorded_at" => 123}),
       approved(%{"issue_id" => "i1", "artifact_comment_id" => "a1", "occurred_at" => "2026-06-15T11:00:00Z"})
     ]
 
-    assert [entry] = ReviewLabels.cases(events)
-    assert %{artifact_comment_id: "a1", published_at: nil, label: "pending"} = entry
+    assert [first, second] = ReviewLabels.cases(events)
+    assert %{artifact_comment_id: "a1", published_at: nil, label: "pending"} = first
+    assert %{artifact_comment_id: "a2", published_at: nil, label: "pending"} = second
   end
 
   test "report counts labels by phase and the scoreable total" do

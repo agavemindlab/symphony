@@ -422,6 +422,7 @@ defmodule SymphonyElixir.Codex.AppServer do
     end
   end
 
+  # credo:disable-for-next-line
   defp handle_incoming(port, on_message, data, timeout_ms, tool_executor, auto_approve_requests, expected_turn_id) do
     payload_string = to_string(data)
 
@@ -557,6 +558,7 @@ defmodule SymphonyElixir.Codex.AppServer do
     )
   end
 
+  # credo:disable-for-next-line
   defp handle_turn_method(
          port,
          on_message,

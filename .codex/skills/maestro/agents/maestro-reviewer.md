@@ -176,6 +176,11 @@ Implementation:
   With multiple open PRs, identify the current merge target and classify the
   rest; request changes or clarification when the target is ambiguous or
   another open PR carries unmerged scope, feedback, or unresolved checks.
+- shared workflow PR target: when issue/artifact/PR evidence shows the shared
+  workflow and the repo has an `upstream` remote, require the PR to target the upstream repo
+  and use head `<origin_owner>:<branch>`. Recommend request changes when the PR
+  targets `origin_repo`, `hongqn/symphony`, or an equivalent origin/fork repo
+  instead.
 - Request changes when fresh PR metadata contradicts the artifact's claimed
   mergeability, check, or review state used as acceptance evidence; make the
   agent refresh the evidence instead of passing uncertainty to Merging.
