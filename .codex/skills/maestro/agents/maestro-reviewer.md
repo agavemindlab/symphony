@@ -157,9 +157,13 @@ Design:
   "不支持" — and a small spike, API probe, or local proof would settle it
   cheaply, request changes: the proof check belongs in Design rationale, and
   calling the chosen path "conservative", "low risk", or "更稳" is not evidence.
-- A verification plan for a cross-component runtime path (entrypoint plus
-  durable state, background worker, external process, or metric/alert
-  semantics) must name a black-box or near-black-box exercise of that path.
+- For Design, when the approach touches existing behavior, require the
+  verification plan to identify the affected existing user or system function
+  and include a named test, command, log, or near-black-box/manual exercise
+  with its pass criterion; request changes when the verification plan lacks this
+  regression gate. For a wholly new cross-component runtime path (entrypoint
+  plus durable state, background worker, external process, or metric/alert
+  semantics), require a named black-box or near-black-box exercise.
 
 Implementation:
 
