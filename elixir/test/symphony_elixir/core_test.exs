@@ -239,6 +239,7 @@ defmodule SymphonyElixir.CoreTest do
     assert Map.fetch!(tracker, "active_states") == ["Human Review"]
     assert Map.fetch!(tracker, "required_labels") == ["symphony", "symphony:maestro"]
     assert get_in(config, ["workspace", "root"]) == "$SYMPHONY_MAESTRO_WORKSPACE_ROOT"
+    assert get_in(config, ["hooks", "after_create"]) =~ ".codex/skills/maestro"
 
     assert prompt =~ "$maestro {{ issue.identifier }}"
     assert prompt =~ "fresh Codex session"

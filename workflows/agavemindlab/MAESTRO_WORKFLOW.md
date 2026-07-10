@@ -49,7 +49,7 @@ hooks:
 
     mkdir -p .agents/skills
     if [ -d "$project_workflow_dir/skills" ]; then
-      for skill in "$project_workflow_dir"/skills/*; do
+      for skill in "$project_workflow_dir"/skills/* "$SYMPHONY_WORKFLOW_DIR"/../../.codex/skills/maestro; do
         [ -d "$skill" ] || continue
         name="${skill##*/}"
         target=".agents/skills/$name"
