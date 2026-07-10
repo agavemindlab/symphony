@@ -84,3 +84,69 @@ python3 .codex/skills/artifact-eval/scripts/artifact_eval.py verify-fixtures
 
 This checks the committed fixture case structure, replay rebuild path, and
 `MISSING_CONTEXT` guard.
+
+## Related: maestro verdict corpus
+
+`mix symphony.eval.maestro` (run in `elixir/`) pairs every `maestro_review`
+analytics event with its human verdict (the next `run_started` state) and
+writes `eval/maestro/corpus.jsonl` plus a `report.md` of agreement rates.
+That corpus is ground truth for future maestro-reviewer replays; capture a
+full artifact-eval case for any overridden pair worth debugging. `eval/` is
+gitignored — corpora carry internal issue content and stay local.
+
+## Maestro reviewer replay
+
+Evaluate `.codex/skills/maestro/agents/maestro-reviewer.md` against human
+verdicts. `mix symphony.eval.reviews` (run in `elixir/`) labels every
+`phase_published` artifact with its first disposition — human ✅ `approve`,
+agent ⏩ `auto_advanced`, a superseding rework round or rollback
+`request_changes`, else `pending` — and writes `eval/reviews/cases.jsonl`
+plus `labels-report.md` (only approve/request_changes are scored).
+
+```bash
+cd elixir && mix symphony.eval.reviews          # build the labeled test set
+python3 .codex/skills/artifact-eval/scripts/maestro_replay.py replay \
+  --cases eval/reviews/cases.jsonl --sample 20   # one codex session per case
+python3 .codex/skills/artifact-eval/scripts/maestro_replay.py score \
+  --cases eval/reviews/cases.jsonl \
+  --predictions eval/reviews/replay/predictions.jsonl
+```
+
+`replay` runs `codex exec --sandbox read-only` per case (prompt on stdin:
+the full reviewer prompt plus a time-travel preamble) and appends
+`predictions.jsonl` incrementally — interrupted runs keep partial results and
+reruns resume by skipping predicted cases. Time-travel caveat: the reviewer
+is told to only consider Linear comments and PR state from before the
+artifact's `published_at`, but it reads live Linear/GitHub, so leakage from
+later history is possible — treat agreement as an upper bound. Cost note:
+each case is a full codex session; use `--sample N` (stable sort by case id,
+deterministic) and `--phase` for regression subsets. `score` writes
+`report.md` with overall/by-phase/by-label agreement, a confusion matrix,
+and the disagreement list.
+
+## Routing replay
+
+Evaluate WORKFLOW.md Main Flow steps 3–5 target-phase routing against
+history. `mix symphony.eval.routing` (run in `elixir/`) labels every
+active-state `run_started` dispatch (`Todo` / `In Progress` / `Rework` /
+`Merging`; `Human Review` reviewer dispatches are skipped) with the phase of
+the first artifact its session published before the issue's next dispatch —
+the ground-truth target phase — and writes `eval/routing/cases.jsonl` plus
+`labels-report.md` (dispatches that published nothing stay unlabeled).
+
+```bash
+cd elixir && mix symphony.eval.routing          # build the labeled test set
+python3 .codex/skills/artifact-eval/scripts/maestro_replay.py routing-replay \
+  --cases eval/routing/cases.jsonl --sample 20   # one codex session per case
+python3 .codex/skills/artifact-eval/scripts/maestro_replay.py score \
+  --field expected_phase \
+  --cases eval/routing/cases.jsonl \
+  --predictions eval/routing/replay/predictions.jsonl
+```
+
+`routing-replay` prompts each case with the WORKFLOW.md "Phase Map" + "Main
+Flow" sections verbatim plus a time-travel preamble (route only, do no phase
+work, write nothing) and parses the final `TARGET_PHASE:` line;
+resume/sampling/scoring behave exactly like the reviewer replay (same
+time-travel leakage caveat; `--phase` filters on the expected phase, and
+`score --field expected_phase` groups agreement by dispatch state).

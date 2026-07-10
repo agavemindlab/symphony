@@ -353,10 +353,22 @@ defmodule SymphonyElixir.ExtensionsTest do
     conn = get(build_conn(), "/api/v1/state")
     state_payload = json_response(conn, 200)
 
-    assert %{"event_sample_count" => 0, "panels" => analytics_panels} = state_payload["analytics"]
-    assert length(analytics_panels) == 6
+    assert %{
+             "event_sample_count" => 0,
+             "window_started_at" => nil,
+             "window_ended_at" => nil,
+             "panels" => analytics_panels
+           } = state_payload["analytics"]
 
-    assert Map.delete(state_payload, "analytics") == %{
+    assert length(analytics_panels) == 5
+
+    assert state_payload["instance"] == %{
+             "name" => Path.basename(Path.dirname(Workflow.workflow_file_path())),
+             "mode" => "main",
+             "port" => nil
+           }
+
+    assert Map.drop(state_payload, ["analytics", "instance"]) == %{
              "generated_at" => state_payload["generated_at"],
              "counts" => %{"running" => 1, "retrying" => 1, "blocked" => 1},
              "running" => [
@@ -408,6 +420,8 @@ defmodule SymphonyElixir.ExtensionsTest do
                "input_tokens" => 4,
                "output_tokens" => 8,
                "total_tokens" => 12,
+               "cached_input_tokens" => 2,
+               "reasoning_output_tokens" => 3,
                "seconds_running" => 42.5
              },
              "rate_limits" => %{"primary" => %{"remaining" => 11}}
@@ -515,22 +529,41 @@ defmodule SymphonyElixir.ExtensionsTest do
 
     assert %{
              "event_sample_count" => 1,
+             "window_started_at" => "2026-06-15T10:10:00Z",
+             "window_ended_at" => "2026-06-15T10:10:00Z",
              "panels" => panels,
              "data_quality" => %{"gaps" => gaps}
            } = payload["analytics"]
 
-    assert length(panels) == 6
+    assert length(panels) == 5
 
-    assert Enum.map(panels, & &1["id"]) == [
-             "delivery_cycle",
-             "autonomy_funnel",
-             "quality_rework",
-             "cost_per_accepted_issue",
-             "capacity_reliability",
-             "data_quality_exclusions"
+    # Panel statuses are derived from the majority of their metric statuses.
+    assert Enum.map(panels, &{&1["id"], &1["status"]}) == [
+             {"delivery_cycle", "partial"},
+             {"autonomy_funnel", "direct"},
+             {"quality_rework", "direct"},
+             {"cost_per_accepted_issue", "partial"},
+             {"capacity_reliability", "partial"}
            ]
 
-    assert "GitHub review/CI data is not configured in v1" in gaps
+    # Neither collector has run for this fixture, so the collector-backed
+    # metrics render as actionable gap rows.
+    autonomy = Enum.find(panels, &(&1["id"] == "autonomy_funnel"))
+
+    assert %{"label" => "Human touch count", "value" => "run mix symphony.events.backfill", "status" => "gap"} in autonomy["metrics"]
+
+    quality = Enum.find(panels, &(&1["id"] == "quality_rework"))
+
+    assert %{"label" => "PR review quality", "value" => "run mix symphony.events.github", "status" => "gap"} in quality["metrics"]
+
+    refute Enum.any?(quality["metrics"], &(&1["label"] == "Merged PRs"))
+
+    assert "GitHub PR review data not collected yet (run mix symphony.events.github)" in gaps
+    assert "Linear human comment data not collected yet (run mix symphony.events.backfill)" in gaps
+
+    # The API analytics block stays summary-shaped: the same catalog that
+    # Analytics.summary/0 produces over the live event tail.
+    assert SymphonyElixir.Analytics.summary().event_sample_count == 1
   end
 
   test "phoenix observability api preserves 405, 404, and unavailable behavior" do
@@ -554,9 +587,12 @@ defmodule SymphonyElixir.ExtensionsTest do
 
     state_payload = json_response(get(build_conn(), "/api/v1/state"), 200)
 
+    assert %{"name" => _name, "mode" => "main", "port" => nil} = state_payload["instance"]
+
     assert state_payload ==
              %{
                "generated_at" => state_payload["generated_at"],
+               "instance" => state_payload["instance"],
                "error" => %{"code" => "snapshot_unavailable", "message" => "Snapshot unavailable"}
              }
 
@@ -576,9 +612,12 @@ defmodule SymphonyElixir.ExtensionsTest do
 
     timeout_payload = json_response(get(build_conn(), "/api/v1/state"), 200)
 
+    assert %{"name" => _name, "mode" => "main", "port" => nil} = timeout_payload["instance"]
+
     assert timeout_payload ==
              %{
                "generated_at" => timeout_payload["generated_at"],
+               "instance" => timeout_payload["instance"],
                "error" => %{"code" => "snapshot_timeout", "message" => "Snapshot timed out"}
              }
   end
@@ -669,12 +708,23 @@ defmodule SymphonyElixir.ExtensionsTest do
     assert html =~ "Offline"
     assert html =~ "Copy ID"
     assert html =~ "Codex update"
+    assert html =~ "Retry #2"
+    assert html =~ ~r/Updated \d+s ago/
+    assert html =~ "remaining 11"
     refute html =~ "data-runtime-clock="
     refute html =~ "setInterval(refreshRuntimeClocks"
     refute html =~ "Refresh now"
     refute html =~ "Transport"
     assert html =~ "status-badge-live"
     assert html =~ "status-badge-offline"
+
+    # Single-instance mode: no instance strip and no per-row instance chips.
+    refute html =~ "instance-strip"
+    refute html =~ ">Instance</th>"
+
+    instance_name = Path.basename(Path.dirname(Workflow.workflow_file_path()))
+    assert html =~ instance_name
+    assert page_title(view) == "(2) #{instance_name} · Symphony"
 
     updated_snapshot =
       put_in(snapshot.running, [
@@ -772,17 +822,247 @@ defmodule SymphonyElixir.ExtensionsTest do
           "Autonomy Funnel",
           "Quality / Rework",
           "Cost Per Accepted Issue",
-          "Capacity / Reliability",
-          "Data Quality / Exclusions"
+          "Capacity / Reliability"
         ] do
       assert html =~ title
     end
 
+    refute html =~ "Data Quality / Exclusions"
+
     assert html =~ "Can accepted issues move faster with the current persisted signals?"
-    assert html =~ "Direct (可直接展示)"
-    assert html =~ "Partial (可展示但样本不足)"
-    assert html =~ "Gap (仅展示数据质量/缺口)"
-    assert html =~ "GitHub review/CI data is not configured in v1"
+    assert html =~ "1 events"
+    assert html =~ ~r/all history · since \d{4}-\d{2}-\d{2} \(1 day\)/
+    refute html =~ "~0m window"
+    # Persisted counterparts on the live totals cards, from the same report.
+    assert html =~ "All time: 0m 11s"
+    assert html =~ "All time: 8"
+    assert html =~ ~s(title="usable as-is")
+    assert html =~ ~s(title="shown but sample-limited")
+    assert html =~ ~s(title="data-quality gap only")
+    assert html =~ ~r/>\s*Direct\s*</
+    assert html =~ ~r/>\s*Partial\s*</
+    assert html =~ ~r/>\s*Gap\s*</
+
+    assert html =~
+             "Direct = complete engine-path signal · Partial = engine-visible activity only · Gap = source not collected yet"
+
+    # Metric chips are exception-only: metrics matching their panel status
+    # render no chip, so the all-partial Cost panel has none at all.
+    [cost_panel] = Regex.run(~r{Cost Per Accepted Issue.*?Capacity / Reliability}s, html)
+    refute cost_panel =~ "analytics-metric-status"
+
+    # Gap rows keep their chip and get the muted-italic value treatment.
+    [touch_row] = Regex.run(~r{Human touch count.*?</div>}s, html)
+    assert touch_row =~ "metric-value-gap"
+    assert touch_row =~ "analytics-metric-status"
+    assert touch_row =~ "run mix symphony.events.backfill"
+
+    [pr_row] = Regex.run(~r{PR review quality.*?</div>}s, html)
+    assert pr_row =~ "metric-value-gap"
+    assert pr_row =~ "analytics-metric-status"
+    assert pr_row =~ "run mix symphony.events.github"
+
+    assert html =~ "GitHub PR review data not collected yet (run mix symphony.events.github)"
+    assert html =~ "Linear human comment data not collected yet (run mix symphony.events.backfill)"
+
+    assert html =~ "History"
+    refute html =~ "History (rollup)"
+    refute html =~ "No rollup yet"
+    assert html =~ "Date (UTC)"
+    assert html =~ "2026-06-15"
+  end
+
+  test "dashboard liveview renders populated collector rows once human/PR events exist" do
+    path = analytics_tmp_path("dashboard-collected-analytics.ndjson")
+    put_analytics_file_env(path)
+
+    :ok =
+      SymphonyElixir.Analytics.record_event(
+        %{event_type: :run_completed, issue_id: "issue-http", issue_identifier: "MT-HTTP", runtime_seconds: 11},
+        path: path,
+        recorded_at: ~U[2026-06-15 10:20:00Z]
+      )
+
+    :ok =
+      SymphonyElixir.Analytics.record_event(
+        %{
+          event_type: :human_comment,
+          event_id: "human-comment-c1",
+          author_name: "Alice",
+          occurred_at: "2026-06-15T10:25:00Z"
+        },
+        path: path,
+        recorded_at: ~U[2026-06-15 10:25:01Z]
+      )
+
+    :ok =
+      SymphonyElixir.Analytics.record_event(
+        %{
+          event_type: :pr_merged,
+          event_id: "github-pr-hongqn/demo#7",
+          repo: "hongqn/demo",
+          pr_number: 7,
+          pr_url: "https://github.com/hongqn/demo/pull/7",
+          issue_identifier: "MT-HTTP",
+          reviews_count: 2,
+          changes_requested: true,
+          approved: true,
+          occurred_at: "2026-06-15T11:00:00Z",
+          source: "github"
+        },
+        path: path,
+        recorded_at: ~U[2026-06-15 11:00:01Z]
+      )
+
+    orchestrator_name = Module.concat(__MODULE__, :DashboardCollectedOrchestrator)
+
+    {:ok, _pid} =
+      StaticOrchestrator.start_link(
+        name: orchestrator_name,
+        snapshot: static_snapshot(),
+        refresh: %{
+          queued: true,
+          coalesced: false,
+          requested_at: DateTime.utc_now(),
+          operations: ["poll"]
+        }
+      )
+
+    start_test_endpoint(orchestrator: orchestrator_name, snapshot_timeout_ms: 50)
+
+    {:ok, _view, html} = live(build_conn(), "/")
+
+    # The collectors ran, so the gap rows are replaced by real metrics and
+    # the collector gaps disappear from the data-quality list.
+    [touch_row] = Regex.run(~r{Human touch count.*?</div>}s, html)
+    assert touch_row =~ ">1</span>"
+    refute touch_row =~ "metric-value-gap"
+
+    assert html =~ "Merged PRs"
+    assert html =~ "Changes-requested rate"
+    assert html =~ "Unreviewed merge share"
+    assert html =~ "100.0%"
+    refute html =~ "PR review quality"
+    refute html =~ "run mix symphony.events.backfill"
+    refute html =~ "run mix symphony.events.github"
+    refute html =~ "data not collected yet"
+  end
+
+  test "dashboard liveview renders densified history from the analytics event log" do
+    path = analytics_tmp_path("history-analytics.ndjson")
+    put_analytics_file_env(path)
+
+    :ok =
+      SymphonyElixir.Analytics.record_event(
+        %{event_type: :phase_published, issue_id: "issue-a", issue_identifier: "MT-A"},
+        path: path,
+        recorded_at: ~U[2026-06-14 10:00:00Z]
+      )
+
+    :ok =
+      SymphonyElixir.Analytics.record_event(
+        %{event_type: :run_completed, issue_id: "issue-a", issue_identifier: "MT-A", state: "Done"},
+        path: path,
+        recorded_at: ~U[2026-06-14 11:00:00Z]
+      )
+
+    :ok =
+      SymphonyElixir.Analytics.record_event(
+        %{event_type: :phase_published, issue_id: "issue-b", issue_identifier: "MT-B"},
+        path: path,
+        recorded_at: ~U[2026-06-17 10:00:00Z]
+      )
+
+    orchestrator_name = Module.concat(__MODULE__, :DashboardHistoryOrchestrator)
+
+    {:ok, _pid} =
+      StaticOrchestrator.start_link(
+        name: orchestrator_name,
+        snapshot: static_snapshot(),
+        refresh: %{
+          queued: true,
+          coalesced: false,
+          requested_at: DateTime.utc_now(),
+          operations: ["poll"]
+        }
+      )
+
+    start_test_endpoint(orchestrator: orchestrator_name, snapshot_timeout_ms: 50)
+
+    {:ok, _view, html} = live(build_conn(), "/")
+
+    assert html =~ "History"
+    assert html =~ "Daily series from the event log (UTC days)."
+    assert html =~ "Daily token deltas are not comparable to the live totals card."
+    assert html =~ "sparkline"
+    assert html =~ "Date (UTC)"
+    assert html =~ "Tokens per issue"
+    # Densified series: the zero-event days between the two dates get rows.
+    assert html =~ "2026-06-14"
+    assert html =~ "2026-06-15"
+    assert html =~ "2026-06-16"
+    assert html =~ "2026-06-17"
+    refute html =~ "No rollup yet"
+    refute html =~ "No events in this window."
+  end
+
+  test "dashboard analytics window selector refetches the report for the chosen window" do
+    path = analytics_tmp_path("window-analytics.ndjson")
+    put_analytics_file_env(path)
+
+    now = DateTime.utc_now()
+    recent_at = DateTime.add(now, -2, :day)
+    old_at = DateTime.add(now, -20, :day)
+    recent_date = recent_at |> DateTime.to_date() |> Date.to_iso8601()
+    old_date = old_at |> DateTime.to_date() |> Date.to_iso8601()
+
+    :ok =
+      SymphonyElixir.Analytics.record_event(
+        %{event_type: :run_completed, issue_id: "issue-new", issue_identifier: "MT-NEW", state: "Done"},
+        path: path,
+        recorded_at: recent_at
+      )
+
+    :ok =
+      SymphonyElixir.Analytics.record_event(
+        %{event_type: :run_completed, issue_id: "issue-old", issue_identifier: "MT-OLD", state: "Done"},
+        path: path,
+        recorded_at: old_at
+      )
+
+    orchestrator_name = Module.concat(__MODULE__, :DashboardWindowOrchestrator)
+
+    {:ok, _pid} =
+      StaticOrchestrator.start_link(
+        name: orchestrator_name,
+        snapshot: static_snapshot(),
+        refresh: %{
+          queued: true,
+          coalesced: false,
+          requested_at: DateTime.utc_now(),
+          operations: ["poll"]
+        }
+      )
+
+    start_test_endpoint(orchestrator: orchestrator_name, snapshot_timeout_ms: 50)
+
+    {:ok, view, html} = live(build_conn(), "/")
+
+    assert html =~ "2 events"
+    span_days = Date.diff(Date.from_iso8601!(recent_date), Date.from_iso8601!(old_date)) + 1
+    assert html =~ "all history · since #{old_date} (#{span_days} days)"
+    assert html =~ recent_date
+
+    html = view |> element(~s(button[phx-value-window="d7"])) |> render_click()
+
+    assert html =~ "1 events"
+    assert html =~ "last 7d"
+    refute html =~ old_date
+    assert html =~ recent_date
+
+    # Values outside the whitelist are ignored.
+    html = render_click(view, "analytics_window", %{"window" => "bogus"})
+    assert html =~ "last 7d"
   end
 
   test "dashboard liveview renders an unavailable state without crashing" do
@@ -794,6 +1074,291 @@ defmodule SymphonyElixir.ExtensionsTest do
     {:ok, _view, html} = live(build_conn(), "/")
     assert html =~ "Snapshot unavailable"
     assert html =~ "snapshot_unavailable"
+    assert html =~ "Retrying automatically"
+  end
+
+  test "dashboard liveview retries automatically after snapshot errors" do
+    orchestrator_name = Module.concat(__MODULE__, :RetryRecoveryOrchestrator)
+
+    start_test_endpoint(
+      orchestrator: orchestrator_name,
+      snapshot_timeout_ms: 50,
+      snapshot_retry_initial_ms: 10
+    )
+
+    {:ok, view, html} = live(build_conn(), "/")
+    assert html =~ "Snapshot unavailable"
+
+    {:ok, _pid} =
+      StaticOrchestrator.start_link(
+        name: orchestrator_name,
+        snapshot: static_snapshot(),
+        refresh: %{
+          queued: true,
+          coalesced: false,
+          requested_at: DateTime.utc_now(),
+          operations: ["poll"]
+        }
+      )
+
+    assert_eventually(fn -> render(view) =~ "MT-HTTP" end, 80)
+  end
+
+  test "dashboard hides blocked and retry sections when combined counts are zero" do
+    snapshot =
+      static_snapshot()
+      |> Map.put(:running, [])
+      |> Map.put(:retrying, [])
+      |> Map.put(:blocked, [])
+
+    orchestrator_name = Module.concat(__MODULE__, :QuietDashboardOrchestrator)
+
+    {:ok, _pid} =
+      StaticOrchestrator.start_link(
+        name: orchestrator_name,
+        snapshot: snapshot,
+        refresh: %{queued: true, coalesced: false, requested_at: DateTime.utc_now(), operations: ["poll"]}
+      )
+
+    start_test_endpoint(orchestrator: orchestrator_name, snapshot_timeout_ms: 50)
+
+    {:ok, view, html} = live(build_conn(), "/")
+
+    assert html =~ "Running sessions"
+    assert html =~ "No active sessions."
+    refute html =~ "Blocked sessions"
+    refute html =~ "No blocked sessions."
+    refute html =~ "Retry queue"
+    refute html =~ "No issues are currently backing off."
+
+    instance_name = Path.basename(Path.dirname(Workflow.workflow_file_path()))
+    assert page_title(view) == "#{instance_name} · Symphony"
+  end
+
+  test "dashboard merges reachable peers and shows unreachable peers as muted cards" do
+    Application.put_env(:symphony_elixir, :peer_dashboards, [
+      "http://peer-one.test",
+      "http://peer-two.test",
+      "http://peer-three.test",
+      "http://peer-four.test"
+    ])
+
+    on_exit(fn -> Application.delete_env(:symphony_elixir, :peer_dashboards) end)
+
+    peer_payload =
+      SymphonyElixirWeb.PeerStatus.normalize(%{
+        "generated_at" => "2026-07-05T00:00:00Z",
+        "instance" => %{"name" => "peer-one", "mode" => "maestro", "port" => 4321},
+        "counts" => %{"running" => 1, "retrying" => 0, "blocked" => 0},
+        "running" => [
+          %{
+            "issue_id" => "issue-peer",
+            "issue_identifier" => "PEER-77",
+            "issue_url" => "https://example.org/issues/PEER-77",
+            "state" => "In Progress",
+            "session_id" => "thread-peer",
+            "turn_count" => 3,
+            "last_event" => "notification",
+            "last_message" => "peer working",
+            "started_at" => "2026-07-05T00:00:00Z",
+            "last_event_at" => nil,
+            "tokens" => %{"input_tokens" => 1, "output_tokens" => 2, "total_tokens" => 3}
+          }
+        ],
+        "retrying" => [],
+        "blocked" => [],
+        "codex_totals" => %{"input_tokens" => 1, "output_tokens" => 2, "total_tokens" => 3, "seconds_running" => 10},
+        "rate_limits" => nil
+      })
+
+    # An old-code peer: /api/v1/state without the "instance" key — the URL
+    # must stand in as its name and its rows must still merge.
+    legacy_peer_payload =
+      SymphonyElixirWeb.PeerStatus.normalize(%{
+        "generated_at" => "2026-07-05T00:00:00Z",
+        "counts" => %{"running" => 0, "retrying" => 0, "blocked" => 1},
+        "running" => [],
+        "retrying" => [],
+        "blocked" => [
+          %{
+            "issue_id" => "issue-old",
+            "issue_identifier" => "OLD-3",
+            "issue_url" => "https://example.org/issues/OLD-3",
+            "state" => "In Progress",
+            "session_id" => "thread-old",
+            "error" => "operator input required",
+            "blocked_at" => "2026-07-05T00:00:00Z"
+          }
+        ],
+        "codex_totals" => %{"input_tokens" => 4, "output_tokens" => 1, "total_tokens" => 5, "seconds_running" => 5}
+      })
+
+    # A reachable peer stuck in a snapshot error: renders as a card with the
+    # error code, contributes nothing to counts or tables.
+    error_peer_payload =
+      SymphonyElixirWeb.PeerStatus.normalize(%{
+        "generated_at" => "2026-07-05T00:00:00Z",
+        "error" => %{"code" => "snapshot_timeout", "message" => "Snapshot timed out"}
+      })
+
+    peer_fetcher = fn
+      "http://peer-one.test" -> {:ok, peer_payload}
+      "http://peer-two.test" -> {:error, :econnrefused}
+      "http://peer-three.test" -> {:ok, legacy_peer_payload}
+      "http://peer-four.test" -> {:ok, error_peer_payload}
+    end
+
+    orchestrator_name = Module.concat(__MODULE__, :PeerDashboardOrchestrator)
+
+    {:ok, _pid} =
+      StaticOrchestrator.start_link(
+        name: orchestrator_name,
+        snapshot: static_snapshot(),
+        refresh: %{queued: true, coalesced: false, requested_at: DateTime.utc_now(), operations: ["poll"]}
+      )
+
+    start_test_endpoint(orchestrator: orchestrator_name, snapshot_timeout_ms: 50, peer_fetcher: peer_fetcher)
+
+    {:ok, view, _html} = live(build_conn(), "/")
+    html = render_async(view)
+
+    assert html =~ "instance-strip"
+    assert html =~ "peer-one"
+    assert html =~ "maestro"
+    assert html =~ ":4321"
+    assert html =~ "http://peer-two.test"
+    assert html =~ "unreachable · econnrefused"
+
+    # Peer rows merge into the session tables with an instance chip column.
+    assert html =~ ">Instance</th>"
+    assert html =~ "PEER-77"
+    assert html =~ "peer working"
+
+    # Peer-owned rows link JSON details at the peer's own API; local rows stay relative.
+    assert html =~ ~s(href="http://peer-one.test/api/v1/PEER-77")
+    assert html =~ ~s(href="/api/v1/MT-HTTP")
+
+    # The legacy (no instance key) peer falls back to its URL as the name and
+    # its blocked row merges; the error-payload peer renders its error code.
+    assert html =~ "http://peer-three.test"
+    assert html =~ "OLD-3"
+    assert html =~ ~s(href="http://peer-three.test/api/v1/OLD-3")
+    assert html =~ "snapshot_timeout"
+
+    # Combined counts: local 1 running + peer 1 running.
+    assert html =~ ~r|<p class="metric-value numeric">\s*2\s*</p>|
+
+    # Local rate limits win over peer data.
+    assert html =~ "remaining 11"
+    refute html =~ "from peer-one"
+
+    # Combined wording on the totals/runtime cards.
+    assert html =~ "Combined across reachable instances since each instance start."
+
+    # Local 1 running + 1 blocked, peer-one 1 running, legacy peer 1 blocked.
+    instance_name = Path.basename(Path.dirname(Workflow.workflow_file_path()))
+    assert page_title(view) == "(4) #{instance_name} · Symphony"
+  end
+
+  test "peer status normalization whitelists dashboard fields into atom-keyed shapes" do
+    normalized =
+      SymphonyElixirWeb.PeerStatus.normalize(%{
+        "generated_at" => "2026-07-05T00:00:00Z",
+        "instance" => %{"name" => "grandline", "mode" => "main", "port" => 4000, "junk" => true},
+        "counts" => %{"running" => 2, "retrying" => 1, "blocked" => 0},
+        "running" => [
+          %{
+            "issue_identifier" => "MT-9",
+            "issue_url" => "https://example.org/issues/MT-9",
+            "state" => "In Progress",
+            "session_id" => "thread-9",
+            "turn_count" => 4,
+            "tokens" => %{"input_tokens" => 7, "output_tokens" => 8, "total_tokens" => 15},
+            "unexpected" => %{"deep" => "junk"}
+          },
+          %{"issue_identifier" => "MT-10"},
+          "not-a-map"
+        ],
+        "retrying" => [%{"issue_identifier" => "MT-8", "attempt" => 2, "due_at" => "soon", "error" => "boom"}],
+        "blocked" => [%{"issue_identifier" => "MT-7", "error" => "stuck", "blocked_at" => "2026-07-05T00:00:00Z"}],
+        "codex_totals" => %{"total_tokens" => 20, "seconds_running" => 12.5},
+        "rate_limits" => %{"primary" => %{"remaining" => 3}},
+        "error" => %{"code" => "snapshot_timeout", "message" => "Snapshot timed out"},
+        "junk_top_level" => "dropped"
+      })
+
+    assert normalized.generated_at == "2026-07-05T00:00:00Z"
+    assert normalized.instance == %{name: "grandline", mode: "main", port: 4000}
+    assert normalized.counts == %{running: 2, retrying: 1, blocked: 0}
+    assert normalized.error == %{code: "snapshot_timeout", message: "Snapshot timed out"}
+    assert normalized.rate_limits == %{"primary" => %{"remaining" => 3}}
+    refute Map.has_key?(normalized, :junk_top_level)
+
+    assert [running, bare_running] = normalized.running
+    assert running.issue_identifier == "MT-9"
+    assert running.turn_count == 4
+    assert running.tokens == %{input_tokens: 7, output_tokens: 8, total_tokens: 15}
+    refute Map.has_key?(running, :unexpected)
+    assert bare_running.tokens == %{input_tokens: nil, output_tokens: nil, total_tokens: nil}
+    assert bare_running.turn_count == 0
+
+    assert [%{issue_identifier: "MT-8", attempt: 2, due_at: "soon", error: "boom"}] = normalized.retrying
+    assert [%{issue_identifier: "MT-7", error: "stuck", state: nil, session_id: nil}] = normalized.blocked
+    assert normalized.codex_totals.total_tokens == 20
+    assert normalized.codex_totals.seconds_running == 12.5
+    assert normalized.codex_totals.input_tokens == nil
+
+    empty = SymphonyElixirWeb.PeerStatus.normalize(%{})
+    assert empty.instance == nil
+    assert empty.counts == nil
+    assert empty.running == []
+    assert empty.retrying == []
+    assert empty.blocked == []
+    assert empty.codex_totals == nil
+    assert empty.rate_limits == nil
+    assert empty.error == nil
+  end
+
+  test "peer status response handling maps status codes and transport errors" do
+    alias SymphonyElixirWeb.PeerStatus
+
+    assert {:ok, %{generated_at: "2026-07-05T00:00:00Z"}} =
+             PeerStatus.handle_response({:ok, %Req.Response{status: 200, body: %{"generated_at" => "2026-07-05T00:00:00Z"}}})
+
+    assert PeerStatus.handle_response({:ok, %Req.Response{status: 200, body: "<html>"}}) ==
+             {:error, :invalid_payload}
+
+    assert PeerStatus.handle_response({:ok, %Req.Response{status: 503, body: %{}}}) ==
+             {:error, {:http_status, 503}}
+
+    assert PeerStatus.handle_response({:error, %Req.TransportError{reason: :econnrefused}}) ==
+             {:error, :econnrefused}
+
+    exception = %RuntimeError{message: "boom"}
+    assert PeerStatus.handle_response({:error, exception}) == {:error, exception}
+  end
+
+  test "runtime formatting and rate-limit summaries handle real payload shapes" do
+    assert SymphonyElixirWeb.DashboardLive.format_runtime_seconds_for_test(14_833) == "4h 7m"
+    assert SymphonyElixirWeb.DashboardLive.format_runtime_seconds_for_test(200) == "3m 20s"
+
+    now = DateTime.utc_now()
+
+    # Real Codex buckets carry used_percent + resets_at (unix seconds), not remaining/limit.
+    assert SymphonyElixirWeb.DashboardLive.rate_limit_summary_for_test(
+             %{"used_percent" => 62.5, "window_minutes" => 300, "resets_at" => DateTime.to_unix(now) + 4_520},
+             now
+           ) == "62.5% used · resets in 1h 15m"
+
+    assert SymphonyElixirWeb.DashboardLive.rate_limit_summary_for_test(
+             %{"remaining" => 3_120, "limit" => 12_000, "reset_in_seconds" => 4_520},
+             now
+           ) == "3,120/12,000 · resets in 1h 15m"
+
+    assert SymphonyElixirWeb.DashboardLive.rate_limit_summary_for_test(%{"remaining" => 11}, now) ==
+             "remaining 11"
+
+    assert SymphonyElixirWeb.DashboardLive.rate_limit_summary_for_test(%{}, now) == "n/a"
   end
 
   test "http server serves embedded assets, accepts form posts, and rejects invalid hosts" do
@@ -831,6 +1396,14 @@ defmodule SymphonyElixir.ExtensionsTest do
     response = Req.get!("http://127.0.0.1:#{port}/api/v1/state")
     assert response.status == 200
     assert response.body["counts"] == %{"running" => 1, "retrying" => 1, "blocked" => 1}
+
+    assert {:ok, peer_state} = SymphonyElixirWeb.PeerStatus.fetch("http://127.0.0.1:#{port}")
+    assert peer_state.counts == %{running: 1, retrying: 1, blocked: 1}
+    assert [%{issue_identifier: "MT-HTTP", tokens: %{total_tokens: 12}}] = peer_state.running
+    assert %{name: _name, mode: "main", port: ^port} = peer_state.instance
+    assert peer_state.rate_limits == %{"primary" => %{"remaining" => 11}}
+
+    assert {:error, _reason} = SymphonyElixirWeb.PeerStatus.fetch("http://127.0.0.1:9")
 
     dashboard_css = Req.get!("http://127.0.0.1:#{port}/dashboard.css")
     assert dashboard_css.status == 200
@@ -870,6 +1443,19 @@ defmodule SymphonyElixir.ExtensionsTest do
 
     Application.put_env(:symphony_elixir, SymphonyElixirWeb.Endpoint, endpoint_config)
     start_supervised!({SymphonyElixirWeb.Endpoint, []})
+  end
+
+  defp put_analytics_file_env(path) do
+    previous = Application.get_env(:symphony_elixir, :analytics_file)
+    Application.put_env(:symphony_elixir, :analytics_file, path)
+
+    on_exit(fn ->
+      if is_nil(previous) do
+        Application.delete_env(:symphony_elixir, :analytics_file)
+      else
+        Application.put_env(:symphony_elixir, :analytics_file, previous)
+      end
+    end)
   end
 
   defp analytics_tmp_path(name) do
@@ -934,7 +1520,14 @@ defmodule SymphonyElixir.ExtensionsTest do
           last_codex_timestamp: DateTime.utc_now()
         }
       ],
-      codex_totals: %{input_tokens: 4, output_tokens: 8, total_tokens: 12, seconds_running: 42.5},
+      codex_totals: %{
+        input_tokens: 4,
+        output_tokens: 8,
+        total_tokens: 12,
+        cached_input_tokens: 2,
+        reasoning_output_tokens: 3,
+        seconds_running: 42.5
+      },
       rate_limits: %{"primary" => %{"remaining" => 11}}
     }
   end

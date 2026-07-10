@@ -26,7 +26,9 @@ defmodule SymphonyElixir.Application do
     children = [
       {Phoenix.PubSub, name: SymphonyElixir.PubSub},
       {Task.Supervisor, name: SymphonyElixir.TaskSupervisor},
+      SymphonyElixir.AnalyticsCache,
       SymphonyElixir.WorkflowStore,
+      SymphonyElixir.PhaseEventScanner,
       SymphonyElixir.Orchestrator,
       SymphonyElixir.HttpServer,
       SymphonyElixir.StatusDashboard

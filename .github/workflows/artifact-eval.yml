@@ -1,0 +1,32 @@
+name: artifact-eval
+
+on:
+  pull_request:
+    paths:
+      - "workflows/**"
+      - ".codex/skills/**"
+      - ".github/workflows/artifact-eval.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "workflows/**"
+      - ".codex/skills/**"
+      - ".github/workflows/artifact-eval.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  artifact-eval:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Unit tests
+        run: python3 -m unittest discover -s .codex/skills/artifact-eval/scripts -p 'test_*.py' -v
+
+      - name: Verify fixtures replay against current prompts
+        run: python3 .codex/skills/artifact-eval/scripts/artifact_eval.py verify-fixtures

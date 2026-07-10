@@ -60,6 +60,7 @@ defmodule SymphonyElixir.TestSupport do
 
           Application.delete_env(:symphony_elixir, :server_port_override)
           Application.delete_env(:symphony_elixir, :memory_tracker_issues)
+          Application.delete_env(:symphony_elixir, :memory_tracker_comments)
           Application.delete_env(:symphony_elixir, :memory_tracker_recipient)
           File.rm_rf(workflow_root)
         end)
@@ -92,6 +93,7 @@ defmodule SymphonyElixir.TestSupport do
       Phoenix.PubSub.Supervisor,
       SymphonyElixir.TaskSupervisor,
       SymphonyElixir.WorkflowStore,
+      SymphonyElixir.PhaseEventScanner,
       SymphonyElixir.Orchestrator,
       SymphonyElixir.StatusDashboard
     ]

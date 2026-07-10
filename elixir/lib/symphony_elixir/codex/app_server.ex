@@ -105,7 +105,7 @@ defmodule SymphonyElixir.Codex.AppServer do
           metadata
         )
 
-        case await_turn_completion(port, on_message, tool_executor, auto_approve_requests) do
+        case await_turn_completion(port, on_message, tool_executor, auto_approve_requests, turn_id) do
           {:ok, result} ->
             Logger.info("Codex session completed for #{issue_context(issue)} session_id=#{session_id}")
 
@@ -376,22 +376,32 @@ defmodule SymphonyElixir.Codex.AppServer do
     end
   end
 
-  defp await_turn_completion(port, on_message, tool_executor, auto_approve_requests) do
+  defp await_turn_completion(port, on_message, tool_executor, auto_approve_requests, expected_turn_id) do
     receive_loop(
       port,
       on_message,
       Config.settings!().codex.turn_timeout_ms,
       "",
       tool_executor,
-      auto_approve_requests
+      auto_approve_requests,
+      expected_turn_id
     )
   end
 
-  defp receive_loop(port, on_message, timeout_ms, pending_line, tool_executor, auto_approve_requests) do
+  defp receive_loop(port, on_message, timeout_ms, pending_line, tool_executor, auto_approve_requests, expected_turn_id) do
     receive do
       {^port, {:data, {:eol, chunk}}} ->
         complete_line = pending_line <> to_string(chunk)
-        handle_incoming(port, on_message, complete_line, timeout_ms, tool_executor, auto_approve_requests)
+
+        handle_incoming(
+          port,
+          on_message,
+          complete_line,
+          timeout_ms,
+          tool_executor,
+          auto_approve_requests,
+          expected_turn_id
+        )
 
       {^port, {:data, {:noeol, chunk}}} ->
         receive_loop(
@@ -400,7 +410,8 @@ defmodule SymphonyElixir.Codex.AppServer do
           timeout_ms,
           pending_line <> to_string(chunk),
           tool_executor,
-          auto_approve_requests
+          auto_approve_requests,
+          expected_turn_id
         )
 
       {^port, {:exit_status, status}} ->
@@ -411,37 +422,53 @@ defmodule SymphonyElixir.Codex.AppServer do
     end
   end
 
-  defp handle_incoming(port, on_message, data, timeout_ms, tool_executor, auto_approve_requests) do
+  # credo:disable-for-next-line
+  defp handle_incoming(port, on_message, data, timeout_ms, tool_executor, auto_approve_requests, expected_turn_id) do
     payload_string = to_string(data)
 
     case Jason.decode(payload_string) do
       {:ok, %{"method" => "turn/completed"} = payload} ->
-        emit_turn_event(on_message, :turn_completed, payload, payload_string, port, payload)
-        {:ok, :turn_completed}
+        if foreign_turn_event?(payload, expected_turn_id) do
+          ignore_foreign_turn_event(port, on_message, payload, payload_string)
+          receive_loop(port, on_message, timeout_ms, "", tool_executor, auto_approve_requests, expected_turn_id)
+        else
+          emit_turn_event(on_message, :turn_completed, payload, payload_string, port, payload)
+          {:ok, :turn_completed}
+        end
 
       {:ok, %{"method" => "turn/failed", "params" => _} = payload} ->
-        emit_turn_event(
-          on_message,
-          :turn_failed,
-          payload,
-          payload_string,
-          port,
-          Map.get(payload, "params")
-        )
+        if foreign_turn_event?(payload, expected_turn_id) do
+          ignore_foreign_turn_event(port, on_message, payload, payload_string)
+          receive_loop(port, on_message, timeout_ms, "", tool_executor, auto_approve_requests, expected_turn_id)
+        else
+          emit_turn_event(
+            on_message,
+            :turn_failed,
+            payload,
+            payload_string,
+            port,
+            Map.get(payload, "params")
+          )
 
-        {:error, {:turn_failed, Map.get(payload, "params")}}
+          {:error, {:turn_failed, Map.get(payload, "params")}}
+        end
 
       {:ok, %{"method" => "turn/cancelled", "params" => _} = payload} ->
-        emit_turn_event(
-          on_message,
-          :turn_cancelled,
-          payload,
-          payload_string,
-          port,
-          Map.get(payload, "params")
-        )
+        if foreign_turn_event?(payload, expected_turn_id) do
+          ignore_foreign_turn_event(port, on_message, payload, payload_string)
+          receive_loop(port, on_message, timeout_ms, "", tool_executor, auto_approve_requests, expected_turn_id)
+        else
+          emit_turn_event(
+            on_message,
+            :turn_cancelled,
+            payload,
+            payload_string,
+            port,
+            Map.get(payload, "params")
+          )
 
-        {:error, {:turn_cancelled, Map.get(payload, "params")}}
+          {:error, {:turn_cancelled, Map.get(payload, "params")}}
+        end
 
       {:ok, %{"method" => method} = payload}
       when is_binary(method) ->
@@ -453,7 +480,8 @@ defmodule SymphonyElixir.Codex.AppServer do
           method,
           timeout_ms,
           tool_executor,
-          auto_approve_requests
+          auto_approve_requests,
+          expected_turn_id
         )
 
       {:ok, payload} ->
@@ -467,7 +495,7 @@ defmodule SymphonyElixir.Codex.AppServer do
           metadata_from_message(port, payload)
         )
 
-        receive_loop(port, on_message, timeout_ms, "", tool_executor, auto_approve_requests)
+        receive_loop(port, on_message, timeout_ms, "", tool_executor, auto_approve_requests, expected_turn_id)
 
       {:error, _reason} ->
         log_non_json_stream_line(payload_string, "turn stream")
@@ -484,7 +512,7 @@ defmodule SymphonyElixir.Codex.AppServer do
           )
         end
 
-        receive_loop(port, on_message, timeout_ms, "", tool_executor, auto_approve_requests)
+        receive_loop(port, on_message, timeout_ms, "", tool_executor, auto_approve_requests, expected_turn_id)
     end
   end
 
@@ -501,6 +529,36 @@ defmodule SymphonyElixir.Codex.AppServer do
     )
   end
 
+  defp foreign_turn_event?(payload, expected_turn_id) do
+    event_turn_id = event_turn_id(payload)
+
+    is_binary(expected_turn_id) and is_binary(event_turn_id) and
+      event_turn_id != expected_turn_id
+  end
+
+  defp event_turn_id(payload) do
+    extract_turn_id(Map.get(payload, "params")) || extract_turn_id(payload)
+  end
+
+  defp extract_turn_id(%{"turn" => %{"id" => turn_id}}) when is_binary(turn_id), do: turn_id
+  defp extract_turn_id(%{"turnId" => turn_id}) when is_binary(turn_id), do: turn_id
+  defp extract_turn_id(_payload), do: nil
+
+  defp ignore_foreign_turn_event(port, on_message, payload, payload_string) do
+    Logger.debug("Ignoring foreign turn event (subagent turn) #{Map.get(payload, "method")} turn_id=#{event_turn_id(payload)}")
+
+    emit_message(
+      on_message,
+      :notification,
+      %{
+        payload: payload,
+        raw: payload_string
+      },
+      metadata_from_message(port, payload)
+    )
+  end
+
+  # credo:disable-for-next-line
   defp handle_turn_method(
          port,
          on_message,
@@ -509,7 +567,8 @@ defmodule SymphonyElixir.Codex.AppServer do
          method,
          timeout_ms,
          tool_executor,
-         auto_approve_requests
+         auto_approve_requests,
+         expected_turn_id
        ) do
     metadata = metadata_from_message(port, payload)
 
@@ -534,7 +593,7 @@ defmodule SymphonyElixir.Codex.AppServer do
         {:error, {:turn_input_required, payload}}
 
       :approved ->
-        receive_loop(port, on_message, timeout_ms, "", tool_executor, auto_approve_requests)
+        receive_loop(port, on_message, timeout_ms, "", tool_executor, auto_approve_requests, expected_turn_id)
 
       :approval_required ->
         emit_message(
@@ -568,7 +627,7 @@ defmodule SymphonyElixir.Codex.AppServer do
           )
 
           Logger.debug("Codex notification: #{inspect(method)}")
-          receive_loop(port, on_message, timeout_ms, "", tool_executor, auto_approve_requests)
+          receive_loop(port, on_message, timeout_ms, "", tool_executor, auto_approve_requests, expected_turn_id)
         end
     end
   end

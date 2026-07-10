@@ -67,8 +67,13 @@ same-phase Rework cycle in your workflow instructions when re-posting the artifa
 ## Skills to invoke
 
 - `writing-plans` (superpowers) — produce the hierarchical plan.
-- `subagent-driven-development` (superpowers, when tasks are parallelizable) —
-  delegate independent plan items to subagents.
+- `subagent-driven-development` (superpowers) — the **default execution mode**
+  when the plan has more than a couple of independent items: delegate plan
+  items to subagents and keep this session's context for the plan, integration,
+  and acceptance evidence (long single-session implementations are the main
+  context-bloat source). Implement directly only when the change is small
+  enough that delegation overhead exceeds the work; then record
+  `Skipped subagent-driven-development: <reason>` in workpad notes.
 - `test-driven-development` (superpowers) — write failing tests first for any
   new behavior.
 - `systematic-debugging` (superpowers) — when a test fails or behavior
@@ -133,8 +138,9 @@ Markdown sections:
 
 1. **Plan** — invoke `writing-plans` to produce the hierarchical plan; write
    it to the workpad. Mirror `S<N>` IDs in `acceptance_criteria`.
-2. **Delegate** — if the plan has independent subtasks, invoke
-   `subagent-driven-development`.
+2. **Delegate** — invoke `subagent-driven-development` by default for a
+   multi-item plan (see Skills to invoke); implement directly only with a
+   recorded skip reason.
 3. **Implement with TDD** — for new behavior: failing test → minimal code
    → green → refactor.
 4. **Commit** — invoke `symphony-commit` skill for each logical change.
@@ -202,6 +208,16 @@ comfort.
 <用中文说明 accepted root cause / chosen approach。讲清楚为什么这个改动能解决
 问题；Type:Spike 写 findings/recommendation。不要把 PR 状态、验证输出和根因混在同一段。>
 
+### Human action needed
+
+> 👉 **需要人工处理**：<正常审查：审查 PR；无异议请将 issue 移至 `Merging`，需要修改则移至 `Rework`。>
+> - 若 blocked：写成可执行 runbook，包含操作系统/账号/项目/workspace、要配置的 key/权限/变量及类型或 sensitive 标记、secret 值从哪里取得或生成但不贴值、配置后如何重跑验证、通过判据。
+
+### 风险/注意（optional: non-merge caveats only）
+
+- <只列不属于合并风险判断、但仍影响 review 的事项；没有就省略>
+
+>>> 🧩 本轮实现细节（默认折叠）
 ### 本轮变化
 
 - `path/file`: <中文说明该文件改了什么和为什么>
@@ -213,7 +229,9 @@ comfort.
 - Current-main compatibility: <当前 head 是否已刷新到 current `main`，以及
   mergeability / 冲突状态；完整 git hygiene 放在 `>>> 🔎 审计证据`>
 - <逐条说明旧证据、旧 head、旧假设或 reviewer feedback 如何被替换 / 回应>
+>>>
 
+>>> ✅ 验证与验收（默认折叠）
 ### 验证结论
 
 - <命令 / CI / reviewer signal 的结论；完整命令、输出和 check metadata 放在
@@ -238,15 +256,7 @@ comfort.
 
 - S<N>: **查询** `<exact runnable query/command>` · **通过判据**
   `<pass/fail predicate, e.g. 匹配条数 == 0>` · **观察窗口** `<length>`
-
-### Human action needed
-
-> 👉 **需要人工处理**：<正常审查：审查 PR；无异议请将 issue 移至 `Merging`，需要修改则移至 `Rework`。>
-> - 若 blocked：写成可执行 runbook，包含操作系统/账号/项目/workspace、要配置的 key/权限/变量及类型或 sensitive 标记、secret 值从哪里取得或生成但不贴值、配置后如何重跑验证、通过判据。
-
-### 风险/注意（optional: non-merge caveats only）
-
-- <只列不属于合并风险判断、但仍影响 review 的事项；没有就省略>
+>>>
 
 >>> 🔎 审计证据（默认折叠）
 - Spec: <source issue/comment, e.g. DEV-123 `## Design` or Source comment: URL>
@@ -275,6 +285,13 @@ comfort.
 
 Status conventions: `✅ 通过`, `⚠️ 部分通过`, `➖ N/A`, `❌ 失败`.
 `❌ 失败` means the criterion is still unmet at handoff time.
+
+In `Acceptance mapping` / `验证结论`, a `✅ 通过` line for a commandable check
+cites its **可重跑命令 + 通过判据** — the exact rerun command plus
+observed-vs-expected result — in the folded `>>> 🔎 审计证据` block, so a
+reviewer (or a future machine spot-check) can re-execute it verbatim.
+Evidence a reviewer cannot re-run must say why (interactive capture,
+credentialed env).
 
 For any `S<N>` classified `延迟验收` in Requirements' `关键假设`, `Merge 后验证`
 must carry a **self-contained, runnable** spec — the exact query, the pass/fail
@@ -341,7 +358,7 @@ Then update workpad `current_phase` to the target phase and open the target phas
 - PR pushed; PR checks green; PR linked on the issue.
 - PR feedback sweep complete: every substantive comment has a reply.
 - `## Implementation` artifact posted.
-- Issue moved to `Human Review`.
+- Issue labeled `symphony:maestro` and moved to `Human Review`.
 
 The human approves by moving the issue to `Merging`. On the next session,
 Main Flow writes the approval reply on this artifact and runs Deployment.

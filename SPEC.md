@@ -1340,6 +1340,13 @@ SHOULD return:
   - SHOULD identify direct, partial, and missing data sources
   - SHOULD keep GitHub/Linear-derived metrics separate from runtime-derived metrics unless the data
     source is actually collected
+  - MAY be computed over a bounded time window; the full-history (`all`) window SHOULD be the
+    default surface. Token metrics for bounded windows MAY be UTC-calendar-day granular
+    (including the whole cutoff day) when they are derived from per-day deltas
+- `instance` (SHOULD, when the state payload is served over HTTP) identifying the reporting
+  instance for multi-instance dashboards: `name` (workflow directory basename), `mode` (`"main"`
+  or `"maestro"`), and `port` (bound HTTP port, `null` when no HTTP server is bound); it SHOULD
+  also be present on snapshot error payloads
 
 RECOMMENDED snapshot error modes:
 

@@ -5,7 +5,7 @@ defmodule SymphonyElixir.AgentRunner do
 
   require Logger
   alias SymphonyElixir.Codex.AppServer
-  alias SymphonyElixir.{Config, Linear.Issue, MaestroPreReview, PromptBuilder, SSH, Tracker, Workspace}
+  alias SymphonyElixir.{Config, Linear.Issue, PromptBuilder, SSH, Tracker, Workspace}
 
   @stop_after_turn_marker Path.join([".symphony", "stop-after-turn"])
 
@@ -163,8 +163,8 @@ defmodule SymphonyElixir.AgentRunner do
 
         :ok
 
-      {:done, refreshed_issue} ->
-        maybe_run_maestro_pre_review(refreshed_issue, context.codex_update_recipient, context.opts, context.worker_host)
+      {:done, _refreshed_issue} ->
+        :ok
 
       {:error, reason} ->
         {:error, reason}
@@ -271,10 +271,17 @@ defmodule SymphonyElixir.AgentRunner do
   defp continue_with_issue?(%Issue{id: issue_id} = issue, issue_state_fetcher) when is_binary(issue_id) do
     case issue_state_fetcher.([issue_id]) do
       {:ok, [%Issue{} = refreshed_issue | _]} ->
-        if active_issue_state?(refreshed_issue.state) and issue_routable?(refreshed_issue) do
-          {:continue, refreshed_issue}
-        else
-          {:done, refreshed_issue}
+        cond do
+          not (active_issue_state?(refreshed_issue.state) and issue_routable?(refreshed_issue)) ->
+            {:done, refreshed_issue}
+
+          issue_blocked_by_non_terminal?(refreshed_issue) ->
+            Logger.info("Ending agent run; issue is blocked by a non-terminal Linear relation: #{issue_context(refreshed_issue)} blocked_by=#{length(refreshed_issue.blocked_by)}")
+
+            {:done, refreshed_issue}
+
+          true ->
+            {:continue, refreshed_issue}
         end
 
       {:ok, []} ->
@@ -296,71 +303,28 @@ defmodule SymphonyElixir.AgentRunner do
 
   defp active_issue_state?(_state_name), do: false
 
+  defp issue_blocked_by_non_terminal?(%Issue{blocked_by: blockers}) when is_list(blockers) do
+    Enum.any?(blockers, fn
+      %{state: blocker_state} when is_binary(blocker_state) ->
+        not terminal_issue_state?(blocker_state)
+
+      _ ->
+        true
+    end)
+  end
+
+  defp issue_blocked_by_non_terminal?(_issue), do: false
+
+  defp terminal_issue_state?(state_name) when is_binary(state_name) do
+    normalized_state = normalize_issue_state(state_name)
+
+    Config.settings!().tracker.terminal_states
+    |> Enum.any?(fn terminal_state -> normalize_issue_state(terminal_state) == normalized_state end)
+  end
+
   defp issue_routable?(%Issue{} = issue) do
     Issue.routable?(issue, Config.settings!().tracker.required_labels)
   end
-
-  defp maybe_run_maestro_pre_review(%Issue{} = issue, codex_update_recipient, opts, worker_host) do
-    if human_review_issue?(issue) and issue_routable?(issue) do
-      runner = Keyword.get(opts, :maestro_pre_review_runner, &MaestroPreReview.run/2)
-
-      runner_opts = [
-        worker_host: worker_host,
-        on_message: codex_message_handler(codex_update_recipient, issue)
-      ]
-
-      start_maestro_pre_review(issue, runner, runner_opts)
-    else
-      :ok
-    end
-  end
-
-  defp maybe_run_maestro_pre_review(_issue, _codex_update_recipient, _opts, _worker_host), do: :ok
-
-  defp start_maestro_pre_review(%Issue{} = issue, runner, runner_opts) when is_function(runner, 2) do
-    if MaestroPreReview.claim_handoff(issue) do
-      Task.Supervisor.async_nolink(SymphonyElixir.TaskSupervisor, fn ->
-        run_maestro_pre_review_task(issue, runner, runner_opts)
-      end)
-    else
-      Logger.info("Skipping duplicate Maestro pre-review for #{issue_context(issue)}")
-    end
-
-    :ok
-  rescue
-    exception ->
-      log_maestro_pre_review_failed(issue, Exception.message(exception))
-  catch
-    kind, reason ->
-      log_maestro_pre_review_failed(issue, {kind, reason})
-  end
-
-  defp run_maestro_pre_review_task(%Issue{} = issue, runner, runner_opts) do
-    case runner.(issue, runner_opts) do
-      :ok ->
-        :ok
-
-      {:error, reason} ->
-        log_maestro_pre_review_failed(issue, reason)
-    end
-  rescue
-    exception ->
-      log_maestro_pre_review_failed(issue, Exception.message(exception))
-  catch
-    kind, reason ->
-      log_maestro_pre_review_failed(issue, {kind, reason})
-  end
-
-  defp log_maestro_pre_review_failed(%Issue{} = issue, reason) do
-    Logger.warning("Maestro pre-review failed for #{issue_context(issue)}: #{inspect(reason)}")
-    :ok
-  end
-
-  defp human_review_issue?(%Issue{state: state}) when is_binary(state) do
-    normalize_issue_state(state) == "human review"
-  end
-
-  defp human_review_issue?(_issue), do: false
 
   defp selected_worker_host(nil, []), do: nil
 
