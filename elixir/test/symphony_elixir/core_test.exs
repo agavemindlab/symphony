@@ -578,6 +578,39 @@ defmodule SymphonyElixir.CoreTest do
     end
   end
 
+  @tag :prompt_contract
+  test "implementation review gate is narrow complete fail closed and head bound" do
+    repo_root = Path.expand("..", File.cwd!())
+    workflow = File.read!(Path.join(repo_root, "workflows/agavemindlab/WORKFLOW.md"))
+
+    implementation =
+      File.read!(Path.join(repo_root, "workflows/agavemindlab/skills/phase-implementation/SKILL.md"))
+
+    for contract <- [
+          "phase-required gstack `review`",
+          "`$HOME/.gstack/`",
+          "managed nested-Codex session state under `$HOME/.codex/`",
+          "`/tmp/codex-adv-*`",
+          "`/tmp/codex-review-*`",
+          "does not authorize another gstack skill",
+          "any other `$HOME`, system, or `/tmp` path",
+          "another external system"
+        ] do
+      assert workflow =~ contract
+    end
+
+    assert implementation =~ "scripts/review_gate.py"
+    assert implementation =~ "exit status 0 is the sole machine handoff predicate"
+    assert implementation =~ ".symphony/review-gate.json"
+    refute implementation =~ "repeat until clean or explicitly recorded in `风险/注意`"
+
+    assert File.read_link!(Path.join(repo_root, "workflows/grotto/WORKFLOW.md")) ==
+             "../agavemindlab/WORKFLOW.md"
+
+    assert File.read_link!(Path.join(repo_root, "workflows/grotto/skills")) ==
+             "../agavemindlab/skills"
+  end
+
   test "phase artifact templates keep decisions visible and details folded" do
     implementation_skill =
       File.read!(Path.expand("../workflows/agavemindlab/skills/phase-implementation/SKILL.md", File.cwd!()))

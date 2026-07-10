@@ -160,12 +160,94 @@ Markdown sections:
    is impossible, record the reason and closest safe alternative proof; surface
    the caveat in the artifact `风险/注意`.
 8. **Verify** — invoke `verification-before-completion`.
-9. **Pre-landing review** — invoke `review` (gstack) on the branch / PR diff.
-   Treat findings as Implementation feedback: fix, rerun validation, commit,
-   push, and repeat until clean or explicitly recorded in `风险/注意`.
-10. **PR feedback sweep** — see protocol below.
+9. **PR feedback sweep** — see protocol below.
+10. **Pre-landing review gate** — run the exact-HEAD protocol below. A skipped,
+    partial, stale, or non-clean review cannot be documented away as risk.
 11. **Post artifact** — write the `## Implementation` artifact and move to
-   `Human Review`.
+   `Human Review` only after the gate is clean for the current full SHA.
+
+## Exact-HEAD pre-landing review gate
+
+Run the phase-required gstack `review` as a fail-closed convergence loop after
+sync, feedback fixes, commit, and push. Tests, lint, and CI support this gate;
+none substitutes for it.
+
+1. Require a clean worktree and freeze one run's inputs:
+
+   ```bash
+   base_ref="upstream/${SYMPHONY_BASE_BRANCH:-main}"
+   review_head=$(git rev-parse HEAD)
+   review_base=$(git merge-base "$base_ref" "$review_head")
+   review_range="$review_base...$review_head"
+   ```
+
+   Every pass reviews `$review_base...$review_head`, records both full SHAs,
+   and verifies `HEAD == review_head` plus an empty `git status --porcelain`
+   before and after every pass and immediately before handoff.
+   Treat the frozen range as an execution override: override every gstack core,
+   specialist, Red Team, Claude, and Codex diff command that detects or
+   recomputes a base. Never execute or propagate gstack's native
+   `origin/<base>` range. Render the two frozen full SHAs into every nested
+   reviewer prompt so no child context can recompute the range.
+2. Isolate supported config and review records under
+   `$HOME/.gstack/symphony/<issue-identifier>/<review_head>/`; hard-coded
+   preamble state may remain elsewhere under the allowed `$HOME/.gstack/`.
+   Before any config command or skill preamble, export `GSTACK_HOME`,
+   `GSTACK_STATE_ROOT`, and `GSTACK_STATE_DIR` to that same exact-head
+   directory and set `OPENCLAW_SESSION=1`. Then set and read back
+   `telemetry=off`, `update_check=false`, `artifacts_sync_mode=off`,
+   `artifacts_sync_mode_prompted=true`, `cross_project_learnings=false`,
+   `checkpoint_mode=explicit`, `checkpoint_push=false`, and
+   `codex_reviews=enabled`. This disables the pre-spawn update check, while
+   spawned non-interactive mode suppresses onboarding and routing prompts.
+   Audit explicit writes:
+   only `$HOME/.gstack/`, managed nested-Codex session state under
+   `$HOME/.codex/`, `/tmp/codex-adv-*`, and `/tmp/codex-review-*` may appear.
+   A config mismatch or any other path is non-clean.
+3. For every code diff, run the core correctness pass plus testing,
+   maintainability, security, and performance specialists regardless of diff
+   size or historical hit rate. Run API contract, migration, and design
+   whenever the diff's content makes them applicable; record a concrete reason
+   for each N/A. Force the selected matrix rather than accepting gstack's
+   `<50 lines` or adaptive hit-rate skips.
+4. For every code diff, run Red Team, Claude adversarial, Codex adversarial,
+   and Codex structured cross-model review. Each required pass records its
+   dispatched/completed status and frozen range. A required pass that fails,
+   times out, is unavailable, or produces unparsable output makes the run
+   non-clean; best-effort continuation is not a pass.
+   Enforce a 300000 ms per-pass deadline and one gate attempt per unchanged
+   `review_head` per phase turn. Persist a timeout/unavailability failure and
+   end that turn without retrying it. A later dispatch may make one fresh
+   attempt for the same HEAD after rechecking tool availability.
+5. Do not enter native Fix-First on raw findings. The fresh validation context
+   must be independent of the reporting reviewer, quote the motivating
+   `file:line`, and reproduce the behavior with a focused test or static trace.
+   The severity auditor must be independent of both and judge concrete impact
+   and reachability. Classify each raw finding as validated, downgraded, or
+   dismissed with evidence. Only independently validated and severity-audited
+   findings may trigger a fix or block the gate; a failed validation/audit stage
+   is non-clean.
+6. Any operation that changes `HEAD` or dirties the worktree invalidates the
+   entire review run. Discard all old pass and finding verdicts, restore a clean
+   committed tree, push the new commit, and rerun the full matrix. Before
+   handoff, fetch PR feedback once more and require current `HEAD` and the PR
+   head both equal `review_head`; new feedback or a mismatch restarts the loop.
+
+Write those inputs and results to `.symphony/review-gate.json`, including the
+config readback, audited write paths, applicability decisions, pass statuses
+and ranges, finding dispositions/evidence, and the PR URL. Run:
+
+```bash
+python3 "$SYMPHONY_WORKFLOW_DIR/skills/phase-implementation/scripts/review_gate.py" \
+  .symphony/review-gate.json
+```
+
+The verifier rereads the actual local HEAD, upstream merge-base, GitHub PR head,
+and worktree state. Its exit status 0 is the sole machine handoff predicate;
+preserve its JSON output as review evidence. Any other exit is non-clean: leave
+the issue in Implementation without publishing the artifact or moving its state. This
+required-review failure is not eligible for the blocked-access Human Review
+escape hatch.
 
 ## PR feedback sweep protocol
 
@@ -265,6 +347,12 @@ comfort.
 - CI / checks: `<workflow/check>` <passed|failed|pending>
 - Automated review: `<reviewer>` <approved|commented|timed out>，只作为自动
   review evidence，不等于人工批准
+- Review gate: `<clean|non-clean>` for `<review_base>...<full review_head>`
+- Review config / writes: <固定配置的 readback；允许/越界路径审计>
+- Review passes: <实际执行、N/A + 理由、失败/跳过的 specialists；Red Team、
+  Claude adversarial、Codex adversarial、Codex structured evidence>
+- Finding audit: <validated / downgraded / dismissed；每项 `file:line`、验真、
+  severity evidence>
 - Commands:
   - `<exact command>` → <关键结果，例如 14 passed>
 - Red/Green 过程: <failing check → fix → passing check；没有则写 N/A + 原因>
@@ -357,6 +445,9 @@ Then update workpad `current_phase` to the target phase and open the target phas
 - Validation/tests green for the latest commit.
 - PR pushed; PR checks green; PR linked on the issue.
 - PR feedback sweep complete: every substantive comment has a reply.
+- The review record has a clean gate verdict for the exact full SHA; every
+  required pass completed, finding validation/audit completed, and local/PR
+  HEAD still match it.
 - `## Implementation` artifact posted.
 - Issue labeled `symphony:maestro` and moved to `Human Review`.
 

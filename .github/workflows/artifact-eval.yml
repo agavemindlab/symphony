@@ -28,5 +28,8 @@ jobs:
       - name: Unit tests
         run: python3 -m unittest discover -s .codex/skills/artifact-eval/scripts -p 'test_*.py' -v
 
+      - name: Shared workflow skill tests
+        run: python3 -m unittest discover -s workflows/agavemindlab/skills/phase-implementation/scripts -p 'test_*.py' -v
+
       - name: Verify fixtures replay against current prompts
         run: python3 .codex/skills/artifact-eval/scripts/artifact_eval.py verify-fixtures
