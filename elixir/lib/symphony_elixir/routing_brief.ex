@@ -150,7 +150,7 @@ defmodule SymphonyElixir.RoutingBrief do
       created_at: artifact.created_at,
       status: artifact_status(closing),
       closed_at: closing && closing.created_at,
-      needs_clarification: String.contains?(artifact.body, "[NEEDS CLARIFICATION"),
+      needs_clarification: PhaseEvents.needs_clarification?(artifact.body),
       new_replies: new_replies
     }
   end
@@ -254,7 +254,7 @@ defmodule SymphonyElixir.RoutingBrief do
     lines = ["- 待审阶段：#{facts.awaiting_phase}（artifact `#{artifact.id}`，发布于 #{timestamp(artifact.created_at)}）"]
 
     if facts.needs_clarification do
-      lines ++ ["- 待审 artifact 内含未决 `[NEEDS CLARIFICATION]` 标记"]
+      lines ++ ["- 待审 artifact 含未决澄清 gate"]
     else
       lines
     end

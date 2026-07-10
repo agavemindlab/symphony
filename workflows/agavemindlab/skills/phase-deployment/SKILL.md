@@ -131,7 +131,8 @@ When a post-merge acceptance check requires logged-in user state:
      configured service, and public docs, then write the exact runbook: where
      to act, what to configure, where secret values come from without printing
      them, how to rerun verification, and the pass predicate. If that cannot be
-     determined, ask `[NEEDS CLARIFICATION]`.
+     determined, use a visible `### NEEDS CLARIFICATION` gate with the exact
+     question.
 3. **Hand off `需人工判定` `S<N>`** (only a human can confirm). Note it in
    后续事项; spin off genuine follow-up work as a separate ticket via the
    `symphony-issue` skill (autonomous `follow-up`) and cite its identifier

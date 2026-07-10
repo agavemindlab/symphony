@@ -251,9 +251,9 @@ Symphony only starts the agent when the issue is in an active state (`Todo`, `In
 
 5. Determine intent:
 
-   **If the awaiting-review artifact still carries an unresolved `[NEEDS CLARIFICATION]` marker** (the phase stopped on its blocked path, not for ordinary review), a new human reply in its thread is an **answer to that question**, not an approval or a new change request. Target phase = the current (awaiting-review) phase; do **not** write an approval reply. Re-open that phase's skill, which follows its own "On resume" path: fold each answer into a revised artifact, drop the resolved marker, and re-decide advance/stop. When the revised artifact needs review, publication follows the same-phase Rework cycle even if the Linear state is `In Progress`: resolve the old artifact, post a fresh top-level artifact, and put the clarification summary on the new artifact; do not `commentUpdate` the old artifact. If an answer does not actually resolve a marker, the skill keeps it open, refines the question, and stops again (its "When blocked" / "On resume" defines the re-ask and the two-round escalation). This branch takes precedence over the intent read below.
+   **If the awaiting-review artifact still carries an unresolved clarification gate** (`### NEEDS CLARIFICATION`, or the legacy `[NEEDS CLARIFICATION]` marker) (the phase stopped on its blocked path, not for ordinary review), a new human reply in its thread is an **answer to that question**, not an approval or a new change request. Target phase = the current (awaiting-review) phase; do **not** write an approval reply. Re-open that phase's skill, which follows its own "On resume" path: fold each answer into a revised artifact, drop the resolved gate, and re-decide advance/stop. When the revised artifact needs review, publication follows the same-phase Rework cycle even if the Linear state is `In Progress`: resolve the old artifact, post a fresh top-level artifact, and put the clarification summary on the new artifact; do not `commentUpdate` the old artifact. If an answer does not actually resolve a gate, the skill keeps it open, refines the question, and stops again (its "When blocked" / "On resume" defines the re-ask and the two-round escalation). This branch takes precedence over the intent read below.
 
-   **Fast path — explicit commands.** When a new human feedback comment begins with a slash command, route it literally instead of reading intent (the `[NEEDS CLARIFICATION]` branch above and the two exceptions below still take precedence):
+   **Fast path — explicit commands.** When a new human feedback comment begins with a slash command, route it literally instead of reading intent (the clarification-gate branch above and the two exceptions below still take precedence):
    - `/approve` → **Approval** of the awaiting-review artifact, handled exactly as the Approval bullet below.
    - `/rework [phase]` → **Change request** targeting the named phase (`requirements` | `design` | `implementation` | `deployment`; omitted → the awaiting-review phase). Text after the command is the change direction; a same-phase `/rework` with no direction is handled by the no-direction `Rework` rule below.
 
@@ -279,7 +279,7 @@ Symphony only starts the agent when the issue is in an active state (`Todo`, `In
    - **`advance`** → write the `⏩ 自动进入 [Next Phase]` reply on the just-posted artifact, set the workpad `current_phase` to the next phase, keep the issue in `In Progress`, persist the agent state, create `.symphony/stop-after-turn`, and stop this agent run. Do **not** open the next phase skill in this session; the next Symphony dispatch targets the saved phase.
    - **`stop`** → add the `symphony:maestro` label before moving the issue to `Human Review`, then stop.
 
-   (A skill that stops **blocked** — unresolved `[NEEDS CLARIFICATION]` / escalated high-impact decision — moves the issue to `Human Review` itself; the session ends there.)
+   (A skill that stops **blocked** — unresolved clarification gate / escalated high-impact decision — moves the issue to `Human Review` itself; the session ends there.)
 
    This is the only auto-advance mechanism, and Main Flow does not second-guess the skill's choice. A confident issue may progress Requirements → Design → Implementation across successive active dispatches, but the Implementation skill always returns `stop` (the PR awaits the human's merge decision), so the chain still ends at `Human Review`; Deployment is reached only via `Merging` (step 3).
 
@@ -287,7 +287,25 @@ Symphony only starts the agent when the issue is in an active state (`Todo`, `In
 
 The phase skills under `.agents/skills/` refer back to **your workflow instructions** (e.g. "the Workpad template in your workflow instructions", "the cross-phase rework protocol in your workflow instructions"). That is this prompt — every referenced section is here; find it by its heading. There is no separate file to open.
 
-This workflow runs unattended — no interactive UI. When any invoked skill needs a human decision, mark it `[NEEDS CLARIFICATION: <question>]` inline in the phase artifact, publish it through the protocol below, move the issue to `Human Review`, and stop. Each phase skill's "When blocked" section defines the detailed bridging procedure for that phase.
+This workflow runs unattended — no interactive UI. When any invoked skill needs
+a human decision, put a visible clarification gate in the phase artifact,
+publish it through the protocol below, move the issue to `Human Review`, and
+stop. Keep the question expanded and out of collapsible sections:
+
+```md
+___
+
+### NEEDS CLARIFICATION
+
+> This needs an explicit human decision before the workflow can continue.
+
+Question: <question>
+
+___
+```
+
+Each phase skill's "When blocked" section defines the detailed bridging
+procedure for that phase.
 
 ## Phase Artifact Protocol
 

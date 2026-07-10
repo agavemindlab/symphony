@@ -53,8 +53,8 @@ feedback in its thread), follow the same-phase Rework cycle in your workflow ins
 If this issue has a **parent** (it was created as a sub-issue), read the
 parent's `## Design` first. Adopt its architecture and already-settled
 tradeoffs for this slice — do **not** re-decide them. Scope the approach to the
-child's slice; raise a `[NEEDS CLARIFICATION]` only if the slice genuinely
-cannot fit the parent's design.
+child's slice; use the visible `### NEEDS CLARIFICATION` block only if the
+slice genuinely cannot fit the parent's design.
 
 ## Discovery / design review
 
@@ -254,7 +254,7 @@ Apply the emphasis matching `Primary:` from the Requirements artifact.
 ## High-impact decision protocol
 
 If the approach has a **high-impact unresolved decision**, do not pick
-unilaterally — surface it as a batched `[NEEDS CLARIFICATION]` question tagged
+unilaterally — surface it as a batched `### NEEDS CLARIFICATION` block tagged
 `🔴 〔影响：高 · 需明确回答〕` (see Batched clarification below) and move to Human
 Review. The tag means a blanket `同意默认` never resolves it — the human must
 answer it explicitly.
@@ -342,7 +342,7 @@ input, key steps, output, and blocking point（触发者 / 输入 / 关键步骤
   - Post-Merge 最终验收: <如何线上验> → <即时信号 / 查询+判据+窗口 / 人工判定>
 >>>
 
-### 待确认（omit if none; the batched [NEEDS CLARIFICATION] block — see Batched clarification）
+### 待确认（omit if none; use the visible `### NEEDS CLARIFICATION` block — see Batched clarification）
 
 >>> 🛠️ 本次激活的 skills
 - Codex session id: `<session_id | n/a>`
@@ -350,7 +350,7 @@ input, key steps, output, and blocking point（触发者 / 输入 / 关键步骤
 >>>
 ```
 
-## Batched clarification (`[NEEDS CLARIFICATION]`)
+## Batched clarification (`### NEEDS CLARIFICATION`)
 
 Because the agent cannot interview the human turn by turn, design ambiguities
 are resolved in **one batch** with a recommended answer per question, so the
@@ -387,8 +387,12 @@ preserve it here — do not flatten the reasoning down to a bare question.
 **Batched format** — one block at the foot of the `## Design` artifact:
 
 ```md
-### 待确认（一次性审阅：认可全部推荐请回复「同意默认」，否则逐条说明）
-[NEEDS CLARIFICATION]
+___
+
+### NEEDS CLARIFICATION
+
+> 需要人工决定后 workflow 才能继续。认可全部推荐请回复「同意默认」，否则逐条说明。
+
 **Q1. <question> 〔影响：低〕**
   背景: <一句：这个 fork 是什么 + 选错的代价>
   - A（推荐）: <answer> — <这样选的后果 / 为什么优于备选>
@@ -399,6 +403,8 @@ preserve it here — do not flatten the reasoning down to a bare question.
   - A（推荐）: <answer> — <后果>
   - B: <answer> — <后果>
   - C: <answer> — <后果>
+
+___
 ```
 
 Give each question as many concrete branches as the decision genuinely has
@@ -418,7 +424,7 @@ them first and auto-resumes the parent for integration.
 
 ## When blocked
 
-When a batched `[NEEDS CLARIFICATION]` block remains after analysis:
+When a batched clarification block remains after analysis:
 
 1. Write the batched block at the foot of the `## Design` artifact.
 2. Publish the artifact through the workflow artifact protocol.
@@ -489,7 +495,7 @@ about form, not correctness:
   visual capture for any interactive `S<N>` — or
   states why a gate does not apply.
 - Type-specific approach emphasis satisfied for `Primary:`.
-- No unresolved `[NEEDS CLARIFICATION]` markers.
+- No unresolved clarification gates.
 
 Publish the `## Design` artifact through the workflow artifact protocol and set the workpad
 `current_phase: Design`. Do **not** move the issue yourself on a clean exit —
@@ -519,7 +525,7 @@ for the `Rework` state, and for the **complete-but-not-confident** case:
 there is a real architectural fork a reasonable reviewer might decide
 differently, an uncertain bet, or a non-obvious risk worth a human's eyes
 before you build on it. When you stop for a specific fork, prefer surfacing it
-as a batched `[NEEDS CLARIFICATION]` question carrying your recommended
+as a batched `### NEEDS CLARIFICATION` block carrying your recommended
 direction (so the human can one-click `同意默认`) rather than only a passive
 `风险/注意` note; record `confidence: review` in the notes. Because a stop now
 costs the human a single approval, **when in doubt, stop** — auto-advance is
@@ -527,5 +533,5 @@ for the clearly-right design. After a stop, the human approves by moving the
 issue back to an active state and the next session advances to Implementation.
 
 (The "When blocked" path above is the harder stop: an unresolved
-`[NEEDS CLARIFICATION]` means the artifact is not even safe to build on, so
+`### NEEDS CLARIFICATION` means the artifact is not even safe to build on, so
 it moves to `Human Review` directly.)

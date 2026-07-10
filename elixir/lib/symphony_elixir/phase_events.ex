@@ -15,6 +15,7 @@ defmodule SymphonyElixir.PhaseEvents do
   @confidence_ratio_regex ~r/(?<![\d.])(10|\d(?:\.\d+)?)\s*\/\s*10/u
   @confidence_label_regex ~r/置信度\s*[:：]?\s*(\d+(?:\.\d+)?)/u
   @marker_decoration_regex ~r/\A[\s>#*_`~-]+/u
+  @needs_clarification_regex ~r/(?:\A|\n)\s*###\s+NEEDS CLARIFICATION\b|\[NEEDS CLARIFICATION/iu
 
   @recommendation_markers [
     {"request changes", "request_changes"},
@@ -69,6 +70,13 @@ defmodule SymphonyElixir.PhaseEvents do
   end
 
   def phase_of_artifact(_body), do: nil
+
+  @spec needs_clarification?(String.t() | nil) :: boolean()
+  def needs_clarification?(body) when is_binary(body) do
+    Regex.match?(@needs_clarification_regex, body)
+  end
+
+  def needs_clarification?(_body), do: false
 
   @doc false
   @spec reply_marker(String.t() | nil) ::
@@ -156,7 +164,7 @@ defmodule SymphonyElixir.PhaseEvents do
       phase: phase,
       comment_id: comment.id,
       occurred_at: occurred_at(comment.created_at),
-      needs_clarification: String.contains?(comment.body, "[NEEDS CLARIFICATION"),
+      needs_clarification: needs_clarification?(comment.body),
       author_name: comment.author_name
     }
   end

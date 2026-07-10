@@ -50,10 +50,10 @@ work was discovered:
 - If a discovery spans multiple target projects, split it into one spawned issue
   per target project. Pick the kind/relation for each split by the real
   dependency.
-- If the target project is unclear, create/propose nothing. Add a
-  `[NEEDS CLARIFICATION: which Linear project should own <work>?]` marker in
-  the current phase artifact with the candidate routes and stop per that phase's
-  blocked path.
+- If the target project is unclear, create/propose nothing. Add a visible
+  `### NEEDS CLARIFICATION` gate in the current phase artifact asking which
+  Linear project should own `<work>`, include the candidate routes, and stop per
+  that phase's blocked path.
 
 ## Safety invariants (every spawned issue)
 
