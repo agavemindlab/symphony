@@ -1808,6 +1808,10 @@ defmodule SymphonyElixir.Orchestrator do
     last_reported_total = Map.get(running_entry, :codex_last_reported_total_tokens, 0)
     last_reported_cached_input = Map.get(running_entry, :codex_last_reported_cached_input_tokens, 0)
     last_reported_reasoning_output = Map.get(running_entry, :codex_last_reported_reasoning_output_tokens, 0)
+
+    updated_reported_reasoning_output =
+      max(last_reported_reasoning_output, token_delta.reasoning_output_reported)
+
     turn_count = Map.get(running_entry, :turn_count, 0)
 
     {
@@ -1826,7 +1830,7 @@ defmodule SymphonyElixir.Orchestrator do
         codex_last_reported_output_tokens: max(last_reported_output, token_delta.output_reported),
         codex_last_reported_total_tokens: max(last_reported_total, token_delta.total_reported),
         codex_last_reported_cached_input_tokens: max(last_reported_cached_input, token_delta.cached_input_reported),
-        codex_last_reported_reasoning_output_tokens: max(last_reported_reasoning_output, token_delta.reasoning_output_reported),
+        codex_last_reported_reasoning_output_tokens: updated_reported_reasoning_output,
         turn_count: turn_count_for_update(turn_count, running_entry.session_id, update)
       }),
       token_delta

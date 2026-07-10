@@ -322,8 +322,6 @@ defmodule SymphonyElixir.AgentRunner do
     |> Enum.any?(fn terminal_state -> normalize_issue_state(terminal_state) == normalized_state end)
   end
 
-  defp terminal_issue_state?(_state_name), do: false
-
   defp issue_routable?(%Issue{} = issue) do
     Issue.routable?(issue, Config.settings!().tracker.required_labels)
   end

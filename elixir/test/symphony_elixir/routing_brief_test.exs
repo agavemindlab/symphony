@@ -11,6 +11,10 @@ defmodule SymphonyElixir.RoutingBriefTest do
     def fetch_issue_comments(_issue_id), do: raise("linear exploded")
   end
 
+  defmodule ThrowingLinearClient do
+    def fetch_issue_comments(_issue_id), do: throw(:linear_exited)
+  end
+
   setup do
     linear_client_module = Application.get_env(:symphony_elixir, :linear_client_module)
 
@@ -247,6 +251,25 @@ defmodule SymphonyElixir.RoutingBriefTest do
     assert markdown =~ "新回复：\n- 无"
   end
 
+  test "compute tolerates malformed comments and timestamps" do
+    facts =
+      RoutingBrief.compute([
+        :not_a_comment,
+        %{id: "req-1", body: "## Requirements\n\n目标", created_at: "not-a-timestamp"},
+        %{id: "req-1-reply", body: "普通回复", parent_id: "req-1"}
+      ])
+
+    assert facts.awaiting_phase == "Requirements"
+
+    assert facts.standalone_comments == [
+             %{id: nil, author_name: nil, author_is_bot: false, created_at: nil, excerpt: ""}
+           ]
+
+    markdown = RoutingBrief.render(facts)
+    assert markdown =~ "- [Requirements `req-1`] 未知作者（时间未知）：普通回复"
+    assert markdown =~ "- `` 未知作者（时间未知）："
+  end
+
   test "build with the memory tracker and no comments is available with a no-artifact brief" do
     write_workflow_file!(Workflow.workflow_file_path(), tracker_kind: "memory")
 
@@ -274,6 +297,9 @@ defmodule SymphonyElixir.RoutingBriefTest do
     assert RoutingBrief.build(%Issue{id: "issue-1", identifier: "MT-1"}) == unavailable
 
     Application.put_env(:symphony_elixir, :linear_client_module, RaisingLinearClient)
+    assert RoutingBrief.build(%Issue{id: "issue-1", identifier: "MT-1"}) == unavailable
+
+    Application.put_env(:symphony_elixir, :linear_client_module, ThrowingLinearClient)
     assert RoutingBrief.build(%Issue{id: "issue-1", identifier: "MT-1"}) == unavailable
 
     assert RoutingBrief.build(%Issue{id: nil, identifier: "MT-1"}) == unavailable

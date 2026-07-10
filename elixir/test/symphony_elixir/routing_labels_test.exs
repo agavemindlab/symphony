@@ -74,7 +74,8 @@ defmodule SymphonyElixir.RoutingLabelsTest do
       run_started(%{"issue_id" => "i2", "issue_identifier" => "DEV-2", "recorded_at" => "2026-06-15T10:00:00Z"}),
       published(%{"issue_id" => "i2", "comment_id" => "b1", "occurred_at" => "2026-06-15T10:00:00Z"}),
       # A dispatch without a parseable timestamp is dropped entirely.
-      run_started(%{"issue_id" => "i3", "recorded_at" => "garbage"})
+      run_started(%{"issue_id" => "i3", "recorded_at" => "garbage"}),
+      run_started(%{"issue_id" => "i4", "recorded_at" => 123})
     ]
 
     # The 12:00+02:00 publication is 10:00Z, after the deduped 09:30Z dispatch.

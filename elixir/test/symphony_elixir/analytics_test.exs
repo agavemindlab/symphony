@@ -54,7 +54,13 @@ defmodule SymphonyElixir.AnalyticsTest do
         event_type: :cost_snapshot,
         issue_id: "issue-1",
         issue_identifier: "DEV-1",
-        tokens: %{input_tokens: 10, output_tokens: 4, total_tokens: 14, cached_input_tokens: 4, reasoning_output_tokens: 2},
+        tokens: %{
+          input_tokens: 10,
+          output_tokens: 4,
+          total_tokens: 14,
+          cached_input_tokens: 4,
+          reasoning_output_tokens: 2
+        },
         recorded_at: "2026-06-15T10:00:05Z"
       },
       %{
@@ -1039,6 +1045,12 @@ defmodule SymphonyElixir.AnalyticsTest do
     :ok =
       Analytics.record_event(
         %{event_type: :human_comment, event_id: "human-comment-old", occurred_at: "2026-06-10T09:00:00Z"},
+        path: path
+      )
+
+    :ok =
+      Analytics.record_event(
+        %{event_type: :human_comment, event_id: "human-comment-old-datetime", occurred_at: ~U[2026-06-10 09:00:00Z]},
         path: path
       )
 
