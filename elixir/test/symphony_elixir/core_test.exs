@@ -447,6 +447,35 @@ defmodule SymphonyElixir.CoreTest do
     end
   end
 
+  @tag :prompt_contract
+  test "shared workflow renders a visible expanded clarification gate" do
+    repo_root = Path.expand("..", File.cwd!())
+    workflow_path = Path.join(repo_root, "workflows/agavemindlab/WORKFLOW.md")
+    original_workflow_path = Workflow.workflow_file_path()
+
+    Workflow.set_workflow_file_path(workflow_path)
+    on_exit(fn -> Workflow.set_workflow_file_path(original_workflow_path) end)
+
+    prompt =
+      PromptBuilder.build_prompt(%Issue{
+        id: "dev-5464-replay",
+        identifier: "DEV-5464",
+        title: "Deployment needs a human coverage-gate decision",
+        description: "Ask whether to expand scope or wait for a separate baseline fix.",
+        state: "Rework",
+        labels: ["symphony", "Type:Bug"]
+      })
+
+    assert [gate] =
+             Regex.run(
+               ~r/___\n\n### NEEDS CLARIFICATION\n\n> This needs an explicit human decision before the workflow can continue\.\n\nQuestion: <question>\n\n___/,
+               prompt
+             )
+
+    refute gate =~ ">>>"
+    refute prompt =~ "[NEEDS CLARIFICATION:"
+  end
+
   test "workflow defines the status card as a non-routing digest" do
     repo_root = Path.expand("..", File.cwd!())
     workflow = File.read!(Path.join(repo_root, "workflows/agavemindlab/WORKFLOW.md"))
