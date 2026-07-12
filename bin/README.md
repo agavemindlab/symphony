@@ -57,8 +57,12 @@ preserved.
 The profile is picked in this order, taking the first non-empty value:
 
 1. Caller-provided `SYMPHONY_PROFILE` already in the environment.
-2. `SYMPHONY_PROFILE` set in `project.env`.
-3. `grandline`.
+2. Under `--maestro`: `SYMPHONY_MAESTRO_PROFILE`, else `maestro`. A namespace
+   whose Linear workspace has its own reviewer identity (e.g. `personal`) sets
+   `SYMPHONY_MAESTRO_PROFILE` in its `project.env.defaults`; `--maestro` never
+   uses `project.env`'s `SYMPHONY_PROFILE`, which names the *main* instance.
+3. `SYMPHONY_PROFILE` set in `project.env`.
+4. `grandline`.
 
 ## Other exports
 
@@ -80,7 +84,8 @@ bin/symphony-run <project> --maestro
 ```
 
 `--maestro` is shorthand for `SYMPHONY_WORKFLOW_FILE=MAESTRO_WORKFLOW.md` +
-`SYMPHONY_PROFILE=maestro` (explicit caller env still wins). It additionally
+the reviewer profile (`SYMPHONY_MAESTRO_PROFILE`, default `maestro`; explicit
+caller env still wins). It additionally
 replaces `SYMPHONY_PORT` with `SYMPHONY_MAESTRO_PORT` (unset → no dashboard),
 so the reviewer instance never fights the main instance for its port. The
 `maestro` profile env's `LINEAR_API_KEY` is the Maestro OAuth identity;
