@@ -303,6 +303,33 @@ class ReviewGateTest(unittest.TestCase):
         self.assertIn("PR check is not successful: test", errors)
         self.assertIn("PR has unresolved change requests: reviewer", errors)
 
+        actionable = deepcopy(pr)
+        actionable["reviewDecision"] = ""
+        actionable["reviews"] = [
+            {
+                "id": "review-1",
+                "author": {"login": "reviewer"},
+                "submittedAt": "2026-07-13T09:03:00Z",
+                "state": "COMMENTED",
+                "body": "Please fix this fallback",
+            }
+        ]
+        actionable["_inline"] = [{"id": 7, "body": "This can fail", "in_reply_to_id": None}]
+        errors = []
+        self.gate._check_pr(actionable, record, errors)
+        self.assertIn("PR feedback dispositions do not match current feedback ids", errors)
+
+        dispositioned = {
+            **record,
+            "pr_feedback_dispositions": [
+                {"id": "review:review-1", "disposition": "addressed", "evidence": "fixed"},
+                {"id": "inline:7", "disposition": "dismissed", "evidence": "static trace"},
+            ],
+        }
+        errors = []
+        self.gate._check_pr(actionable, dispositioned, errors)
+        self.assertNotIn("PR feedback dispositions do not match current feedback ids", errors)
+
         superseded = deepcopy(pr)
         superseded["reviewDecision"] = ""
         superseded["reviews"].append(

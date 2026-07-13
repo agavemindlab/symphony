@@ -145,6 +145,48 @@ def _change_request_authors(pr):
     return sorted(author for author, (_, state) in latest.items() if state == "CHANGES_REQUESTED")
 
 
+def _feedback_ids(pr):
+    latest_reviews = {}
+    for review in pr.get("reviews") or []:
+        author = (review.get("author") or {}).get("login")
+        submitted = review.get("submittedAt") or ""
+        if author and (author not in latest_reviews or submitted >= latest_reviews[author][0]):
+            latest_reviews[author] = (submitted, review)
+    ids = {
+        f"review:{review['id']}"
+        for _, review in latest_reviews.values()
+        if review.get("state") == "COMMENTED" and _text(review.get("body")) and review.get("id")
+    }
+    ids.update(
+        f"comment:{item['id']}"
+        for item in pr.get("comments") or []
+        if _text(item.get("body")) and item.get("id")
+    )
+    ids.update(
+        f"inline:{item['id']}"
+        for item in pr.get("_inline") or []
+        if not item.get("in_reply_to_id") and _text(item.get("body")) and item.get("id")
+    )
+    return ids
+
+
+def _check_feedback_dispositions(pr, record, errors):
+    dispositions = record.get("pr_feedback_dispositions") or []
+    by_id = {}
+    for item in dispositions:
+        item_id = item.get("id")
+        if not _text(item_id) or item_id in by_id:
+            errors.append("PR feedback dispositions require unique non-empty ids")
+            continue
+        by_id[item_id] = item
+        if item.get("disposition") not in {"addressed", "dismissed", "superseded"} or not _text(
+            item.get("evidence")
+        ):
+            errors.append(f"PR feedback disposition lacks evidence: {item_id}")
+    if set(by_id) != _feedback_ids(pr):
+        errors.append("PR feedback dispositions do not match current feedback ids")
+
+
 def _check_pr(pr, record, errors):
     if pr.get("url") != record.get("pr_url"):
         errors.append("canonical PR URL does not match review record")
@@ -155,6 +197,7 @@ def _check_pr(pr, record, errors):
     change_request_authors = _change_request_authors(pr)
     if pr.get("reviewDecision") == "CHANGES_REQUESTED" or change_request_authors:
         errors.append(f"PR has unresolved change requests: {', '.join(change_request_authors) or 'reviewDecision'}")
+    _check_feedback_dispositions(pr, record, errors)
     checks = pr.get("statusCheckRollup") or []
     if not checks:
         errors.append("PR status checks are empty")
@@ -320,7 +363,9 @@ def _github_snapshot(record):
             or "[]"
         )
     )
-    return pr, _feedback_digest(pr, inline)
+    feedback_digest = _feedback_digest(pr, inline)
+    pr["_inline"] = inline
+    return pr, feedback_digest
 
 
 def main(argv):
