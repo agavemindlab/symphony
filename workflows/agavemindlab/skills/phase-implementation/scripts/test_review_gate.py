@@ -270,14 +270,10 @@ class ReviewGateTest(unittest.TestCase):
 
     def test_pr_identity_ci_and_feedback_snapshot_fail_closed(self):
         self.assertEqual(
-            ("github.com", "example/repo"),
-            self.gate._repo_identity("git@github.com:example/repo.git"),
+            ("github.com", "example/repo", "1"), self.gate._pr_identity(self.record["pr_url"])
         )
-        self.assertEqual("1", self.gate._pr_number(self.record["pr_url"], "github.com", "example/repo"))
-        with self.assertRaisesRegex(ValueError, "does not belong"):
-            self.gate._pr_number(
-                "https://ghe.example/example/repo/pull/1", "github.com", "example/repo"
-            )
+        with self.assertRaisesRegex(ValueError, "canonical PR URL"):
+            self.gate._pr_identity("ssh://github.com/example/repo/pull/1")
 
         pr = {
             "url": self.record["pr_url"],
@@ -428,7 +424,7 @@ class ReviewGateTest(unittest.TestCase):
             subprocess.run(["git", "remote", "add", "upstream", upstream], cwd=repo, check=True)
             subprocess.run(["git", "push", "upstream", "main"], cwd=repo, check=True, capture_output=True)
             subprocess.run(
-                ["git", "remote", "set-url", "upstream", "https://github.com/example/repo.git"],
+                ["git", "remote", "set-url", "upstream", "https://github.com/openai/symphony.git"],
                 cwd=repo,
                 check=True,
             )

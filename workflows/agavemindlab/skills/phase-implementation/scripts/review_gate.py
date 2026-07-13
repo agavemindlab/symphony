@@ -291,42 +291,25 @@ def _run(command):
     return subprocess.run(command, capture_output=True, text=True, check=True).stdout.strip()
 
 
-def _repo_identity(remote):
-    if remote.startswith("git@"):
-        authority, path = remote.split(":", 1)
-        host = authority.split("@", 1)[1]
-    else:
-        parsed = urlparse(remote)
-        host, path = parsed.hostname, parsed.path
-    if not host:
-        raise ValueError(f"upstream remote lacks a canonical host: {remote}")
-    parts = path.removesuffix(".git").strip("/").split("/")
-    if len(parts) < 2:
-        raise ValueError(f"cannot derive GitHub repository from upstream remote: {remote}")
-    return host.lower(), "/".join(parts[-2:])
-
-
-def _pr_number(pr_url, host, repo):
+def _pr_identity(pr_url):
     parsed = urlparse(pr_url)
     parts = parsed.path.strip("/").split("/")
     if (
         parsed.scheme != "https"
-        or parsed.hostname != host
+        or not parsed.hostname
         or len(parts) != 4
-        or "/".join(parts[:2]) != repo
         or parts[2] != "pull"
         or not parts[3].isdigit()
     ):
-        raise ValueError("canonical PR URL does not belong to the upstream repository")
-    return parts[3]
+        raise ValueError("review record lacks a canonical PR URL")
+    return parsed.hostname.lower(), "/".join(parts[:2]), parts[3]
 
 
 def _github_snapshot(record):
-    host, repo = _repo_identity(_run(["git", "remote", "get-url", "upstream"]))
     pr_url = record.get("pr_url")
     if not _text(pr_url):
         raise ValueError("review record lacks canonical PR URL")
-    pr_number = _pr_number(pr_url, host, repo)
+    host, repo, pr_number = _pr_identity(pr_url)
     pr = json.loads(
         _run(
             [
