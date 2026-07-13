@@ -337,6 +337,8 @@ def _reserve_attempt(record_path, head):
                 or not _text(attempt.get("turn"))
             ):
                 raise ValueError("review attempt marker is invalid")
+            if attempt["status"] == "completed":
+                raise ValueError("review HEAD already has a completed capture")
         path = root / f"{hashlib.sha256(turn.encode()).hexdigest()}.json"
         _exclusive_write(
             path,

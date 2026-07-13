@@ -246,10 +246,12 @@ def _external_snapshot(roots, index):
                     metadata.st_mtime_ns,
                     os.readlink(path) if path.is_symlink() else None,
                 )
+    if index.is_symlink():
+        raise ValueError("Codex session index may not be symlinked")
     if index.exists():
         metadata = index.lstat()
-        if stat.S_ISREG(metadata.st_mode) and metadata.st_nlink != 1:
-            raise ValueError("Codex session index may not be hard linked")
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+            raise ValueError("Codex session index must be a single-link regular file")
         snapshot[str(index)] = (
             metadata.st_mode,
             metadata.st_nlink,
@@ -1038,6 +1040,7 @@ def produce(record_path):
                     *git_command,
                     "diff",
                     "--no-ext-diff",
+                    "--no-textconv",
                     "--binary",
                     f"{base}...{head}",
                 ],

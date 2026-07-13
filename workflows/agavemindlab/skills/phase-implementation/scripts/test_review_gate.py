@@ -578,10 +578,11 @@ class ReviewGateTest(unittest.TestCase):
                     {"review_head": self.head, "status": "completed", "turn": "turn-a"}
                 )
             )
-            with mock.patch.dict(os.environ, {"CODEX_THREAD_ID": "turn-b"}):
-                fresh, fresh_lock = self.gate._reserve_attempt(record_path, self.head)
-                self.gate._finish_attempt(fresh, self.head, "failed", lock=fresh_lock)
-            self.assertEqual("failed", json.loads(fresh.read_text())["status"])
+            with (
+                mock.patch.dict(os.environ, {"CODEX_THREAD_ID": "turn-b"}),
+                self.assertRaisesRegex(ValueError, "completed capture"),
+            ):
+                self.gate._reserve_attempt(record_path, self.head)
 
             symlink_record = root / "symlink" / "review-gate.json"
             symlink_record.parent.mkdir()
@@ -619,6 +620,10 @@ class ReviewGateTest(unittest.TestCase):
             os.link(outside, hardlink_root / "linked")
             with self.assertRaisesRegex(ValueError, "contains a hard link"):
                 producer._external_snapshot((hardlink_root,), root / "missing-index")
+            symlink_index = root / "session_index.jsonl"
+            symlink_index.symlink_to(outside)
+            with self.assertRaisesRegex(ValueError, "may not be symlinked"):
+                producer._external_snapshot((), symlink_index)
 
             context = root / "context"
             context.mkdir()
