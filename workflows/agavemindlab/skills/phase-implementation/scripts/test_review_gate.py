@@ -321,7 +321,10 @@ class ReviewGateTest(unittest.TestCase):
                 "body": "Also add a regression",
             },
         ]
-        actionable["_inline"] = [{"id": 7, "body": "This can fail", "in_reply_to_id": None}]
+        actionable["_inline"] = [
+            {"id": 7, "body": "This can fail", "in_reply_to_id": None},
+            {"id": 8, "body": "The race still exists", "in_reply_to_id": 7},
+        ]
         errors = []
         self.gate._check_pr(actionable, record, errors)
         self.assertIn("PR feedback dispositions do not match current feedback ids", errors)
@@ -332,6 +335,7 @@ class ReviewGateTest(unittest.TestCase):
                 {"id": "review:review-1", "disposition": "addressed", "evidence": "fixed"},
                 {"id": "review:review-older", "disposition": "superseded", "evidence": "covered by review-1"},
                 {"id": "inline:7", "disposition": "dismissed", "evidence": "static trace"},
+                {"id": "inline:8", "disposition": "addressed", "evidence": "race test"},
             ],
         }
         errors = []

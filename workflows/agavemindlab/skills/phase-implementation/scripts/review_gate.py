@@ -159,7 +159,7 @@ def _feedback_ids(pr):
     ids.update(
         f"inline:{item['id']}"
         for item in pr.get("_inline") or []
-        if not item.get("in_reply_to_id") and _text(item.get("body")) and item.get("id")
+        if _text(item.get("body")) and item.get("id")
     )
     return ids
 
