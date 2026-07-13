@@ -315,6 +315,39 @@ class ReviewGateTest(unittest.TestCase):
         self.assertNotEqual(findings[1]["reporter"], findings[1]["validator"])
         self.assertNotEqual(findings[1]["validator"], findings[1]["auditor"])
 
+        duplicate = {"results": [validation["results"][0]] * 2}
+        with (
+            mock.patch.object(producer, "_codex_json", return_value=(duplicate, {})),
+            mock.patch.object(producer, "_output", return_value="dangerous()"),
+        ):
+            findings, errors = producer._validate_and_audit(
+                raw[:1], record, paths
+            )
+        self.assertEqual([], findings)
+        self.assertEqual(
+            ["independent finding validator returned duplicate ids"], errors
+        )
+
+        duplicate_audit = {"results": [audit["results"][0]] * 2}
+        with (
+            mock.patch.object(
+                producer,
+                "_codex_json",
+                side_effect=[
+                    ({"results": [validation["results"][1]]}, {}),
+                    (duplicate_audit, {}),
+                ],
+            ),
+            mock.patch.object(producer, "_output", return_value="dangerous()"),
+        ):
+            findings, errors = producer._validate_and_audit(
+                raw[1:], record, paths
+            )
+        self.assertEqual([], findings)
+        self.assertEqual(
+            ["independent severity auditor returned duplicate ids"], errors
+        )
+
     def test_reviewer_environment_drops_caller_credentials(self):
         producer = load_producer()
         with mock.patch.dict(

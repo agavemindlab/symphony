@@ -887,8 +887,11 @@ schema JSON."""
     )
     if not isinstance(validation, dict):
         return [], ["independent finding validator failed"]
-    by_id = {item.get("raw_finding_id"): item for item in validation.get("results", [])}
+    validation_results = validation.get("results", [])
+    by_id = {item.get("raw_finding_id"): item for item in validation_results}
     raw_ids = {item["id"] for item in raw_findings}
+    if len(by_id) != len(validation_results):
+        return [], ["independent finding validator returned duplicate ids"]
     if set(by_id) != raw_ids:
         return [], ["independent finding validator returned an incomplete mapping"]
     validated = [
@@ -909,9 +912,10 @@ Return only schema JSON."""
         )
         if not isinstance(audit, dict):
             return [], ["independent severity auditor failed"]
-        audit_by_id = {
-            item.get("raw_finding_id"): item for item in audit.get("results", [])
-        }
+        audit_results = audit.get("results", [])
+        audit_by_id = {item.get("raw_finding_id"): item for item in audit_results}
+        if len(audit_by_id) != len(audit_results):
+            return [], ["independent severity auditor returned duplicate ids"]
         if set(audit_by_id) != {item["raw_finding_id"] for item in validated}:
             return [], ["independent severity auditor returned an incomplete mapping"]
     raw_by_id = {item["id"]: item for item in raw_findings}
