@@ -597,11 +597,10 @@ class ReviewGateTest(unittest.TestCase):
                 ["consumer.py:1: parse(payload)"],
                 references["unchanged_references"],
             )
-            with (
-                mock.patch.object(producer, "MAX_CONTEXT_BYTES", 10),
-                self.assertRaisesRegex(ValueError, "output bound"),
-            ):
-                producer._reference_context(context, diff)
+            with mock.patch.object(producer, "MAX_CONTEXT_BYTES", 10):
+                truncated = producer._reference_context(context, diff)
+            self.assertEqual([], truncated["unchanged_references"])
+            self.assertEqual(["output"], truncated["audit"]["truncated"])
 
     def test_each_pass_binds_a_trusted_gstack_checklist(self):
         producer = load_producer()

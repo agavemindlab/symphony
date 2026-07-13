@@ -39,7 +39,7 @@ REQUIRED_CONFIG = {
     "checkpoint_push": False,
     "codex_reviews": "enabled",
 }
-MAX_CONTEXT_BYTES = 1_300_000
+MAX_CONTEXT_BYTES = 256_000
 MAX_CONTEXT_FILES = 2_000
 MAX_CONTEXT_SCAN_BYTES = 64 * 1024 * 1024
 MAX_CONTEXT_SYMBOLS = 2_000
@@ -367,8 +367,10 @@ def _reference_context(root, diff):
         | set(re.findall(r"\.([A-Za-z_][A-Za-z0-9_]*)\b", changed_lines))
         | set(re.findall(r"\b([A-Z][A-Z0-9_]{2,})\b", changed_lines))
     )
+    truncated = []
     if len(symbols) > MAX_CONTEXT_SYMBOLS:
-        raise ValueError("frozen review context has too many changed identifiers")
+        symbols = symbols[:MAX_CONTEXT_SYMBOLS]
+        truncated.append("symbols")
     pattern = re.compile(r"\b(?:" + "|".join(map(re.escape, symbols)) + r")\b")
     context = {"unchanged_references": []}
     output_bytes = 0
@@ -382,7 +384,8 @@ def _reference_context(root, diff):
         scanned_files += 1
         scanned_bytes += size
         if scanned_files > MAX_CONTEXT_FILES or scanned_bytes > MAX_CONTEXT_SCAN_BYTES:
-            raise ValueError("frozen review context exceeds its repository scan bound")
+            truncated.append("scan")
+            break
         if size > 300_000:
             continue
         content = path.read_bytes()
@@ -402,17 +405,23 @@ def _reference_context(root, diff):
                 continue
             encoded = line.encode()
             if len(encoded) > MAX_CONTEXT_LINE_BYTES:
-                raise ValueError("frozen review context contains an oversized matching line")
+                truncated.append("line")
+                continue
             reference = f"{relative}:{number}: {line}"
-            output_bytes += len(reference.encode())
-            if output_bytes > MAX_CONTEXT_BYTES:
-                raise ValueError("frozen review context exceeds its output bound")
+            reference_bytes = len(reference.encode())
+            if output_bytes + reference_bytes > MAX_CONTEXT_BYTES:
+                truncated.append("output")
+                break
+            output_bytes += reference_bytes
             context["unchanged_references"].append(reference)
+        if "output" in truncated:
+            break
     context["audit"] = {
         "output_bytes": output_bytes,
         "scanned_bytes": scanned_bytes,
         "scanned_files": scanned_files,
         "symbol_count": len(symbols),
+        "truncated": sorted(set(truncated)),
     }
     return context
 
@@ -709,6 +718,7 @@ def _codex_json(
         "exit_code": result.returncode,
         "failure_status": failure_status,
         "output_sha256": _sha256(output_path) if output_path.is_file() else None,
+        "stderr": (result.stderr or "")[-4096:],
     }
 
 
@@ -1094,6 +1104,7 @@ def produce(record_path):
             "git_sha256": _sha256(Path(git).resolve()),
             "zsh_sha256": _sha256(Path(zsh).resolve()),
             "auth_sha256": auth_hash,
+            "context_audit": paths["reference_context"]["audit"],
         },
         "write_policy": list(WRITE_POLICY),
         "config": _config(config_path),
