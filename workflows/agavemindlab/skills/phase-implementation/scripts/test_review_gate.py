@@ -30,6 +30,7 @@ class ReviewGateTest(unittest.TestCase):
             "current_head": self.head,
             "pr_head": self.head,
             "pr_url": "https://github.com/example/repo/pull/1",
+            "pr_feedback_digest": "f" * 64,
             "worktree_clean": True,
             "diff_kind": "code",
             "diff_size": "small",
@@ -55,6 +56,7 @@ class ReviewGateTest(unittest.TestCase):
                 "design": {"required": True},
             },
             "passes": [],
+            "raw_findings": [],
             "findings": [],
         }
         self.record["passes"] = [self.pass_record(name) for name in self.gate.ALWAYS_PASSES]
@@ -72,6 +74,12 @@ class ReviewGateTest(unittest.TestCase):
     def errors(self, record=None):
         return self.gate.evaluate(record or self.record)
 
+    @staticmethod
+    def replay_handoff(gate_result):
+        if gate_result.returncode:
+            return {"state": "Implementation", "artifacts": []}
+        return {"state": "Human Review", "artifacts": ["## Implementation"]}
+
     def test_small_and_large_code_diffs_require_the_same_core_matrix(self):
         self.assertEqual([], self.errors())
 
@@ -84,6 +92,21 @@ class ReviewGateTest(unittest.TestCase):
             missing["diff_size"] = size
             missing["passes"] = [item for item in missing["passes"] if item["name"] != "performance"]
             self.assertIn("missing required pass: performance", self.errors(missing))
+
+    def test_plan_command_forces_the_same_dispatch_matrix_for_small_large_and_low_hit_rate(self):
+        for size in ("small", "large"):
+            with tempfile.TemporaryDirectory() as tmp:
+                path = Path(tmp) / "record.json"
+                record = deepcopy(self.record)
+                record.update(diff_size=size, adaptive_hit_rate=0)
+                path.write_text(json.dumps(record))
+                result = subprocess.run(
+                    [sys.executable, SCRIPT, "--plan", path], capture_output=True, text=True
+                )
+            self.assertEqual(0, result.returncode, result.stdout)
+            self.assertEqual(
+                [*self.gate.ALWAYS_PASSES, "design"], json.loads(result.stdout)["passes"]
+            )
 
     def test_failed_timeout_unavailable_and_unparsable_passes_fail_closed(self):
         for status in ("failed", "timeout", "unavailable", "unparsable"):
@@ -108,12 +131,21 @@ class ReviewGateTest(unittest.TestCase):
             outside["writes"].append(path)
             self.assertIn(f"write outside review allowlist: {path}", self.errors(outside))
 
+        if os.path.realpath("/tmp") != "/private/tmp":
+            outside = deepcopy(self.record)
+            outside["writes"].append("/private/tmp/codex-review-5678")
+            self.assertIn(
+                "write outside review allowlist: /private/tmp/codex-review-5678",
+                self.errors(outside),
+            )
+
         bad_config = deepcopy(self.record)
         bad_config["config"]["telemetry"] = "community"
         self.assertIn("config telemetry must be 'off'", self.errors(bad_config))
 
     def test_findings_are_validated_dismissed_or_downgraded_before_action(self):
         true_finding = {
+            "raw_finding_id": "raw-true",
             "disposition": "validated",
             "reporter": "performance-reviewer",
             "validator": "validator-1",
@@ -126,6 +158,7 @@ class ReviewGateTest(unittest.TestCase):
             "blocking": True,
         }
         false_finding = {
+            "raw_finding_id": "raw-false",
             "disposition": "dismissed",
             "reporter": "security-reviewer",
             "validator": "validator-2",
@@ -134,6 +167,7 @@ class ReviewGateTest(unittest.TestCase):
             "validation_evidence": "static trace proves the lock covers both writes",
         }
         overstated = {
+            "raw_finding_id": "raw-overstated",
             "disposition": "downgraded",
             "reporter": "maintainability-reviewer",
             "validator": "validator-3",
@@ -147,30 +181,103 @@ class ReviewGateTest(unittest.TestCase):
         }
 
         record = deepcopy(self.record)
+        record["raw_findings"] = [{"id": "raw-false"}, {"id": "raw-overstated"}]
         record["findings"] = [false_finding, overstated]
         self.assertEqual([], self.errors(record))
 
         record["findings"].append(true_finding)
-        self.assertIn("validated blocking finding remains: lib/upload.ex:47", self.errors(record))
+        record["raw_findings"].append({"id": "raw-true"})
+        self.assertIn("audited blocking finding remains: lib/upload.ex:47", self.errors(record))
 
         true_finding["blocking"] = False
-        self.assertIn("validated blocking finding remains: lib/upload.ex:47", self.errors(record))
+        self.assertIn("audited blocking finding remains: lib/upload.ex:47", self.errors(record))
 
         invalid_severity = deepcopy(self.record)
         invalid_finding = deepcopy(overstated)
         invalid_finding["final_severity"] = "urgent"
+        invalid_severity["raw_findings"] = [{"id": "raw-overstated"}]
         invalid_severity["findings"] = [invalid_finding]
         self.assertIn("finding 1 has invalid final severity", self.errors(invalid_severity))
 
         raw = deepcopy(self.record)
-        raw["findings"] = [{"path": "lib/raw.ex", "line": 1}]
+        raw["raw_findings"] = [{"id": "raw-unclassified"}]
+        raw["findings"] = [
+            {"raw_finding_id": "raw-unclassified", "path": "lib/raw.ex", "line": 1}
+        ]
         self.assertIn("finding 1 has invalid disposition", self.errors(raw))
 
         biased = deepcopy(self.record)
         biased_finding = deepcopy(overstated)
         biased_finding["auditor"] = biased_finding["reporter"]
+        biased["raw_findings"] = [{"id": "raw-overstated"}]
         biased["findings"] = [biased_finding]
         self.assertIn("finding 1 lacks an independent severity auditor", self.errors(biased))
+
+        omitted = deepcopy(self.record)
+        omitted["raw_findings"] = [{"id": "raw-p1"}]
+        self.assertIn("every raw finding requires exactly one final disposition", self.errors(omitted))
+
+        empty_validator = deepcopy(self.record)
+        finding = deepcopy(false_finding)
+        finding["validator"] = ""
+        empty_validator["raw_findings"] = [{"id": "raw-false"}]
+        empty_validator["findings"] = [finding]
+        self.assertIn("finding 1 lacks an independent validator", self.errors(empty_validator))
+
+        still_p1 = deepcopy(self.record)
+        finding = deepcopy(overstated)
+        finding["final_severity"] = "P1"
+        still_p1["raw_findings"] = [{"id": "raw-overstated"}]
+        still_p1["findings"] = [finding]
+        self.assertIn("audited blocking finding remains: lib/state.ex:19", self.errors(still_p1))
+
+    def test_config_booleans_home_root_and_temp_cleanup_are_strict(self):
+        numeric = deepcopy(self.record)
+        numeric["config"]["checkpoint_push"] = 0
+        self.assertIn("config checkpoint_push must be False", self.errors(numeric))
+
+        old_home = os.environ.get("HOME")
+        try:
+            os.environ["HOME"] = "/etc"
+            self.assertFalse(self.gate._allowed_write("/etc/.gstack/run.json"))
+        finally:
+            if old_home is None:
+                os.environ.pop("HOME", None)
+            else:
+                os.environ["HOME"] = old_home
+
+        with tempfile.NamedTemporaryFile(prefix="codex-review-", dir="/tmp") as temp:
+            dirty = deepcopy(self.record)
+            dirty["writes"].append(temp.name)
+            self.assertIn(f"temporary review path was not cleaned: {temp.name}", self.errors(dirty))
+
+    def test_pr_identity_ci_and_feedback_snapshot_fail_closed(self):
+        pr = {
+            "url": self.record["pr_url"],
+            "headRefOid": self.head,
+            "baseRefName": "main",
+            "state": "OPEN",
+            "statusCheckRollup": [
+                {"name": "test", "status": "COMPLETED", "conclusion": "FAILURE"}
+            ],
+            "reviews": [],
+            "comments": [],
+        }
+        record = {**self.record, "pr_base_branch": "main"}
+        errors = []
+        self.gate._check_pr(pr, record, errors)
+        self.assertIn("PR check is not successful: test", errors)
+
+        changed = deepcopy(pr)
+        changed["comments"] = [{"id": "new-feedback", "body": "please fix"}]
+        self.assertNotEqual(
+            self.gate._feedback_digest(pr, []), self.gate._feedback_digest(changed, [])
+        )
+        wrong_url = deepcopy(pr)
+        wrong_url["url"] = "https://github.com/example/repo/pull/2"
+        errors = []
+        self.gate._check_pr(wrong_url, record, errors)
+        self.assertIn("canonical PR URL does not match review record", errors)
 
     def test_head_change_invalidates_the_old_verdict_until_every_pass_reruns(self):
         changed = deepcopy(self.record)
@@ -186,7 +293,7 @@ class ReviewGateTest(unittest.TestCase):
         rerun["passes"] = []
         self.assertIn("missing required pass: core-correctness", self.errors(rerun))
 
-    def test_cli_reads_the_real_git_head_and_invalidates_commit_a_after_commit_b(self):
+    def test_dev_5195_handoff_replay_and_head_change_require_a_fresh_clean_gate(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             repo = root / "repo"
@@ -218,12 +325,42 @@ class ReviewGateTest(unittest.TestCase):
             fake_bin = root / "bin"
             fake_bin.mkdir()
             fake_gh = fake_bin / "gh"
-            fake_gh.write_text("#!/bin/sh\nprintf '%s\\n' \"$GH_PR_HEAD\"\n")
+            fake_gh.write_text(
+                "#!/bin/sh\n"
+                "if [ \"$1 $2\" = \"pr list\" ]; then printf '%s\\n' \"$GH_PR_LIST\"; "
+                "elif [ \"$1 $2\" = \"pr view\" ]; then printf '%s\\n' \"$GH_PR_JSON\"; "
+                "elif [ \"$1\" = \"api\" ]; then printf '%s\\n' \"$GH_INLINE_JSON\"; fi\n"
+            )
             fake_gh.chmod(0o755)
-            env_a = {**os.environ, "PATH": f"{fake_bin}:{os.environ['PATH']}", "GH_PR_HEAD": head_a}
+            pr_url = self.record["pr_url"]
+
+            def github_env(head):
+                pr = {
+                    "url": pr_url,
+                    "headRefOid": head,
+                    "baseRefName": "main",
+                    "state": "OPEN",
+                    "statusCheckRollup": [
+                        {"name": "test", "status": "COMPLETED", "conclusion": "SUCCESS"}
+                    ],
+                    "reviews": [],
+                    "comments": [],
+                }
+                return {
+                    **os.environ,
+                    "PATH": f"{fake_bin}:{os.environ['PATH']}",
+                    "GH_PR_LIST": json.dumps(
+                        [{key: pr[key] for key in ("url", "headRefOid", "baseRefName", "state")}]
+                    ),
+                    "GH_PR_JSON": json.dumps(pr),
+                    "GH_INLINE_JSON": "[]",
+                }, self.gate._feedback_digest(pr, [])
+
+            env_a, feedback_a = github_env(head_a)
 
             record_a = deepcopy(self.record)
             record_a.update(review_base=base, review_head=head_a, current_head=head_a, pr_head=head_a)
+            record_a["pr_feedback_digest"] = feedback_a
             record_a["passes"] = [
                 {**item, "review_base": base, "review_head": head_a} for item in record_a["passes"]
             ]
@@ -237,60 +374,71 @@ class ReviewGateTest(unittest.TestCase):
                 text=True,
             )
             self.assertEqual(0, clean_a.returncode, clean_a.stdout)
+            self.assertEqual(
+                {"state": "Human Review", "artifacts": ["## Implementation"]},
+                self.replay_handoff(clean_a),
+            )
+            snapshot_a = subprocess.run(
+                [sys.executable, SCRIPT, "--snapshot", record_path],
+                cwd=repo,
+                env=env_a,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(feedback_a, json.loads(snapshot_a.stdout)["pr_feedback_digest"])
 
             (repo / "file.txt").write_text("head b\n")
             subprocess.run(["git", "commit", "-am", "head b"], cwd=repo, check=True, capture_output=True)
+            head_b = subprocess.run(
+                ["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True
+            ).stdout.strip()
             stale_a = subprocess.run(
                 [sys.executable, SCRIPT, record_path],
                 cwd=repo,
-                env=env_a,
+                env=github_env(head_b)[0],
                 capture_output=True,
                 text=True,
             )
             self.assertEqual(1, stale_a.returncode)
             self.assertIn("current HEAD does not match review HEAD", json.loads(stale_a.stdout)["errors"])
 
-            head_b = subprocess.run(
-                ["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True
-            ).stdout.strip()
             record_b = deepcopy(record_a)
             record_b.update(review_head=head_b, current_head=head_b, pr_head=head_b)
             record_b["passes"] = []
+            record_b["pr_feedback_digest"] = github_env(head_b)[1]
             record_path.write_text(json.dumps(record_b))
             incomplete_b = subprocess.run(
                 [sys.executable, SCRIPT, record_path],
                 cwd=repo,
-                env={**env_a, "GH_PR_HEAD": head_b},
+                env=github_env(head_b)[0],
                 capture_output=True,
                 text=True,
             )
             self.assertEqual(1, incomplete_b.returncode)
             self.assertIn("missing required pass: core-correctness", json.loads(incomplete_b.stdout)["errors"])
+            self.assertEqual(
+                {"state": "Implementation", "artifacts": []},
+                self.replay_handoff(incomplete_b),
+            )
 
             record_b["passes"] = [
                 {**item, "review_base": base, "review_head": head_b} for item in record_a["passes"]
             ]
+            record_b["pr_feedback_digest"] = github_env(head_b)[1]
             record_path.write_text(json.dumps(record_b))
             subprocess.run(["git", "push", "fork", "review"], cwd=repo, check=True, capture_output=True)
             clean_b = subprocess.run(
                 [sys.executable, SCRIPT, record_path],
                 cwd=repo,
-                env={**env_a, "GH_PR_HEAD": head_b},
+                env=github_env(head_b)[0],
                 capture_output=True,
                 text=True,
             )
             self.assertEqual(0, clean_b.returncode, clean_b.stdout)
-
-    def test_cli_exit_code_blocks_handoff_for_incomplete_review(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "record.json"
-            incomplete = deepcopy(self.record)
-            incomplete["passes"] = []
-            path.write_text(json.dumps(incomplete))
-            result = subprocess.run([sys.executable, SCRIPT, path], capture_output=True, text=True)
-
-        self.assertEqual(1, result.returncode)
-        self.assertEqual("non-clean", json.loads(result.stdout)["verdict"])
+            self.assertEqual(
+                {"state": "Human Review", "artifacts": ["## Implementation"]},
+                self.replay_handoff(clean_b),
+            )
 
     def test_grotto_resolves_the_same_gate_script(self):
         repo = Path(__file__).resolve().parents[5]

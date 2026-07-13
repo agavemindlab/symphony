@@ -56,7 +56,9 @@ not treat it as production work. The PR/CI line is optional: cite a prototype
 branch or an ADR/docs PR if one exists, else omit it. Exit to `Human Review` as
 usual; for a no-PR spike the human moves the issue straight to `Done`. The rest
 of this skill (PR feedback sweep, Merge-gated Deployment) applies only when the
-spike actually produced a PR worth landing.
+spike actually produced a PR worth landing. A no-PR spike skips only Push, PR
+feedback sweep, the pre-landing review gate, and their PR-specific exit checks;
+it still persists agent state and validates the investigation evidence.
 
 If the workpad (`.symphony/workpad.md`) does not exist, create it with the
 template from your workflow instructions. If this run is a rework of `## Implementation`
@@ -209,7 +211,9 @@ none substitutes for it.
    size or historical hit rate. Run API contract, migration, and design
    whenever the diff's content makes them applicable; record a concrete reason
    for each N/A. Force the selected matrix rather than accepting gstack's
-   `<50 lines` or adaptive hit-rate skips.
+   `<50 lines` or adaptive hit-rate skips. Record applicability first, run
+   `review_gate.py --plan .symphony/review-gate.json`, and dispatch every pass
+   it prints; diff size and adaptive hit rate are not executable-plan inputs.
 4. For every code diff, run Red Team, Claude adversarial, Codex adversarial,
    and Codex structured cross-model review. Each required pass records its
    dispatched/completed status and frozen range. A required pass that fails,
@@ -226,12 +230,16 @@ none substitutes for it.
    and reachability. Classify each raw finding as validated, downgraded, or
    dismissed with evidence. Only independently validated and severity-audited
    findings may trigger a fix or block the gate; a failed validation/audit stage
-   is non-clean.
+   is non-clean. Give every raw finding a stable `id`; every final finding names
+   exactly one `raw_finding_id`, including dismissed findings. Missing,
+   duplicate, or unmapped findings are non-clean.
 6. Any operation that changes `HEAD` or dirties the worktree invalidates the
    entire review run. Discard all old pass and finding verdicts, restore a clean
    committed tree, push the new commit, and rerun the full matrix. Before
    handoff, fetch PR feedback once more and require current `HEAD` and the PR
    head both equal `review_head`; new feedback or a mismatch restarts the loop.
+   Record every created `/tmp/codex-{adv,review}-*` path and remove it before
+   verification; a surviving path is non-clean.
 
 Write those inputs and results to `.symphony/review-gate.json`, including the
 config readback, audited write paths, applicability decisions, pass statuses
@@ -239,11 +247,17 @@ and ranges, finding dispositions/evidence, and the PR URL. Run:
 
 ```bash
 python3 "$SYMPHONY_WORKFLOW_DIR/skills/phase-implementation/scripts/review_gate.py" \
+  --snapshot .symphony/review-gate.json
+# Copy the emitted pr_feedback_digest into the record without changing HEAD.
+python3 "$SYMPHONY_WORKFLOW_DIR/skills/phase-implementation/scripts/review_gate.py" \
   .symphony/review-gate.json
 ```
 
-The verifier rereads the actual local HEAD, upstream merge-base, GitHub PR head,
-and worktree state. Its exit status 0 is the sole machine handoff predicate;
+The snapshot runs after the final PR feedback sweep. The verifier derives the
+unique open PR from the upstream repository, current branch, base branch, and
+exact HEAD; checks CI and the recorded feedback digest; then rereads local and
+PR HEAD, feedback, and worktree state immediately before verdict. Its exit
+status 0 is the sole machine handoff predicate;
 preserve its JSON output as review evidence. Any other exit is non-clean: leave
 the issue in Implementation without publishing the artifact or moving its state. This
 required-review failure is not eligible for the blocked-access Human Review

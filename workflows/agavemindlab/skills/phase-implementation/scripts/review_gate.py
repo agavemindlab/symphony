@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 """Fail-closed verifier for Symphony's exact-HEAD review record."""
 
+import hashlib
 import json
 import os
+import pwd
 import subprocess
 import sys
 from pathlib import Path
+from urllib.parse import urlparse
 
 
 ALWAYS_PASSES = (
@@ -40,24 +43,45 @@ def _under(path, root):
         return False
 
 
+def _trusted_home():
+    return os.path.realpath(pwd.getpwuid(os.getuid()).pw_dir)
+
+
+def _temp_review_path(path):
+    return os.path.dirname(path) == os.path.realpath("/tmp") and os.path.basename(path).startswith(
+        ("codex-adv-", "codex-review-")
+    )
+
+
 def _allowed_write(raw_path):
-    home = os.path.realpath(os.path.expanduser("~"))
+    home = _trusted_home()
     expanded = raw_path.replace("$HOME", home, 1) if raw_path.startswith("$HOME/") else raw_path
     path = os.path.realpath(expanded)
     gstack = os.path.join(home, ".gstack")
     codex_sessions = os.path.join(home, ".codex", "sessions")
     codex_index = os.path.join(home, ".codex", "session_index.jsonl")
-    tmp_parent = os.path.dirname(path)
-    tmp_name = os.path.basename(path)
     return (
         _under(path, gstack)
         or _under(path, codex_sessions)
         or path == codex_index
-        or (
-            tmp_parent in {os.path.realpath("/tmp"), "/private/tmp"}
-            and tmp_name.startswith(("codex-adv-", "codex-review-"))
-        )
+        or _temp_review_path(path)
     )
+
+
+def required_passes(record):
+    errors = []
+    expected = list(ALWAYS_PASSES)
+    applicability = record.get("applicability") or {}
+    for name in CONDITIONAL_PASSES:
+        decision = applicability.get(name) or {}
+        if decision.get("required") is True:
+            expected.append(name)
+        elif decision.get("required") is False:
+            if not decision.get("reason"):
+                errors.append(f"N/A pass {name} lacks a reason")
+        else:
+            errors.append(f"pass {name} lacks applicability decision")
+    return expected, errors
 
 
 def _validate_finding(finding, number, errors):
@@ -72,7 +96,8 @@ def _validate_finding(finding, number, errors):
         errors.append(f"finding {number} lacks file:line evidence")
     if not finding.get("validation_evidence"):
         errors.append(f"finding {number} lacks independent validation evidence")
-    if not finding.get("reporter") or finding.get("validator") in {None, finding.get("reporter")}:
+    validator = finding.get("validator")
+    if not finding.get("reporter") or not validator or validator == finding.get("reporter"):
         errors.append(f"finding {number} lacks an independent validator")
 
     if disposition in {"validated", "downgraded"}:
@@ -81,14 +106,40 @@ def _validate_finding(finding, number, errors):
             errors.append(f"finding {number} lacks independent severity audit")
         elif severity not in SEVERITIES:
             errors.append(f"finding {number} has invalid final severity")
-        if finding.get("auditor") in {
-            None,
-            finding.get("reporter"),
-            finding.get("validator"),
-        }:
+        auditor = finding.get("auditor")
+        if not auditor or auditor in {finding.get("reporter"), validator}:
             errors.append(f"finding {number} lacks an independent severity auditor")
-    if disposition == "validated" and finding.get("final_severity") in {"P0", "P1"}:
-        errors.append(f"validated blocking finding remains: {path}:{line}")
+    if disposition in {"validated", "downgraded"} and finding.get("final_severity") in {"P0", "P1"}:
+        errors.append(f"audited blocking finding remains: {path}:{line}")
+
+
+def _feedback_digest(pr, inline_comments):
+    evidence = {
+        "comments": pr.get("comments") or [],
+        "reviews": pr.get("reviews") or [],
+        "inline": inline_comments,
+    }
+    payload = json.dumps(evidence, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _check_pr(pr, record, errors):
+    if pr.get("url") != record.get("pr_url"):
+        errors.append("canonical PR URL does not match review record")
+    if pr.get("baseRefName") != record.get("pr_base_branch"):
+        errors.append("PR base branch does not match review record")
+    if pr.get("state") != "OPEN":
+        errors.append("PR is not open")
+    checks = pr.get("statusCheckRollup") or []
+    if not checks:
+        errors.append("PR status checks are empty")
+    for check in checks:
+        conclusion = check.get("conclusion") or check.get("state")
+        status = check.get("status")
+        if status and status != "COMPLETED":
+            errors.append(f"PR check is not complete: {check.get('name') or check.get('context')}")
+        if conclusion not in {"SUCCESS", "SKIPPED", "NEUTRAL"}:
+            errors.append(f"PR check is not successful: {check.get('name') or check.get('context')}")
 
 
 def evaluate(record):
@@ -109,7 +160,8 @@ def evaluate(record):
 
     config = record.get("config") or {}
     for name, expected in REQUIRED_CONFIG.items():
-        if config.get(name) != expected:
+        actual = config.get(name)
+        if type(actual) is not type(expected) or actual != expected:
             errors.append(f"config {name} must be {expected!r}")
 
     writes = record.get("writes") or []
@@ -118,18 +170,13 @@ def evaluate(record):
     for raw_path in writes:
         if not isinstance(raw_path, str) or not _allowed_write(raw_path):
             errors.append(f"write outside review allowlist: {raw_path}")
+        elif _temp_review_path(os.path.realpath(raw_path)) and os.path.lexists(
+            os.path.realpath(raw_path)
+        ):
+            errors.append(f"temporary review path was not cleaned: {raw_path}")
 
-    expected_passes = list(ALWAYS_PASSES)
-    applicability = record.get("applicability") or {}
-    for name in CONDITIONAL_PASSES:
-        decision = applicability.get(name) or {}
-        if decision.get("required") is True:
-            expected_passes.append(name)
-        elif decision.get("required") is False:
-            if not decision.get("reason"):
-                errors.append(f"N/A pass {name} lacks a reason")
-        else:
-            errors.append(f"pass {name} lacks applicability decision")
+    expected_passes, plan_errors = required_passes(record)
+    errors.extend(plan_errors)
 
     passes = {}
     for item in record.get("passes") or []:
@@ -151,51 +198,137 @@ def evaluate(record):
         if item.get("review_base") != base or item.get("review_head") != head:
             errors.append(f"required pass {name} reviewed a different range")
 
-    for number, finding in enumerate(record.get("findings") or [], start=1):
+    raw_findings = record.get("raw_findings") or []
+    raw_ids = [finding.get("id") for finding in raw_findings]
+    final_findings = record.get("findings") or []
+    final_ids = [finding.get("raw_finding_id") for finding in final_findings]
+    if any(not finding_id for finding_id in raw_ids) or len(raw_ids) != len(set(raw_ids)):
+        errors.append("raw findings require unique non-empty ids")
+    if any(not finding_id for finding_id in final_ids) or len(final_ids) != len(set(final_ids)):
+        errors.append("final findings require unique raw_finding_id values")
+    if set(raw_ids) != set(final_ids):
+        errors.append("every raw finding requires exactly one final disposition")
+    for number, finding in enumerate(final_findings, start=1):
         _validate_finding(finding, number, errors)
     return errors
 
 
-def main(argv):
-    if len(argv) != 2:
-        print("usage: review_gate.py RECORD.json", file=sys.stderr)
-        return 2
-    try:
-        record = json.loads(Path(argv[1]).read_text())
-        head = subprocess.run(
-            ["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=True
-        ).stdout.strip()
-        base_ref = f"upstream/{os.environ.get('SYMPHONY_BASE_BRANCH', 'main')}"
-        actual_base = subprocess.run(
-            ["git", "merge-base", base_ref, head], capture_output=True, text=True, check=True
-        ).stdout.strip()
-        remote_head = subprocess.run(
+def _run(command):
+    return subprocess.run(command, capture_output=True, text=True, check=True).stdout.strip()
+
+
+def _repo_slug(remote):
+    path = remote.split(":", 1)[1] if remote.startswith("git@") else urlparse(remote).path
+    parts = path.removesuffix(".git").strip("/").split("/")
+    if len(parts) < 2:
+        raise ValueError(f"cannot derive GitHub repository from upstream remote: {remote}")
+    return "/".join(parts[-2:])
+
+
+def _github_snapshot(record, base_branch, head, branch):
+    repo = _repo_slug(_run(["git", "remote", "get-url", "upstream"]))
+    candidates = json.loads(
+        _run(
+            [
+                "gh",
+                "pr",
+                "list",
+                "--repo",
+                repo,
+                "--state",
+                "open",
+                "--head",
+                branch,
+                "--base",
+                base_branch,
+                "--json",
+                "url,headRefOid,baseRefName,state",
+                "--limit",
+                "100",
+            ]
+        )
+        or "[]"
+    )
+    candidates = [item for item in candidates if item.get("headRefOid") == head]
+    if len(candidates) != 1:
+        raise ValueError(f"expected one canonical open PR for {branch}@{head}, found {len(candidates)}")
+    canonical = candidates[0]
+    if canonical.get("url") != record.get("pr_url"):
+        raise ValueError("record PR URL is not the canonical branch PR")
+    pr = json.loads(
+        _run(
             [
                 "gh",
                 "pr",
                 "view",
-                record["pr_url"],
+                canonical["url"],
                 "--json",
-                "headRefOid",
-                "--jq",
-                ".headRefOid",
-            ],
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout.strip()
-        status = subprocess.run(
-            ["git", "status", "--porcelain"], capture_output=True, text=True, check=True
-        ).stdout
-        record["current_head"] = head
-        record["pr_head"] = remote_head or None
-        record["worktree_clean"] = status == ""
-        if record.get("review_base") != actual_base:
-            record.setdefault("runtime_errors", []).append(
-                f"review base does not match merge-base of {base_ref}"
+                "headRefOid,baseRefName,state,url,statusCheckRollup,reviews,comments",
+            ]
+        )
+    )
+    inline = json.loads(
+        _run(["gh", "api", f"repos/{repo}/pulls/{canonical['url'].rsplit('/', 1)[-1]}/comments"])
+        or "[]"
+    )
+    return pr, _feedback_digest(pr, inline)
+
+
+def main(argv):
+    if len(argv) not in {2, 3} or (len(argv) == 3 and argv[1] not in {"--plan", "--snapshot"}):
+        print("usage: review_gate.py [--plan|--snapshot] RECORD.json", file=sys.stderr)
+        return 2
+    try:
+        record = json.loads(Path(argv[-1]).read_text())
+        if len(argv) == 3 and argv[1] == "--plan":
+            passes, errors = required_passes(record)
+            print(json.dumps({"passes": passes, "errors": errors}, indent=2, sort_keys=True))
+            return 0 if not errors else 1
+        trusted_home = _trusted_home()
+        if os.path.realpath(os.environ.get("HOME", "")) != trusted_home:
+            raise ValueError("HOME does not match the current OS account")
+        head = _run(["git", "rev-parse", "HEAD"])
+        base_branch = os.environ.get("SYMPHONY_BASE_BRANCH", "main")
+        base_ref = f"upstream/{base_branch}"
+        actual_base = _run(["git", "merge-base", base_ref, head])
+        branch = _run(["git", "branch", "--show-current"])
+        pr, feedback_digest = _github_snapshot(record, base_branch, head, branch)
+        if len(argv) == 3:
+            print(
+                json.dumps(
+                    {
+                        "pr_feedback_digest": feedback_digest,
+                        "pr_head": pr.get("headRefOid"),
+                        "pr_url": pr.get("url"),
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
             )
+            return 0
+        status = _run(["git", "status", "--porcelain"])
+        record["current_head"] = head
+        record["pr_head"] = pr.get("headRefOid")
+        record["pr_base_branch"] = base_branch
+        record["worktree_clean"] = status == ""
+        runtime_errors = list(record.get("runtime_errors") or [])
+        record["runtime_errors"] = runtime_errors
+        if record.get("review_base") != actual_base:
+            runtime_errors.append(f"review base does not match merge-base of {base_ref}")
+        _check_pr(pr, record, runtime_errors)
+        if record.get("pr_feedback_digest") != feedback_digest:
+            runtime_errors.append("PR feedback snapshot changed or was not recorded")
+        final_head = _run(["git", "rev-parse", "HEAD"])
+        final_pr, final_feedback_digest = _github_snapshot(record, base_branch, final_head, branch)
+        final_status = _run(["git", "status", "--porcelain"])
+        if final_head != head or final_pr.get("headRefOid") != pr.get("headRefOid"):
+            runtime_errors.append("HEAD or PR head changed during gate verification")
+        if final_feedback_digest != feedback_digest:
+            runtime_errors.append("PR feedback changed during gate verification")
+        if final_status:
+            runtime_errors.append("worktree changed during gate verification")
         errors = evaluate(record)
-    except (OSError, ValueError, TypeError, subprocess.SubprocessError) as exc:
+    except (KeyError, OSError, ValueError, TypeError, subprocess.SubprocessError) as exc:
         errors = [f"invalid review record: {exc}"]
         record = {}
     print(

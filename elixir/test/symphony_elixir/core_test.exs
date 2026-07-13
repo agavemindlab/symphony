@@ -600,7 +600,10 @@ defmodule SymphonyElixir.CoreTest do
     end
 
     assert implementation =~ "scripts/review_gate.py"
-    assert implementation =~ "exit status 0 is the sole machine handoff predicate"
+    assert implementation =~ "review_gate.py --plan"
+    assert implementation =~ "--snapshot .symphony/review-gate.json"
+    assert implementation =~ "A no-PR spike skips only Push"
+    assert implementation =~ "sole machine handoff predicate"
     assert implementation =~ ".symphony/review-gate.json"
     refute implementation =~ "repeat until clean or explicitly recorded in `风险/注意`"
 
