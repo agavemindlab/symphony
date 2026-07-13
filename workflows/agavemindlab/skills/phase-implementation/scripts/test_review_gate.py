@@ -279,6 +279,7 @@ class ReviewGateTest(unittest.TestCase):
             "url": self.record["pr_url"],
             "headRefOid": self.head,
             "baseRefName": "main",
+            "baseRefOid": self.base,
             "state": "OPEN",
             "reviewDecision": "CHANGES_REQUESTED",
             "statusCheckRollup": [
@@ -429,6 +430,11 @@ class ReviewGateTest(unittest.TestCase):
                 check=True,
             )
             subprocess.run(["git", "remote", "add", "origin", upstream], cwd=repo, check=True)
+            subprocess.run(
+                ["git", "remote", "set-url", "origin", "https://github.com/example/repo.git"],
+                cwd=repo,
+                check=True,
+            )
             fork = root / "fork.git"
             subprocess.run(["git", "init", "--bare", fork], check=True, capture_output=True)
             subprocess.run(["git", "remote", "add", "fork", fork], cwd=repo, check=True)
@@ -456,6 +462,7 @@ class ReviewGateTest(unittest.TestCase):
                     "url": pr_url,
                     "headRefOid": head,
                     "baseRefName": "main",
+                    "baseRefOid": base,
                     "state": "OPEN",
                     "reviewDecision": "APPROVED",
                     "statusCheckRollup": [

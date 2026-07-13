@@ -186,6 +186,8 @@ def _check_pr(pr, record, errors):
         errors.append("canonical PR URL does not match review record")
     if pr.get("baseRefName") != record.get("pr_base_branch"):
         errors.append("PR base branch does not match review record")
+    if pr.get("baseRefOid") != record.get("review_base"):
+        errors.append("PR base commit does not match review base")
     if pr.get("state") != "OPEN":
         errors.append("PR is not open")
     change_request_authors = _change_request_authors(pr)
@@ -305,11 +307,29 @@ def _pr_identity(pr_url):
     return parsed.hostname.lower(), "/".join(parts[:2]), parts[3]
 
 
+def _remote_identity(remote):
+    if remote.startswith("git@"):
+        authority, path = remote.split(":", 1)
+        host = authority.split("@", 1)[1]
+    else:
+        parsed = urlparse(remote)
+        host, path = parsed.hostname, parsed.path
+    parts = path.removesuffix(".git").strip("/").split("/")
+    return (host.lower(), "/".join(parts[-2:])) if host and len(parts) >= 2 else None
+
+
 def _github_snapshot(record):
     pr_url = record.get("pr_url")
     if not _text(pr_url):
         raise ValueError("review record lacks canonical PR URL")
     host, repo, pr_number = _pr_identity(pr_url)
+    allowed_targets = {
+        identity
+        for remote in ("origin", "upstream")
+        if (identity := _remote_identity(_run(["git", "remote", "get-url", remote])))
+    }
+    if (host, repo) not in allowed_targets:
+        raise ValueError("canonical PR URL does not match origin or upstream")
     pr = json.loads(
         _run(
             [
@@ -320,7 +340,7 @@ def _github_snapshot(record):
                 "--repo",
                 f"{host}/{repo}",
                 "--json",
-                "headRefOid,baseRefName,state,url,reviewDecision,statusCheckRollup,reviews,comments",
+                "headRefOid,baseRefName,baseRefOid,state,url,reviewDecision,statusCheckRollup,reviews,comments",
             ]
         )
     )
