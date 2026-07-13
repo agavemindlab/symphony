@@ -279,6 +279,22 @@ class ReviewGateTest(unittest.TestCase):
         self.gate._check_pr(wrong_url, record, errors)
         self.assertIn("canonical PR URL does not match review record", errors)
 
+        final_errors = []
+        self.gate._check_final_snapshot(
+            pr,
+            {**pr, "statusCheckRollup": [{"name": "test", "status": "IN_PROGRESS"}]},
+            "same-digest",
+            "same-digest",
+            record,
+            final_errors,
+        )
+        self.assertIn("PR check is not complete: test", final_errors)
+
+        self.assertEqual(
+            [{"id": 1}, {"id": 2}],
+            self.gate._flatten_pages([[{"id": 1}], [{"id": 2}]]),
+        )
+
     def test_head_change_invalidates_the_old_verdict_until_every_pass_reruns(self):
         changed = deepcopy(self.record)
         changed["current_head"] = "c" * 40

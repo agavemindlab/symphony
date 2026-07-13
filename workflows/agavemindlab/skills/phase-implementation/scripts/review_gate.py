@@ -142,6 +142,18 @@ def _check_pr(pr, record, errors):
             errors.append(f"PR check is not successful: {check.get('name') or check.get('context')}")
 
 
+def _check_final_snapshot(pr, final_pr, feedback_digest, final_feedback_digest, record, errors):
+    _check_pr(final_pr, record, errors)
+    if final_pr.get("headRefOid") != pr.get("headRefOid"):
+        errors.append("PR head changed during gate verification")
+    if final_feedback_digest != feedback_digest:
+        errors.append("PR feedback changed during gate verification")
+
+
+def _flatten_pages(value):
+    return [item for page in value for item in page] if value and isinstance(value[0], list) else value
+
+
 def evaluate(record):
     errors = list(record.get("runtime_errors") or [])
     base = record.get("review_base")
@@ -267,9 +279,19 @@ def _github_snapshot(record, base_branch, head, branch):
             ]
         )
     )
-    inline = json.loads(
-        _run(["gh", "api", f"repos/{repo}/pulls/{canonical['url'].rsplit('/', 1)[-1]}/comments"])
-        or "[]"
+    inline = _flatten_pages(
+        json.loads(
+            _run(
+                [
+                    "gh",
+                    "api",
+                    "--paginate",
+                    "--slurp",
+                    f"repos/{repo}/pulls/{canonical['url'].rsplit('/', 1)[-1]}/comments",
+                ]
+            )
+            or "[]"
+        )
     )
     return pr, _feedback_digest(pr, inline)
 
@@ -321,10 +343,11 @@ def main(argv):
         final_head = _run(["git", "rev-parse", "HEAD"])
         final_pr, final_feedback_digest = _github_snapshot(record, base_branch, final_head, branch)
         final_status = _run(["git", "status", "--porcelain"])
-        if final_head != head or final_pr.get("headRefOid") != pr.get("headRefOid"):
-            runtime_errors.append("HEAD or PR head changed during gate verification")
-        if final_feedback_digest != feedback_digest:
-            runtime_errors.append("PR feedback changed during gate verification")
+        if final_head != head:
+            runtime_errors.append("local HEAD changed during gate verification")
+        _check_final_snapshot(
+            pr, final_pr, feedback_digest, final_feedback_digest, record, runtime_errors
+        )
         if final_status:
             runtime_errors.append("worktree changed during gate verification")
         errors = evaluate(record)
