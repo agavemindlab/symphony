@@ -580,7 +580,7 @@ def _review_one(name, record, paths):
             input=prompt,
             capture_output=True,
             text=True,
-            timeout=300,
+            timeout=600,
             cwd=paths["temp_root"],
             env=_review_env(
                 paths["home"],

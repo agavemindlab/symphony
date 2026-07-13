@@ -219,10 +219,11 @@ none substitutes for it.
    dispatched/completed status and frozen range. A required pass that fails,
    times out, is unavailable, or produces unparsable output makes the run
    non-clean; best-effort continuation is not a pass.
-   Enforce a 300000 ms per-pass deadline and one gate attempt per unchanged
-   `review_head` per phase turn. Persist a timeout/unavailability failure and
-   end that turn without retrying it. A later dispatch may make one fresh
-   attempt for the same HEAD after rechecking tool availability.
+   Enforce a 600000 ms deadline for Claude adversarial and 300000 ms for every
+   other pass, plus one gate attempt per unchanged `review_head` per phase
+   turn. Persist a timeout/unavailability failure and end that turn without
+   retrying it. A later dispatch may make one fresh attempt for the same HEAD
+   after rechecking tool availability.
 5. Do not enter native Fix-First on raw findings. The fresh validation context
    must be independent of the reporting reviewer, quote the motivating
    `file:line`, and reproduce the behavior with a focused test or static trace.

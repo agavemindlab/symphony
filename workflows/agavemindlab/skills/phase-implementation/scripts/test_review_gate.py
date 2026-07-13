@@ -395,7 +395,16 @@ class ReviewGateTest(unittest.TestCase):
             self.assertNotIn("--bare", command)
             self.assertNotIn("--effort", command)
             self.assertEqual("", command[command.index("--tools") + 1])
+            self.assertEqual(600, run.call_args.kwargs["timeout"])
             self.assertEqual(temp, run.call_args.kwargs["cwd"])
+
+    def test_outer_deadline_covers_the_bounded_producer_budget(self):
+        completed = subprocess.CompletedProcess([], 0, "{}", "")
+        with mock.patch.object(
+            self.gate.subprocess, "run", return_value=completed
+        ) as run:
+            self.gate._fixed_producer(Path("record.json"))
+        self.assertEqual(2000, run.call_args.kwargs["timeout"])
 
     def test_each_pass_binds_a_trusted_gstack_checklist(self):
         producer = load_producer()

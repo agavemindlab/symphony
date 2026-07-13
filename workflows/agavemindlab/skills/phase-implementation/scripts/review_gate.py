@@ -267,7 +267,7 @@ def _fixed_producer(record_path):
         [sys.executable, PRODUCER, record_path],
         capture_output=True,
         text=True,
-        timeout=1600,
+        timeout=2000,
         env=env,
     )
     if result.returncode != 0:
