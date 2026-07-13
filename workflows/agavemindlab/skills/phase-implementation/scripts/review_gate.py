@@ -8,6 +8,7 @@ import pwd
 import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -101,7 +102,7 @@ def _allowed_write(raw_path):
         return _under(os.path.realpath(path), codex_sessions)
     return (
         _under(os.path.realpath(path), gstack)
-        or path == codex_index
+        or (path == codex_index and not os.path.islink(path))
         or _temp_review_path(path)
     )
 
@@ -130,10 +131,26 @@ def _trusted_tool(name):
 def _safe_write(path, content):
     if path.is_symlink():
         raise ValueError(f"refusing to write symlinked review evidence: {path}")
-    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0)
+    descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    try:
+        os.fchmod(descriptor, 0o600)
+        with os.fdopen(descriptor, "w") as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def _exclusive_write(path, content):
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
     descriptor = os.open(path, flags, 0o600)
     with os.fdopen(descriptor, "w") as handle:
         handle.write(content)
+        handle.flush()
+        os.fsync(handle.fileno())
 
 
 def _workspace_record(record_path):
@@ -189,7 +206,10 @@ def _load_receipt(record, record_path):
         or _sha256(path) != expected_sha
     ):
         raise ValueError("evidence receipt sha256 mismatch")
-    return json.loads(path.read_text())
+    receipt = json.loads(path.read_text())
+    if not isinstance(receipt, dict):
+        raise ValueError("evidence receipt must be a JSON object")
+    return receipt
 
 
 def _receipt_errors(record, record_path):
@@ -204,6 +224,19 @@ def _receipt_errors(record, record_path):
         "review_head"
     ) != record.get("review_head"):
         errors.append("evidence receipt reviewed a different range")
+    inputs = {
+        name: record.get(name)
+        for name in (
+            "issue_identifier",
+            "pr_url",
+            "pr_base_branch",
+            "diff_kind",
+            "diff_size",
+            "applicability",
+        )
+    }
+    if receipt.get("inputs") != inputs:
+        errors.append("evidence receipt inputs do not match the review record")
     producer = receipt.get("producer") or {}
     if (
         producer.get("kind") != "fixed-review-producer"
@@ -275,6 +308,81 @@ def _fixed_producer(record_path):
     return json.loads(result.stdout), result.stdout
 
 
+def _reserve_attempt(record_path, head):
+    turn = os.environ.get("CODEX_THREAD_ID")
+    if not _text(turn):
+        raise ValueError("capture requires CODEX_THREAD_ID for attempt isolation")
+    root = record_path.parent / "review-evidence" / head / "attempts"
+    if record_path.parent.is_symlink() or any(
+        path.is_symlink() for path in (root.parent.parent, root.parent)
+    ):
+        raise ValueError("review attempt path may not traverse symlinks")
+    root.mkdir(parents=True, exist_ok=True)
+    if root.is_symlink():
+        raise ValueError("review attempt path may not traverse symlinks")
+    for existing in root.glob("*.json"):
+        try:
+            attempt = json.loads(existing.read_text())
+        except (OSError, TypeError, json.JSONDecodeError):
+            raise ValueError("review attempt marker is invalid") from None
+        if (
+            not isinstance(attempt, dict)
+            or attempt.get("review_head") != head
+            or attempt.get("status") not in {"started", "failed", "completed"}
+            or not _text(attempt.get("turn"))
+        ):
+            raise ValueError("review attempt marker is invalid")
+        if attempt["status"] == "completed":
+            raise ValueError("review HEAD already has a completed capture")
+    path = root / f"{hashlib.sha256(turn.encode()).hexdigest()}.json"
+    try:
+        _exclusive_write(
+            path,
+            json.dumps(
+                {"review_head": head, "status": "started", "turn": turn},
+                sort_keys=True,
+            )
+            + "\n",
+        )
+    except FileExistsError:
+        raise ValueError(
+            "review HEAD was already attempted in this phase turn"
+        ) from None
+    return path
+
+
+def _finish_attempt(path, head, status, error=None):
+    payload = {
+        "review_head": head,
+        "status": status,
+        "turn": os.environ["CODEX_THREAD_ID"],
+    }
+    if error:
+        payload["error"] = str(error)[:500]
+    _safe_write(path, json.dumps(payload, sort_keys=True) + "\n")
+
+
+def _fail_current_attempt(record_path, error):
+    record_path = _workspace_record(record_path)
+    record = json.loads(record_path.read_text())
+    head = record.get("review_head")
+    turn = os.environ.get("CODEX_THREAD_ID")
+    if not _text(head) or not _text(turn):
+        return
+    path = (
+        record_path.parent
+        / "review-evidence"
+        / head
+        / "attempts"
+        / f"{hashlib.sha256(turn.encode()).hexdigest()}.json"
+    )
+    if not path.is_file() or path.is_symlink():
+        return
+    attempt = json.loads(path.read_text())
+    if isinstance(attempt, dict) and attempt.get("status") == "started":
+        _finish_attempt(path, head, "failed", error)
+
+
 def _capture(record_path):
     record_path = _workspace_record(record_path)
     record = json.loads(record_path.read_text())
@@ -289,7 +397,12 @@ def _capture(record_path):
         )
     if _run(["git", "status", "--porcelain"]):
         raise ValueError("capture requires a clean worktree")
-    output, raw_output = _fixed_producer(record_path)
+    attempt_path = _reserve_attempt(record_path, head)
+    try:
+        output, raw_output = _fixed_producer(record_path)
+    except (OSError, ValueError, TypeError, subprocess.SubprocessError) as exc:
+        _finish_attempt(attempt_path, head, "failed", exc)
+        raise
     producer = output.get("producer") or {}
     if producer.get("kind") != "fixed-review-producer" or producer.get(
         "sha256"
@@ -305,6 +418,17 @@ def _capture(record_path):
         "schema": 1,
         "review_base": base,
         "review_head": head,
+        "inputs": {
+            name: record.get(name)
+            for name in (
+                "issue_identifier",
+                "pr_url",
+                "pr_base_branch",
+                "diff_kind",
+                "diff_size",
+                "applicability",
+            )
+        },
         "producer": producer,
         "write_policy": list(WRITE_POLICY),
         **{
@@ -355,6 +479,13 @@ def _capture(record_path):
         "sha256": _sha256(receipt_path),
     }
     _safe_write(record_path, json.dumps(record, indent=2, sort_keys=True) + "\n")
+    attempt_status = (
+        "completed"
+        if not receipt["runtime_errors"]
+        and all(item.get("status") == "completed" for item in receipt["passes"])
+        else "failed"
+    )
+    _finish_attempt(attempt_path, head, attempt_status)
     return receipt
 
 
@@ -597,6 +728,9 @@ def evaluate(record):
             errors.append(f"duplicate pass: {name}")
         passes[name] = item
 
+    if set(passes) != set(expected_passes):
+        errors.append("actual review passes do not exactly match the required plan")
+
     for name in expected_passes:
         item = passes.get(name)
         if item is None:
@@ -665,7 +799,7 @@ def _run(command):
             if os.environ.get(variable):
                 env[variable] = os.environ[variable]
     return subprocess.run(
-        command, capture_output=True, text=True, check=True, env=env
+        command, capture_output=True, text=True, check=True, timeout=60, env=env
     ).stdout.strip()
 
 
@@ -752,6 +886,10 @@ def main(argv):
             json.JSONDecodeError,
             subprocess.SubprocessError,
         ) as exc:
+            try:
+                _fail_current_attempt(Path(argv[2]), exc)
+            except (OSError, ValueError, TypeError, json.JSONDecodeError):
+                pass
             print(json.dumps({"verdict": "non-clean", "errors": [str(exc)]}, indent=2))
             return 1
         print(
@@ -824,10 +962,11 @@ def main(argv):
         status = _run(["git", "status", "--porcelain"])
         record["current_head"] = head
         record["pr_head"] = pr.get("headRefOid")
-        record["pr_base_branch"] = base_branch
         record["worktree_clean"] = status == ""
         runtime_errors = list(record.get("runtime_errors") or [])
         record["runtime_errors"] = runtime_errors
+        if record.get("pr_base_branch") != base_branch:
+            runtime_errors.append("recorded PR base branch changed before final gate")
         if record.get("review_base") != actual_base:
             runtime_errors.append(
                 f"review base does not match merge-base of {base_ref}"

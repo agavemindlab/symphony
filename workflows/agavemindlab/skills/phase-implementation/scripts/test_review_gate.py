@@ -43,6 +43,7 @@ class ReviewGateTest(unittest.TestCase):
             "current_head": self.head,
             "pr_head": self.head,
             "pr_url": "https://github.com/example/repo/pull/1",
+            "pr_base_branch": "main",
             "pr_feedback_digest": "f" * 64,
             "worktree_clean": True,
             "diff_kind": "code",
@@ -146,6 +147,17 @@ class ReviewGateTest(unittest.TestCase):
                 "schema": 1,
                 "review_base": self.base,
                 "review_head": self.head,
+                "inputs": {
+                    name: record.get(name)
+                    for name in (
+                        "issue_identifier",
+                        "pr_url",
+                        "pr_base_branch",
+                        "diff_kind",
+                        "diff_size",
+                        "applicability",
+                    )
+                },
                 "producer": {
                     "kind": "fixed-review-producer",
                     "sha256": hashlib.sha256(
@@ -172,6 +184,13 @@ class ReviewGateTest(unittest.TestCase):
             write_receipt(receipt)
             self.assertEqual([], self.gate._receipt_errors(record, record_path))
 
+            record["pr_url"] = "https://github.com/example/repo/pull/2"
+            self.assertIn(
+                "evidence receipt inputs do not match the review record",
+                self.gate._receipt_errors(record, record_path),
+            )
+            record["pr_url"] = "https://github.com/example/repo/pull/1"
+
             stale = {**receipt, "review_head": "c" * 40}
             write_receipt(stale)
             self.assertIn(
@@ -183,6 +202,15 @@ class ReviewGateTest(unittest.TestCase):
             receipt_path.write_text("tampered")
             self.assertIn(
                 "evidence receipt sha256 mismatch",
+                self.gate._receipt_errors(record, record_path),
+            )
+
+            receipt_path.write_text("[]")
+            record["evidence_receipt"]["sha256"] = hashlib.sha256(
+                receipt_path.read_bytes()
+            ).hexdigest()
+            self.assertIn(
+                "evidence receipt must be a JSON object",
                 self.gate._receipt_errors(record, record_path),
             )
 
@@ -286,6 +314,7 @@ class ReviewGateTest(unittest.TestCase):
         self.assertNotIn("security:1", run.call_args_list[1].args[1])
         self.assertIn("<frozen-diff>", run.call_args_list[0].args[1])
         self.assertIn("dangerous()", run.call_args_list[0].args[1])
+        self.assertIn("approved trust boundary", run.call_args_list[0].args[1])
         self.assertNotEqual(findings[1]["reporter"], findings[1]["validator"])
         self.assertNotEqual(findings[1]["validator"], findings[1]["auditor"])
 
@@ -340,7 +369,7 @@ class ReviewGateTest(unittest.TestCase):
                     producer.subprocess, "run", side_effect=completed
                 ) as run,
             ):
-                result, _ = producer._codex_json(
+                result, provenance = producer._codex_json(
                     "security", "literal diff", producer.RESULT_SCHEMA, record, paths
                 )
             command = run.call_args.args[0]
@@ -351,6 +380,22 @@ class ReviewGateTest(unittest.TestCase):
             self.assertIn("shell_tool", command)
             self.assertIn("unified_exec", command)
             self.assertNotIn("--dangerously-bypass-approvals-and-sandbox", command)
+            json.dumps(provenance)
+            with (
+                mock.patch.object(
+                    producer, "_codex_home", return_value=root / "managed"
+                ),
+                mock.patch.object(
+                    producer.subprocess,
+                    "run",
+                    side_effect=subprocess.TimeoutExpired(command, 300),
+                ),
+            ):
+                result, provenance = producer._codex_json(
+                    "security", "literal diff", producer.RESULT_SCHEMA, record, paths
+                )
+            self.assertIsNone(result)
+            self.assertEqual("timeout", provenance["failure_status"])
 
     def test_claude_reviewer_keeps_oauth_but_disables_project_customizations(self):
         producer = load_producer()
@@ -397,6 +442,17 @@ class ReviewGateTest(unittest.TestCase):
             self.assertEqual("", command[command.index("--tools") + 1])
             self.assertEqual(600, run.call_args.kwargs["timeout"])
             self.assertEqual(temp, run.call_args.kwargs["cwd"])
+            json.dumps(result)
+
+            with mock.patch.object(
+                producer.subprocess,
+                "run",
+                side_effect=subprocess.TimeoutExpired(command, 600),
+            ):
+                timed_out = producer._review_one("claude-adversarial", record, paths)
+            self.assertEqual("timeout", timed_out["status"])
+            self.assertEqual(self.head, timed_out["review_head"])
+            self.assertEqual("timeout", timed_out["provenance"]["failure_status"])
 
     def test_outer_deadline_covers_the_bounded_producer_budget(self):
         completed = subprocess.CompletedProcess([], 0, "{}", "")
@@ -405,6 +461,60 @@ class ReviewGateTest(unittest.TestCase):
         ) as run:
             self.gate._fixed_producer(Path("record.json"))
         self.assertEqual(2000, run.call_args.kwargs["timeout"])
+        with (
+            mock.patch.object(self.gate, "_trusted_tool", return_value="/usr/bin/git"),
+            mock.patch.object(
+                self.gate.subprocess, "run", return_value=completed
+            ) as run,
+        ):
+            self.gate._run(["git", "status", "--porcelain"])
+        self.assertEqual(60, run.call_args.kwargs["timeout"])
+
+    def test_attempt_markers_and_atomic_writes_prevent_same_turn_rerolls(self):
+        producer = load_producer()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            record_path = root / "review-gate.json"
+            record_path.write_text("{}")
+            with mock.patch.dict(os.environ, {"CODEX_THREAD_ID": "turn-a"}):
+                marker = self.gate._reserve_attempt(record_path, self.head)
+                with self.assertRaisesRegex(ValueError, "already attempted"):
+                    self.gate._reserve_attempt(record_path, self.head)
+            self.assertEqual("started", json.loads(marker.read_text())["status"])
+            with mock.patch.dict(os.environ, {"CODEX_THREAD_ID": "turn-a"}):
+                self.gate._finish_attempt(marker, self.head, "failed", "review timeout")
+            self.assertEqual("failed", json.loads(marker.read_text())["status"])
+            self.assertIn("review timeout", json.loads(marker.read_text())["error"])
+            other_head = "c" * 40
+            record_path.write_text(json.dumps({"review_head": other_head}))
+            with (
+                mock.patch.dict(os.environ, {"CODEX_THREAD_ID": "turn-c"}),
+                mock.patch.object(
+                    self.gate, "_workspace_record", return_value=record_path
+                ),
+            ):
+                other = self.gate._reserve_attempt(record_path, other_head)
+                self.gate._fail_current_attempt(record_path, "post-review failure")
+            self.assertEqual("failed", json.loads(other.read_text())["status"])
+            marker.write_text(
+                json.dumps(
+                    {"review_head": self.head, "status": "completed", "turn": "turn-a"}
+                )
+            )
+            with (
+                mock.patch.dict(os.environ, {"CODEX_THREAD_ID": "turn-b"}),
+                self.assertRaisesRegex(ValueError, "completed capture"),
+            ):
+                self.gate._reserve_attempt(record_path, self.head)
+
+            for module in (self.gate, producer):
+                outside = root / f"outside-{module.__name__}"
+                target = root / f"target-{module.__name__}"
+                outside.write_text("preserve")
+                os.link(outside, target)
+                module._safe_write(target, "evidence")
+                self.assertEqual("preserve", outside.read_text())
+                self.assertEqual("evidence", target.read_text())
 
     def test_each_pass_binds_a_trusted_gstack_checklist(self):
         producer = load_producer()
@@ -553,6 +663,13 @@ class ReviewGateTest(unittest.TestCase):
                 for item in record["passes"]
             ]
             self.assertIn(f"required pass red-team is {status}", self.errors(record))
+
+        extra = deepcopy(self.record)
+        extra["passes"].append(self.pass_record("migration"))
+        self.assertIn(
+            "actual review passes do not exactly match the required plan",
+            self.errors(extra),
+        )
 
     def test_real_home_write_allowlist_and_fixed_config_are_fail_closed(self):
         self.assertEqual([], self.errors())
@@ -736,6 +853,16 @@ class ReviewGateTest(unittest.TestCase):
                 f"temporary review path was not cleaned: {temp.name}",
                 self.errors(dirty),
             )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            (home / ".codex").mkdir()
+            outside = home / "outside-index"
+            outside.write_text("preserve")
+            index = home / ".codex" / "session_index.jsonl"
+            index.symlink_to(outside)
+            with mock.patch.object(self.gate, "_trusted_home", return_value=str(home)):
+                self.assertFalse(self.gate._allowed_write(str(index)))
 
     def test_pr_identity_ci_and_feedback_snapshot_fail_closed(self):
         self.assertEqual(
@@ -1031,7 +1158,11 @@ class ReviewGateTest(unittest.TestCase):
                     os.chdir(previous_cwd)
                 return code, output.getvalue()
 
+            capture_turn = 0
+
             def capture(record, failed_pass=None):
+                nonlocal capture_turn
+                capture_turn += 1
                 record_path.write_text(json.dumps(record))
                 producer = load_producer()
                 home = root / "home"
@@ -1110,10 +1241,16 @@ class ReviewGateTest(unittest.TestCase):
                     ):
                         producer_result = producer.produce(record_path)
                     raw_output = json.dumps(producer_result, sort_keys=True) + "\n"
-                    with mock.patch.object(
-                        self.gate,
-                        "_fixed_producer",
-                        return_value=(producer_result, raw_output),
+                    with (
+                        mock.patch.object(
+                            self.gate,
+                            "_fixed_producer",
+                            return_value=(producer_result, raw_output),
+                        ),
+                        mock.patch.dict(
+                            os.environ,
+                            {"CODEX_THREAD_ID": f"test-turn-{capture_turn}"},
+                        ),
                     ):
                         self.gate._capture(record_path)
                 finally:
