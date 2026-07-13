@@ -312,7 +312,14 @@ class ReviewGateTest(unittest.TestCase):
                 "submittedAt": "2026-07-13T09:03:00Z",
                 "state": "COMMENTED",
                 "body": "Please fix this fallback",
-            }
+            },
+            {
+                "id": "review-older",
+                "author": {"login": "reviewer"},
+                "submittedAt": "2026-07-13T09:02:00Z",
+                "state": "COMMENTED",
+                "body": "Also add a regression",
+            },
         ]
         actionable["_inline"] = [{"id": 7, "body": "This can fail", "in_reply_to_id": None}]
         errors = []
@@ -323,6 +330,7 @@ class ReviewGateTest(unittest.TestCase):
             **record,
             "pr_feedback_dispositions": [
                 {"id": "review:review-1", "disposition": "addressed", "evidence": "fixed"},
+                {"id": "review:review-older", "disposition": "superseded", "evidence": "covered by review-1"},
                 {"id": "inline:7", "disposition": "dismissed", "evidence": "static trace"},
             ],
         }
@@ -498,6 +506,7 @@ class ReviewGateTest(unittest.TestCase):
                 text=True,
             )
             self.assertEqual(feedback_a, json.loads(snapshot_a.stdout)["pr_feedback_digest"])
+            self.assertEqual([], json.loads(snapshot_a.stdout)["pr_feedback_ids"])
 
             subprocess.run(["git", "switch", "review"], cwd=repo, check=True, capture_output=True)
             (repo / "file.txt").write_text("head b\n")

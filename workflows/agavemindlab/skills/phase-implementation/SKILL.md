@@ -249,6 +249,8 @@ and ranges, finding dispositions/evidence, and the PR URL. Run:
 python3 "$SYMPHONY_WORKFLOW_DIR/skills/phase-implementation/scripts/review_gate.py" \
   --snapshot .symphony/review-gate.json
 # Copy the emitted pr_feedback_digest into the record without changing HEAD.
+# Classify every emitted pr_feedback_id in pr_feedback_dispositions as
+# addressed, dismissed, or superseded, with concrete evidence.
 python3 "$SYMPHONY_WORKFLOW_DIR/skills/phase-implementation/scripts/review_gate.py" \
   .symphony/review-gate.json
 ```

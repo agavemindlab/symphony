@@ -146,16 +146,10 @@ def _change_request_authors(pr):
 
 
 def _feedback_ids(pr):
-    latest_reviews = {}
-    for review in pr.get("reviews") or []:
-        author = (review.get("author") or {}).get("login")
-        submitted = review.get("submittedAt") or ""
-        if author and (author not in latest_reviews or submitted >= latest_reviews[author][0]):
-            latest_reviews[author] = (submitted, review)
     ids = {
         f"review:{review['id']}"
-        for _, review in latest_reviews.values()
-        if review.get("state") == "COMMENTED" and _text(review.get("body")) and review.get("id")
+        for review in pr.get("reviews") or []
+        if _text(review.get("body")) and review.get("id")
     }
     ids.update(
         f"comment:{item['id']}"
@@ -391,6 +385,7 @@ def main(argv):
                 json.dumps(
                     {
                         "pr_feedback_digest": feedback_digest,
+                        "pr_feedback_ids": sorted(_feedback_ids(pr)),
                         "pr_head": pr.get("headRefOid"),
                         "pr_url": pr.get("url"),
                     },
