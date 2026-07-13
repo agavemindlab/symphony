@@ -1091,7 +1091,7 @@ class ReviewGateTest(unittest.TestCase):
             "url": self.record["pr_url"],
             "headRefOid": self.head,
             "baseRefName": "main",
-            "baseRefOid": self.base,
+            "baseRefOid": "f" * 40,
             "state": "OPEN",
             "isDraft": False,
             "mergeable": "MERGEABLE",
@@ -1118,6 +1118,7 @@ class ReviewGateTest(unittest.TestCase):
         self.assertIn("PR check is not successful: test", errors)
         self.assertIn("required PR check is not successful: test", errors)
         self.assertIn("PR has unresolved change requests: reviewer", errors)
+        self.assertFalse(any("base commit" in error for error in errors))
 
         unrelated = {
             **pr,

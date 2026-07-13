@@ -225,9 +225,11 @@ an actionable blocker handoff until an equivalent write-audit sandbox exists.
    non-clean; best-effort continuation is not a pass.
    Enforce a 900000 ms deadline for Claude adversarial and 300000 ms for every
    other pass, plus one gate attempt per unchanged `review_head` per phase
-   turn. Persist a timeout/unavailability failure and end that turn without
-   retrying it. A later dispatch may make one fresh attempt for the same HEAD
-   after rechecking tool availability.
+   turn. `CODEX_THREAD_ID` identifies that turn and is required for capture;
+   each later Symphony dispatch has a fresh thread ID. Persist a
+   timeout/unavailability failure and end that turn without retrying it. A
+   later dispatch may make one fresh attempt for the same HEAD after rechecking
+   tool availability.
 5. Do not enter native Fix-First on raw findings. The fresh validation context
    must be independent of the reporting reviewer, quote the motivating
    `file:line`, and reproduce the behavior with a focused test or static trace.
@@ -274,9 +276,10 @@ python3 "$SYMPHONY_WORKFLOW_DIR/skills/phase-implementation/scripts/review_gate.
 
 The snapshot runs after the final PR feedback sweep. The verifier resolves the
 recorded canonical PR URL, requires its target to match `origin` or `upstream`,
-and binds its base branch and base commit to the frozen upstream-derived review
-base plus its head to the exact review HEAD, without relying on a local branch
-name. It checks CI and the recorded feedback digest, then rereads local
+and binds its base branch plus its head to the exact review range, without
+equating the moving GitHub base-ref tip with the frozen upstream merge-base or
+relying on a local branch name. It checks CI and the recorded feedback digest,
+then rereads local
 and PR HEAD, feedback, and worktree state immediately before verdict. Its exit
 status 0 is the sole machine handoff predicate. Treat its two emitted
 `handoff_actions` as the only gate-authorized phase transitions, while still

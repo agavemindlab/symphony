@@ -612,8 +612,6 @@ def _check_pr(pr, record, errors):
         errors.append("canonical PR URL does not match review record")
     if pr.get("baseRefName") != record.get("pr_base_branch"):
         errors.append("PR base branch does not match review record")
-    if pr.get("baseRefOid") != record.get("review_base"):
-        errors.append("PR base commit does not match review base")
     if pr.get("state") != "OPEN":
         errors.append("PR is not open")
     if pr.get("isDraft") is True:
