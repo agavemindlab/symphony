@@ -2,6 +2,7 @@
 """Fail-closed verifier for Symphony's exact-HEAD review record."""
 
 import hashlib
+import fcntl
 import json
 import os
 import pwd
@@ -42,6 +43,14 @@ WRITE_POLICY = (
     "$HOME/.codex/sessions",
     "$HOME/.codex/session_index.jsonl",
     "/tmp/codex-{adv,review}-*",
+)
+RECEIPT_INPUTS = (
+    "issue_identifier",
+    "pr_url",
+    "pr_base_branch",
+    "diff_kind",
+    "diff_size",
+    "applicability",
 )
 PRODUCER = Path(__file__).with_name("review_producer.py")
 TRUSTED_TOOL_CANDIDATES = {
@@ -224,17 +233,7 @@ def _receipt_errors(record, record_path):
         "review_head"
     ) != record.get("review_head"):
         errors.append("evidence receipt reviewed a different range")
-    inputs = {
-        name: record.get(name)
-        for name in (
-            "issue_identifier",
-            "pr_url",
-            "pr_base_branch",
-            "diff_kind",
-            "diff_size",
-            "applicability",
-        )
-    }
+    inputs = {name: record.get(name) for name in RECEIPT_INPUTS}
     if receipt.get("inputs") != inputs:
         errors.append("evidence receipt inputs do not match the review record")
     producer = receipt.get("producer") or {}
@@ -300,7 +299,7 @@ def _fixed_producer(record_path):
         [sys.executable, PRODUCER, record_path],
         capture_output=True,
         text=True,
-        timeout=2000,
+        timeout=2400,
         env=env,
     )
     if result.returncode != 0:
@@ -320,22 +319,27 @@ def _reserve_attempt(record_path, head):
     root.mkdir(parents=True, exist_ok=True)
     if root.is_symlink():
         raise ValueError("review attempt path may not traverse symlinks")
-    for existing in root.glob("*.json"):
-        try:
-            attempt = json.loads(existing.read_text())
-        except (OSError, TypeError, json.JSONDecodeError):
-            raise ValueError("review attempt marker is invalid") from None
-        if (
-            not isinstance(attempt, dict)
-            or attempt.get("review_head") != head
-            or attempt.get("status") not in {"started", "failed", "completed"}
-            or not _text(attempt.get("turn"))
-        ):
-            raise ValueError("review attempt marker is invalid")
-        if attempt["status"] == "completed":
-            raise ValueError("review HEAD already has a completed capture")
-    path = root / f"{hashlib.sha256(turn.encode()).hexdigest()}.json"
+    lock_path = root.parent / "capture.lock"
+    descriptor = os.open(
+        lock_path,
+        os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0),
+        0o600,
+    )
+    lock = os.fdopen(descriptor, "a+")
     try:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        for existing in root.glob("*.json"):
+            attempt = json.loads(existing.read_text())
+            if (
+                not isinstance(attempt, dict)
+                or attempt.get("review_head") != head
+                or attempt.get("status") not in {"started", "failed", "completed"}
+                or not _text(attempt.get("turn"))
+            ):
+                raise ValueError("review attempt marker is invalid")
+            if attempt["status"] == "completed":
+                raise ValueError("review HEAD already has a completed capture")
+        path = root / f"{hashlib.sha256(turn.encode()).hexdigest()}.json"
         _exclusive_write(
             path,
             json.dumps(
@@ -344,14 +348,21 @@ def _reserve_attempt(record_path, head):
             )
             + "\n",
         )
+    except BlockingIOError:
+        lock.close()
+        raise ValueError("review HEAD already has an active capture") from None
     except FileExistsError:
+        lock.close()
         raise ValueError(
             "review HEAD was already attempted in this phase turn"
         ) from None
-    return path
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        lock.close()
+        raise
+    return path, lock
 
 
-def _finish_attempt(path, head, status, error=None):
+def _finish_attempt(path, head, status, error=None, lock=None):
     payload = {
         "review_head": head,
         "status": status,
@@ -359,7 +370,12 @@ def _finish_attempt(path, head, status, error=None):
     }
     if error:
         payload["error"] = str(error)[:500]
-    _safe_write(path, json.dumps(payload, sort_keys=True) + "\n")
+    try:
+        _safe_write(path, json.dumps(payload, sort_keys=True) + "\n")
+    finally:
+        if lock is not None:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+            lock.close()
 
 
 def _fail_current_attempt(record_path, error):
@@ -397,11 +413,11 @@ def _capture(record_path):
         )
     if _run(["git", "status", "--porcelain"]):
         raise ValueError("capture requires a clean worktree")
-    attempt_path = _reserve_attempt(record_path, head)
+    attempt_path, attempt_lock = _reserve_attempt(record_path, head)
     try:
         output, raw_output = _fixed_producer(record_path)
     except (OSError, ValueError, TypeError, subprocess.SubprocessError) as exc:
-        _finish_attempt(attempt_path, head, "failed", exc)
+        _finish_attempt(attempt_path, head, "failed", exc, attempt_lock)
         raise
     producer = output.get("producer") or {}
     if producer.get("kind") != "fixed-review-producer" or producer.get(
@@ -418,17 +434,7 @@ def _capture(record_path):
         "schema": 1,
         "review_base": base,
         "review_head": head,
-        "inputs": {
-            name: record.get(name)
-            for name in (
-                "issue_identifier",
-                "pr_url",
-                "pr_base_branch",
-                "diff_kind",
-                "diff_size",
-                "applicability",
-            )
-        },
+        "inputs": {name: record.get(name) for name in RECEIPT_INPUTS},
         "producer": producer,
         "write_policy": list(WRITE_POLICY),
         **{
@@ -485,7 +491,7 @@ def _capture(record_path):
         and all(item.get("status") == "completed" for item in receipt["passes"])
         else "failed"
     )
-    _finish_attempt(attempt_path, head, attempt_status)
+    _finish_attempt(attempt_path, head, attempt_status, lock=attempt_lock)
     return receipt
 
 
@@ -619,6 +625,8 @@ def _check_pr(pr, record, errors):
     checks = pr.get("statusCheckRollup") or []
     if not checks:
         errors.append("PR status checks are empty")
+    if pr.get("mergeStateStatus") != "CLEAN":
+        errors.append("GitHub reports the PR is not merge-clean")
     for check in checks:
         conclusion = check.get("conclusion") or check.get("state")
         status = check.get("status")
@@ -626,7 +634,7 @@ def _check_pr(pr, record, errors):
             errors.append(
                 f"PR check is not complete: {check.get('name') or check.get('context')}"
             )
-        if conclusion not in {"SUCCESS", "SKIPPED", "NEUTRAL"}:
+        if conclusion != "SUCCESS":
             errors.append(
                 f"PR check is not successful: {check.get('name') or check.get('context')}"
             )
@@ -850,7 +858,7 @@ def _github_snapshot(record):
                 "--repo",
                 f"{host}/{repo}",
                 "--json",
-                "headRefOid,baseRefName,baseRefOid,state,url,reviewDecision,statusCheckRollup,reviews,comments",
+                "headRefOid,baseRefName,baseRefOid,state,url,mergeStateStatus,reviewDecision,statusCheckRollup,reviews,comments",
             ]
         )
     )

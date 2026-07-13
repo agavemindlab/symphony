@@ -147,17 +147,7 @@ class ReviewGateTest(unittest.TestCase):
                 "schema": 1,
                 "review_base": self.base,
                 "review_head": self.head,
-                "inputs": {
-                    name: record.get(name)
-                    for name in (
-                        "issue_identifier",
-                        "pr_url",
-                        "pr_base_branch",
-                        "diff_kind",
-                        "diff_size",
-                        "applicability",
-                    )
-                },
+                "inputs": {name: record.get(name) for name in self.gate.RECEIPT_INPUTS},
                 "producer": {
                     "kind": "fixed-review-producer",
                     "sha256": hashlib.sha256(
@@ -440,14 +430,14 @@ class ReviewGateTest(unittest.TestCase):
             self.assertNotIn("--bare", command)
             self.assertNotIn("--effort", command)
             self.assertEqual("", command[command.index("--tools") + 1])
-            self.assertEqual(600, run.call_args.kwargs["timeout"])
+            self.assertEqual(900, run.call_args.kwargs["timeout"])
             self.assertEqual(temp, run.call_args.kwargs["cwd"])
             json.dumps(result)
 
             with mock.patch.object(
                 producer.subprocess,
                 "run",
-                side_effect=subprocess.TimeoutExpired(command, 600),
+                side_effect=subprocess.TimeoutExpired(command, 900),
             ):
                 timed_out = producer._review_one("claude-adversarial", record, paths)
             self.assertEqual("timeout", timed_out["status"])
@@ -460,7 +450,7 @@ class ReviewGateTest(unittest.TestCase):
             self.gate.subprocess, "run", return_value=completed
         ) as run:
             self.gate._fixed_producer(Path("record.json"))
-        self.assertEqual(2000, run.call_args.kwargs["timeout"])
+        self.assertEqual(2400, run.call_args.kwargs["timeout"])
         with (
             mock.patch.object(self.gate, "_trusted_tool", return_value="/usr/bin/git"),
             mock.patch.object(
@@ -477,12 +467,16 @@ class ReviewGateTest(unittest.TestCase):
             record_path = root / "review-gate.json"
             record_path.write_text("{}")
             with mock.patch.dict(os.environ, {"CODEX_THREAD_ID": "turn-a"}):
-                marker = self.gate._reserve_attempt(record_path, self.head)
-                with self.assertRaisesRegex(ValueError, "already attempted"):
+                marker, lock = self.gate._reserve_attempt(record_path, self.head)
+                with self.assertRaisesRegex(ValueError, "active capture"):
                     self.gate._reserve_attempt(record_path, self.head)
             self.assertEqual("started", json.loads(marker.read_text())["status"])
             with mock.patch.dict(os.environ, {"CODEX_THREAD_ID": "turn-a"}):
-                self.gate._finish_attempt(marker, self.head, "failed", "review timeout")
+                self.gate._finish_attempt(
+                    marker, self.head, "failed", "review timeout", lock
+                )
+                with self.assertRaisesRegex(ValueError, "already attempted"):
+                    self.gate._reserve_attempt(record_path, self.head)
             self.assertEqual("failed", json.loads(marker.read_text())["status"])
             self.assertIn("review timeout", json.loads(marker.read_text())["error"])
             other_head = "c" * 40
@@ -493,7 +487,8 @@ class ReviewGateTest(unittest.TestCase):
                     self.gate, "_workspace_record", return_value=record_path
                 ),
             ):
-                other = self.gate._reserve_attempt(record_path, other_head)
+                other, other_lock = self.gate._reserve_attempt(record_path, other_head)
+                other_lock.close()
                 self.gate._fail_current_attempt(record_path, "post-review failure")
             self.assertEqual("failed", json.loads(other.read_text())["status"])
             marker.write_text(
@@ -507,6 +502,25 @@ class ReviewGateTest(unittest.TestCase):
             ):
                 self.gate._reserve_attempt(record_path, self.head)
 
+            symlink_record = root / "symlink" / "review-gate.json"
+            symlink_record.parent.mkdir()
+            symlink_record.write_text("{}")
+            lock_path = (
+                symlink_record.parent
+                / "review-evidence"
+                / self.head
+                / "capture.lock"
+            )
+            lock_path.parent.mkdir(parents=True)
+            outside_lock = root / "outside-lock"
+            lock_path.symlink_to(outside_lock)
+            with (
+                mock.patch.dict(os.environ, {"CODEX_THREAD_ID": "turn-symlink"}),
+                self.assertRaises(OSError),
+            ):
+                self.gate._reserve_attempt(symlink_record, self.head)
+            self.assertFalse(outside_lock.exists())
+
             for module in (self.gate, producer):
                 outside = root / f"outside-{module.__name__}"
                 target = root / f"target-{module.__name__}"
@@ -515,6 +529,10 @@ class ReviewGateTest(unittest.TestCase):
                 module._safe_write(target, "evidence")
                 self.assertEqual("preserve", outside.read_text())
                 self.assertEqual("evidence", target.read_text())
+            self.assertEqual(
+                {"/allowed/deleted"},
+                producer._changed_paths({"/allowed/deleted": (1,)}, {}),
+            )
 
     def test_each_pass_binds_a_trusted_gstack_checklist(self):
         producer = load_producer()
@@ -598,6 +616,22 @@ class ReviewGateTest(unittest.TestCase):
                 root / "sessions",
                 root / "session_index.jsonl",
                 root / "codex-review-test",
+            )
+            injected = evidence / "injection.sb"
+            producer._sandbox_profile(
+                injected,
+                root / 'quote"\n(allow file-write*)\n',
+                root / "gstack",
+                root / "sessions",
+                root / "session_index.jsonl",
+                root / "codex-review-test",
+            )
+            self.assertEqual(
+                1,
+                sum(
+                    line.strip() == "(allow file-write*"
+                    for line in injected.read_text().splitlines()
+                ),
             )
             allowed = subprocess.run(
                 [
@@ -878,6 +912,7 @@ class ReviewGateTest(unittest.TestCase):
             "baseRefName": "main",
             "baseRefOid": self.base,
             "state": "OPEN",
+            "mergeStateStatus": "BLOCKED",
             "reviewDecision": "CHANGES_REQUESTED",
             "statusCheckRollup": [
                 {"name": "test", "status": "COMPLETED", "conclusion": "FAILURE"}
@@ -896,6 +931,32 @@ class ReviewGateTest(unittest.TestCase):
         self.gate._check_pr(pr, record, errors)
         self.assertIn("PR check is not successful: test", errors)
         self.assertIn("PR has unresolved change requests: reviewer", errors)
+
+        unrelated = {
+            **pr,
+            "reviewDecision": "",
+            "reviews": [],
+            "mergeStateStatus": "BLOCKED",
+            "statusCheckRollup": [
+                {
+                    "name": "unrelated",
+                    "status": "COMPLETED",
+                    "conclusion": "SUCCESS",
+                }
+            ],
+        }
+        errors = []
+        self.gate._check_pr(unrelated, record, errors)
+        self.assertIn("GitHub reports the PR is not merge-clean", errors)
+
+        legacy = {
+            **unrelated,
+            "mergeStateStatus": "CLEAN",
+            "statusCheckRollup": [{"context": "test", "state": "SUCCESS"}],
+        }
+        errors = []
+        self.gate._check_pr(legacy, record, errors)
+        self.assertEqual([], errors)
 
         actionable = deepcopy(pr)
         actionable["reviewDecision"] = ""
@@ -1128,6 +1189,7 @@ class ReviewGateTest(unittest.TestCase):
                     "baseRefName": "main",
                     "baseRefOid": base,
                     "state": "OPEN",
+                    "mergeStateStatus": "CLEAN",
                     "reviewDecision": "APPROVED",
                     "statusCheckRollup": [
                         {"name": "test", "status": "COMPLETED", "conclusion": "SUCCESS"}

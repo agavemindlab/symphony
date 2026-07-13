@@ -240,6 +240,14 @@ def _external_snapshot(roots, index):
     return snapshot
 
 
+def _changed_paths(before, after):
+    return {
+        path
+        for path in before.keys() | after.keys()
+        if before.get(path) != after.get(path)
+    }
+
+
 def _cleanup_temp(root):
     if (
         not root.name.startswith(("codex-adv-", "codex-review-"))
@@ -283,19 +291,22 @@ def _required_passes(record):
 def _sandbox_profile(
     path, evidence, gstack_root, session_root, session_index, temp_root
 ):
+    def literal(value):
+        return json.dumps(str(value))
+
     profile = "\n".join(
         (
             "(version 1)",
             "(allow default)",
             "(deny file-write*)",
             "(allow file-write*",
-            f'  (subpath "{evidence}")',
-            f'  (subpath "{gstack_root}")',
-            f'  (subpath "{session_root}")',
-            f'  (literal "{session_index}")',
-            f'  (subpath "{temp_root}")',
+            f"  (subpath {literal(evidence)})",
+            f"  (subpath {literal(gstack_root)})",
+            f"  (subpath {literal(session_root)})",
+            f"  (literal {literal(session_index)})",
+            f"  (subpath {literal(temp_root)})",
             '  (literal "/dev/null")',
-            f'  (literal "{temp_root}"))',
+            f"  (literal {literal(temp_root)}))",
             "",
         )
     )
@@ -606,7 +617,7 @@ def _review_one(name, record, paths):
                 input=prompt,
                 capture_output=True,
                 text=True,
-                timeout=600,
+                timeout=900,
                 cwd=paths["temp_root"],
                 env=_review_env(
                     paths["home"],
@@ -906,12 +917,7 @@ def produce(record_path):
     ):
         runtime_errors.append("HEAD or worktree changed during review")
     writes = sorted(
-        {
-            path
-            for path, state in writes_after.items()
-            if writes_before.get(path) != state
-        }
-        | {str(temp_root), *temp_writes}
+        _changed_paths(writes_before, writes_after) | {str(temp_root), *temp_writes}
     )
     return {
         "producer": {
