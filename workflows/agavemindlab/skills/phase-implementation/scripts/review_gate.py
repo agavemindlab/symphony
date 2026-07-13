@@ -246,43 +246,24 @@ def _repo_slug(remote):
     return "/".join(parts[-2:])
 
 
-def _github_snapshot(record, base_branch, head, branch):
+def _github_snapshot(record):
     repo = _repo_slug(_run(["git", "remote", "get-url", "upstream"]))
-    candidates = json.loads(
-        _run(
-            [
-                "gh",
-                "pr",
-                "list",
-                "--repo",
-                repo,
-                "--state",
-                "open",
-                "--head",
-                branch,
-                "--base",
-                base_branch,
-                "--json",
-                "url,headRefOid,baseRefName,state",
-                "--limit",
-                "100",
-            ]
-        )
-        or "[]"
-    )
-    candidates = [item for item in candidates if item.get("headRefOid") == head]
-    if len(candidates) != 1:
-        raise ValueError(f"expected one canonical open PR for {branch}@{head}, found {len(candidates)}")
-    canonical = candidates[0]
-    if canonical.get("url") != record.get("pr_url"):
-        raise ValueError("record PR URL is not the canonical branch PR")
+    pr_url = record.get("pr_url")
+    if not _text(pr_url):
+        raise ValueError("review record lacks canonical PR URL")
+    parts = urlparse(pr_url).path.strip("/").split("/")
+    if len(parts) != 4 or "/".join(parts[:2]) != repo or parts[2] != "pull" or not parts[3].isdigit():
+        raise ValueError("canonical PR URL does not belong to the upstream repository")
+    pr_number = parts[3]
     pr = json.loads(
         _run(
             [
                 "gh",
                 "pr",
                 "view",
-                canonical["url"],
+                pr_url,
+                "--repo",
+                repo,
                 "--json",
                 "headRefOid,baseRefName,state,url,statusCheckRollup,reviews,comments",
             ]
@@ -296,7 +277,7 @@ def _github_snapshot(record, base_branch, head, branch):
                     "api",
                     "--paginate",
                     "--slurp",
-                    f"repos/{repo}/pulls/{canonical['url'].rsplit('/', 1)[-1]}/comments",
+                    f"repos/{repo}/pulls/{pr_number}/comments",
                 ]
             )
             or "[]"
@@ -322,8 +303,7 @@ def main(argv):
         base_branch = os.environ.get("SYMPHONY_BASE_BRANCH", "main")
         base_ref = f"upstream/{base_branch}"
         actual_base = _run(["git", "merge-base", base_ref, head])
-        branch = _run(["git", "branch", "--show-current"])
-        pr, feedback_digest = _github_snapshot(record, base_branch, head, branch)
+        pr, feedback_digest = _github_snapshot(record)
         if len(argv) == 3:
             print(
                 json.dumps(
@@ -350,7 +330,7 @@ def main(argv):
         if record.get("pr_feedback_digest") != feedback_digest:
             runtime_errors.append("PR feedback snapshot changed or was not recorded")
         final_head = _run(["git", "rev-parse", "HEAD"])
-        final_pr, final_feedback_digest = _github_snapshot(record, base_branch, final_head, branch)
+        final_pr, final_feedback_digest = _github_snapshot(record)
         final_status = _run(["git", "status", "--porcelain"])
         if final_head != head:
             runtime_errors.append("local HEAD changed during gate verification")

@@ -365,7 +365,7 @@ class ReviewGateTest(unittest.TestCase):
                 "elif [ \"$1\" = \"api\" ]; then printf '%s\\n' \"$GH_INLINE_JSON\"; fi\n"
             )
             fake_gh.chmod(0o755)
-            pr_url = self.record["pr_url"]
+            pr_url = f"https://github.com/{self.gate._repo_slug(str(upstream))}/pull/1"
 
             def github_env(head):
                 pr = {
@@ -393,12 +393,14 @@ class ReviewGateTest(unittest.TestCase):
 
             record_a = deepcopy(self.record)
             record_a.update(review_base=base, review_head=head_a, current_head=head_a, pr_head=head_a)
+            record_a["pr_url"] = pr_url
             record_a["pr_feedback_digest"] = feedback_a
             record_a["passes"] = [
                 {**item, "review_base": base, "review_head": head_a} for item in record_a["passes"]
             ]
             record_path = root / "record.json"
             record_path.write_text(json.dumps(record_a))
+            subprocess.run(["git", "switch", "--detach"], cwd=repo, check=True, capture_output=True)
             clean_a = subprocess.run(
                 [sys.executable, SCRIPT, record_path],
                 cwd=repo,
@@ -420,6 +422,7 @@ class ReviewGateTest(unittest.TestCase):
             )
             self.assertEqual(feedback_a, json.loads(snapshot_a.stdout)["pr_feedback_digest"])
 
+            subprocess.run(["git", "switch", "review"], cwd=repo, check=True, capture_output=True)
             (repo / "file.txt").write_text("head b\n")
             subprocess.run(["git", "commit", "-am", "head b"], cwd=repo, check=True, capture_output=True)
             head_b = subprocess.run(
