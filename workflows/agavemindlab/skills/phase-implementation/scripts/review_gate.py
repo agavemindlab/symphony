@@ -238,23 +238,42 @@ def _run(command):
     return subprocess.run(command, capture_output=True, text=True, check=True).stdout.strip()
 
 
-def _repo_slug(remote):
-    path = remote.split(":", 1)[1] if remote.startswith("git@") else urlparse(remote).path
+def _repo_identity(remote):
+    if remote.startswith("git@"):
+        authority, path = remote.split(":", 1)
+        host = authority.split("@", 1)[1]
+    else:
+        parsed = urlparse(remote)
+        host, path = parsed.hostname, parsed.path
+    if not host:
+        raise ValueError(f"upstream remote lacks a canonical host: {remote}")
     parts = path.removesuffix(".git").strip("/").split("/")
     if len(parts) < 2:
         raise ValueError(f"cannot derive GitHub repository from upstream remote: {remote}")
-    return "/".join(parts[-2:])
+    return host.lower(), "/".join(parts[-2:])
+
+
+def _pr_number(pr_url, host, repo):
+    parsed = urlparse(pr_url)
+    parts = parsed.path.strip("/").split("/")
+    if (
+        parsed.scheme != "https"
+        or parsed.hostname != host
+        or len(parts) != 4
+        or "/".join(parts[:2]) != repo
+        or parts[2] != "pull"
+        or not parts[3].isdigit()
+    ):
+        raise ValueError("canonical PR URL does not belong to the upstream repository")
+    return parts[3]
 
 
 def _github_snapshot(record):
-    repo = _repo_slug(_run(["git", "remote", "get-url", "upstream"]))
+    host, repo = _repo_identity(_run(["git", "remote", "get-url", "upstream"]))
     pr_url = record.get("pr_url")
     if not _text(pr_url):
         raise ValueError("review record lacks canonical PR URL")
-    parts = urlparse(pr_url).path.strip("/").split("/")
-    if len(parts) != 4 or "/".join(parts[:2]) != repo or parts[2] != "pull" or not parts[3].isdigit():
-        raise ValueError("canonical PR URL does not belong to the upstream repository")
-    pr_number = parts[3]
+    pr_number = _pr_number(pr_url, host, repo)
     pr = json.loads(
         _run(
             [
@@ -263,7 +282,7 @@ def _github_snapshot(record):
                 "view",
                 pr_url,
                 "--repo",
-                repo,
+                f"{host}/{repo}",
                 "--json",
                 "headRefOid,baseRefName,state,url,statusCheckRollup,reviews,comments",
             ]
@@ -275,6 +294,8 @@ def _github_snapshot(record):
                 [
                     "gh",
                     "api",
+                    "--hostname",
+                    host,
                     "--paginate",
                     "--slurp",
                     f"repos/{repo}/pulls/{pr_number}/comments",

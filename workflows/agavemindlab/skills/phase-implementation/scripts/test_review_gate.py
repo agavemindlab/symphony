@@ -269,6 +269,16 @@ class ReviewGateTest(unittest.TestCase):
             self.assertIn(f"temporary review path was not cleaned: {temp.name}", self.errors(dirty))
 
     def test_pr_identity_ci_and_feedback_snapshot_fail_closed(self):
+        self.assertEqual(
+            ("github.com", "example/repo"),
+            self.gate._repo_identity("git@github.com:example/repo.git"),
+        )
+        self.assertEqual("1", self.gate._pr_number(self.record["pr_url"], "github.com", "example/repo"))
+        with self.assertRaisesRegex(ValueError, "does not belong"):
+            self.gate._pr_number(
+                "https://ghe.example/example/repo/pull/1", "github.com", "example/repo"
+            )
+
         pr = {
             "url": self.record["pr_url"],
             "headRefOid": self.head,
@@ -344,6 +354,11 @@ class ReviewGateTest(unittest.TestCase):
             subprocess.run(["git", "init", "--bare", upstream], check=True, capture_output=True)
             subprocess.run(["git", "remote", "add", "upstream", upstream], cwd=repo, check=True)
             subprocess.run(["git", "push", "upstream", "main"], cwd=repo, check=True, capture_output=True)
+            subprocess.run(
+                ["git", "remote", "set-url", "upstream", "https://github.com/example/repo.git"],
+                cwd=repo,
+                check=True,
+            )
             subprocess.run(["git", "remote", "add", "origin", upstream], cwd=repo, check=True)
             fork = root / "fork.git"
             subprocess.run(["git", "init", "--bare", fork], check=True, capture_output=True)
@@ -365,7 +380,7 @@ class ReviewGateTest(unittest.TestCase):
                 "elif [ \"$1\" = \"api\" ]; then printf '%s\\n' \"$GH_INLINE_JSON\"; fi\n"
             )
             fake_gh.chmod(0o755)
-            pr_url = f"https://github.com/{self.gate._repo_slug(str(upstream))}/pull/1"
+            pr_url = self.record["pr_url"]
 
             def github_env(head):
                 pr = {
