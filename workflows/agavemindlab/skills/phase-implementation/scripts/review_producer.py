@@ -566,8 +566,6 @@ def _review_one(name, record, paths):
             "--safe-mode",
             "--setting-sources",
             "",
-            "--effort",
-            "high",
             "--no-session-persistence",
             "--tools",
             "",

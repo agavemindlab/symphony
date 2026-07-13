@@ -393,6 +393,7 @@ class ReviewGateTest(unittest.TestCase):
             self.assertEqual("completed", result["status"])
             self.assertIn("--safe-mode", command)
             self.assertNotIn("--bare", command)
+            self.assertNotIn("--effort", command)
             self.assertEqual("", command[command.index("--tools") + 1])
             self.assertEqual(temp, run.call_args.kwargs["cwd"])
 
