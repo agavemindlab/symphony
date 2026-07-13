@@ -241,11 +241,23 @@ none substitutes for it.
    Record every created `/tmp/codex-{adv,review}-*` path and remove it before
    verification; a surviving path is non-clean.
 
-Write those inputs and results to `.symphony/review-gate.json`, including the
-config readback, audited write paths, applicability decisions, pass statuses
-and ranges, finding dispositions/evidence, and the PR URL. Run:
+Write immutable inputs (`issue_identifier`, exact base/head SHAs, PR base/URL),
+applicability decisions, and the PR URL to `.symphony/review-gate.json`. Do not
+hand-write completed passes or findings.
+`--capture` accepts no producer command. It invokes the versioned sibling
+`review_producer.py`, which validates and hashes the live exact-HEAD config,
+runs the trusted gstack preamble and every planned pass under the canonical
+narrow write sandbox, then rechecks config, HEAD, and worktree. Model tools and
+inherited credentials are disabled; the outer sandbox is the sole write
+boundary. Each pass receives its trusted gstack checklist and frozen diff;
+their checklist/executable hashes, sandbox-profile hash, structured outputs,
+and final producer output are recorded in the receipt. The final gate rejects a
+missing, stale, moved, symlinked, modified, or non-versioned receipt and ignores
+record-only success claims.
 
 ```bash
+python3 "$SYMPHONY_WORKFLOW_DIR/skills/phase-implementation/scripts/review_gate.py" \
+  --capture .symphony/review-gate.json
 python3 "$SYMPHONY_WORKFLOW_DIR/skills/phase-implementation/scripts/review_gate.py" \
   --snapshot .symphony/review-gate.json
 # Copy the emitted pr_feedback_digest into the record without changing HEAD.
