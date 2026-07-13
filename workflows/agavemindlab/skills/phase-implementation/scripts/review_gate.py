@@ -132,6 +132,16 @@ def _feedback_digest(pr, inline_comments):
     return hashlib.sha256(payload).hexdigest()
 
 
+def _change_request_authors(pr):
+    latest = {}
+    for review in pr.get("reviews") or []:
+        author = (review.get("author") or {}).get("login")
+        submitted = review.get("submittedAt") or ""
+        if author and (author not in latest or submitted >= latest[author][0]):
+            latest[author] = (submitted, review.get("state"))
+    return sorted(author for author, (_, state) in latest.items() if state == "CHANGES_REQUESTED")
+
+
 def _check_pr(pr, record, errors):
     if pr.get("url") != record.get("pr_url"):
         errors.append("canonical PR URL does not match review record")
@@ -139,6 +149,9 @@ def _check_pr(pr, record, errors):
         errors.append("PR base branch does not match review record")
     if pr.get("state") != "OPEN":
         errors.append("PR is not open")
+    change_request_authors = _change_request_authors(pr)
+    if pr.get("reviewDecision") == "CHANGES_REQUESTED" or change_request_authors:
+        errors.append(f"PR has unresolved change requests: {', '.join(change_request_authors) or 'reviewDecision'}")
     checks = pr.get("statusCheckRollup") or []
     if not checks:
         errors.append("PR status checks are empty")
@@ -284,7 +297,7 @@ def _github_snapshot(record):
                 "--repo",
                 f"{host}/{repo}",
                 "--json",
-                "headRefOid,baseRefName,state,url,statusCheckRollup,reviews,comments",
+                "headRefOid,baseRefName,state,url,reviewDecision,statusCheckRollup,reviews,comments",
             ]
         )
     )

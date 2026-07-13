@@ -284,16 +284,37 @@ class ReviewGateTest(unittest.TestCase):
             "headRefOid": self.head,
             "baseRefName": "main",
             "state": "OPEN",
+            "reviewDecision": "CHANGES_REQUESTED",
             "statusCheckRollup": [
                 {"name": "test", "status": "COMPLETED", "conclusion": "FAILURE"}
             ],
-            "reviews": [],
+            "reviews": [
+                {
+                    "author": {"login": "reviewer"},
+                    "submittedAt": "2026-07-13T09:00:00Z",
+                    "state": "CHANGES_REQUESTED",
+                }
+            ],
             "comments": [],
         }
         record = {**self.record, "pr_base_branch": "main"}
         errors = []
         self.gate._check_pr(pr, record, errors)
         self.assertIn("PR check is not successful: test", errors)
+        self.assertIn("PR has unresolved change requests: reviewer", errors)
+
+        superseded = deepcopy(pr)
+        superseded["reviewDecision"] = ""
+        superseded["reviews"].append(
+            {
+                "author": {"login": "reviewer"},
+                "submittedAt": "2026-07-13T09:01:00Z",
+                "state": "APPROVED",
+            }
+        )
+        errors = []
+        self.gate._check_pr(superseded, {**record, "pr_url": superseded["url"]}, errors)
+        self.assertNotIn("PR has unresolved change requests: reviewer", errors)
 
         changed = deepcopy(pr)
         changed["comments"] = [{"id": "new-feedback", "body": "please fix"}]
@@ -388,6 +409,7 @@ class ReviewGateTest(unittest.TestCase):
                     "headRefOid": head,
                     "baseRefName": "main",
                     "state": "OPEN",
+                    "reviewDecision": "APPROVED",
                     "statusCheckRollup": [
                         {"name": "test", "status": "COMPLETED", "conclusion": "SUCCESS"}
                     ],
