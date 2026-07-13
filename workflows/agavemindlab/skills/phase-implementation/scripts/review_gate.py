@@ -612,6 +612,19 @@ def _check_pr(pr, record, errors):
         errors.append("canonical PR URL does not match review record")
     if pr.get("baseRefName") != record.get("pr_base_branch"):
         errors.append("PR base branch does not match review record")
+    base_oid = pr.get("baseRefOid")
+    if not re.fullmatch(r"[0-9a-f]{40}", str(base_oid or "")):
+        errors.append("PR base OID is unavailable")
+    elif base_oid != record.get("review_base"):
+        try:
+            pr_merge_base = _run(
+                ["git", "merge-base", base_oid, record.get("review_head")]
+            )
+        except subprocess.CalledProcessError:
+            errors.append("PR base OID is unavailable in the local repository")
+        else:
+            if pr_merge_base != record.get("review_base"):
+                errors.append("PR range does not match the frozen review base")
     if pr.get("state") != "OPEN":
         errors.append("PR is not open")
     if pr.get("isDraft") is True:
@@ -883,13 +896,9 @@ def _github_snapshot(record):
     if not _text(pr_url):
         raise ValueError("review record lacks canonical PR URL")
     host, repo, pr_number = _pr_identity(pr_url)
-    allowed_targets = {
-        identity
-        for remote in ("origin", "upstream")
-        if (identity := _remote_identity(_run(["git", "remote", "get-url", remote])))
-    }
-    if (host, repo) not in allowed_targets:
-        raise ValueError("canonical PR URL does not match origin or upstream")
+    upstream = _remote_identity(_run(["git", "remote", "get-url", "upstream"]))
+    if (host, repo) != upstream:
+        raise ValueError("canonical PR URL does not match upstream")
     pr = json.loads(
         _run(
             [

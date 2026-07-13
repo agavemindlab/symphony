@@ -276,7 +276,7 @@ python3 "$SYMPHONY_WORKFLOW_DIR/skills/phase-implementation/scripts/review_gate.
 ```
 
 The snapshot runs after the final PR feedback sweep. The verifier resolves the
-recorded canonical PR URL, requires its target to match `origin` or `upstream`,
+recorded canonical PR URL, requires its target to match `upstream`,
 and binds its base branch plus its head to the exact review range, without
 equating the moving GitHub base-ref tip with the frozen upstream merge-base or
 relying on a local branch name. It checks CI and the recorded feedback digest,

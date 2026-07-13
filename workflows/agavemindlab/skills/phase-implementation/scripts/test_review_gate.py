@@ -1152,6 +1152,7 @@ class ReviewGateTest(unittest.TestCase):
 
         unrelated = {
             **pr,
+            "baseRefOid": self.base,
             "reviewDecision": "",
             "reviews": [],
             "mergeStateStatus": "BLOCKED",
@@ -1167,6 +1168,15 @@ class ReviewGateTest(unittest.TestCase):
         errors = []
         self.gate._check_pr(unrelated, record, errors)
         self.assertEqual([], errors)
+        moving_base = {**unrelated, "baseRefOid": "f" * 40}
+        with mock.patch.object(self.gate, "_run", return_value=self.base):
+            errors = []
+            self.gate._check_pr(moving_base, record, errors)
+        self.assertEqual([], errors)
+        with mock.patch.object(self.gate, "_run", return_value="c" * 40):
+            errors = []
+            self.gate._check_pr(moving_base, record, errors)
+        self.assertIn("PR range does not match the frozen review base", errors)
 
         awaiting_approval = {
             **unrelated,
