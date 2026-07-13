@@ -174,6 +174,10 @@ Run the phase-required gstack `review` as a fail-closed convergence loop after
 sync, feedback fixes, commit, and push. Tests, lint, and CI support this gate;
 none substitutes for it.
 
+The required runner prerequisite is Darwin with trusted
+`/usr/bin/sandbox-exec` and `/bin/zsh`. Another platform must fail closed with
+an actionable blocker handoff until an equivalent write-audit sandbox exists.
+
 1. Require a clean worktree and freeze one run's inputs:
 
    ```bash

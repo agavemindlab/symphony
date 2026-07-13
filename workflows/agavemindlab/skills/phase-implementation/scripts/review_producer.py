@@ -3,12 +3,15 @@
 
 import concurrent.futures
 import hashlib
+import io
 import json
 import os
 import pwd
 import re
+import stat
 import subprocess
 import sys
+import tarfile
 import tempfile
 import time
 from pathlib import Path
@@ -36,6 +39,11 @@ REQUIRED_CONFIG = {
     "checkpoint_push": False,
     "codex_reviews": "enabled",
 }
+MAX_CONTEXT_BYTES = 1_300_000
+MAX_CONTEXT_FILES = 2_000
+MAX_CONTEXT_SCAN_BYTES = 64 * 1024 * 1024
+MAX_CONTEXT_SYMBOLS = 2_000
+MAX_CONTEXT_LINE_BYTES = 16_384
 WRITE_POLICY = (
     "workspace",
     "$HOME/.gstack",
@@ -227,16 +235,27 @@ def _external_snapshot(roots, index):
         for directory, names, files in os.walk(root, followlinks=False):
             for name in [*names, *files]:
                 path = Path(directory) / name
-                stat = path.lstat()
+                metadata = path.lstat()
+                if stat.S_ISREG(metadata.st_mode) and metadata.st_nlink != 1:
+                    raise ValueError(f"review write root contains a hard link: {path}")
                 snapshot[str(path)] = (
-                    stat.st_mode,
-                    stat.st_size,
-                    stat.st_mtime_ns,
+                    metadata.st_mode,
+                    metadata.st_nlink,
+                    metadata.st_size,
+                    metadata.st_mtime_ns,
                     os.readlink(path) if path.is_symlink() else None,
                 )
     if index.exists():
-        stat = index.lstat()
-        snapshot[str(index)] = (stat.st_mode, stat.st_size, stat.st_mtime_ns, None)
+        metadata = index.lstat()
+        if stat.S_ISREG(metadata.st_mode) and metadata.st_nlink != 1:
+            raise ValueError("Codex session index may not be hard linked")
+        snapshot[str(index)] = (
+            metadata.st_mode,
+            metadata.st_nlink,
+            metadata.st_size,
+            metadata.st_mtime_ns,
+            None,
+        )
     return snapshot
 
 
@@ -289,7 +308,7 @@ def _required_passes(record):
 
 
 def _sandbox_profile(
-    path, evidence, gstack_root, session_root, session_index, temp_root
+    path, evidence, gstack_root, session_root, session_index, temp_root, context_root
 ):
     def literal(value):
         return json.dumps(str(value))
@@ -307,11 +326,103 @@ def _sandbox_profile(
             f"  (subpath {literal(temp_root)})",
             '  (literal "/dev/null")',
             f"  (literal {literal(temp_root)}))",
+            f"(deny file-write* (subpath {literal(context_root)}))",
             "",
         )
     )
     _safe_write(path, profile)
     return _sha256(path)
+
+
+def _frozen_checkout(root, head, git_command, git_env):
+    root.mkdir()
+    result = subprocess.run(
+        [*git_command, "archive", "--format=tar", head],
+        capture_output=True,
+        check=True,
+        timeout=60,
+        env=git_env,
+    )
+    with tarfile.open(fileobj=io.BytesIO(result.stdout)) as archive:
+        archive.extractall(root, filter="data")
+    for path in root.rglob("*"):
+        if path.is_symlink() and not path.resolve().is_relative_to(root.resolve()):
+            raise ValueError("frozen repository snapshot contains an escaping symlink")
+    return root
+
+
+def _reference_context(root, diff):
+    changed = {
+        line.removeprefix("+++ b/")
+        for line in diff.splitlines()
+        if line.startswith("+++ b/") and line != "+++ /dev/null"
+    }
+    changed_lines = "\n".join(
+        line[1:]
+        for line in diff.splitlines()
+        if line.startswith(("+", "-")) and not line.startswith(("+++", "---"))
+    )
+    symbols = sorted(
+        set(re.findall(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*(?=\()", changed_lines))
+        | set(re.findall(r"\.([A-Za-z_][A-Za-z0-9_]*)\b", changed_lines))
+        | set(re.findall(r"\b([A-Z][A-Z0-9_]{2,})\b", changed_lines))
+    )
+    if len(symbols) > MAX_CONTEXT_SYMBOLS:
+        raise ValueError("frozen review context has too many changed identifiers")
+    pattern = re.compile(r"\b(?:" + "|".join(map(re.escape, symbols)) + r")\b")
+    context = {"unchanged_references": []}
+    output_bytes = 0
+    scanned_bytes = 0
+    scanned_files = 0
+
+    for path in sorted(root.rglob("*")):
+        if path.is_symlink() or not path.is_file():
+            continue
+        size = path.stat().st_size
+        scanned_files += 1
+        scanned_bytes += size
+        if scanned_files > MAX_CONTEXT_FILES or scanned_bytes > MAX_CONTEXT_SCAN_BYTES:
+            raise ValueError("frozen review context exceeds its repository scan bound")
+        if size > 300_000:
+            continue
+        content = path.read_bytes()
+        if b"\0" in content:
+            continue
+        try:
+            text = content.decode()
+        except UnicodeDecodeError:
+            continue
+        relative = path.relative_to(root).as_posix()
+        if relative in changed:
+            continue
+        if not symbols:
+            continue
+        for number, line in enumerate(text.splitlines(), start=1):
+            if not pattern.search(line):
+                continue
+            encoded = line.encode()
+            if len(encoded) > MAX_CONTEXT_LINE_BYTES:
+                raise ValueError("frozen review context contains an oversized matching line")
+            reference = f"{relative}:{number}: {line}"
+            output_bytes += len(reference.encode())
+            if output_bytes > MAX_CONTEXT_BYTES:
+                raise ValueError("frozen review context exceeds its output bound")
+            context["unchanged_references"].append(reference)
+    context["audit"] = {
+        "output_bytes": output_bytes,
+        "scanned_bytes": scanned_bytes,
+        "scanned_files": scanned_files,
+        "symbol_count": len(symbols),
+    }
+    return context
+
+
+def _require_supported_runner():
+    if sys.platform != "darwin":
+        raise ValueError(
+            "phase-required review needs a Darwin runner with "
+            "/usr/bin/sandbox-exec and /bin/zsh"
+        )
 
 
 def _gstack_preamble(home, workspace):
@@ -353,7 +464,15 @@ def _gstack_preamble(home, workspace):
 
 def _run_preamble(record, paths):
     skill, script, helper_hashes = _gstack_preamble(paths["home"], paths["workspace"])
-    command = [paths["sandbox"], "-f", paths["profile"], paths["zsh"], "-c", script]
+    command = [
+        paths["sandbox"],
+        "-f",
+        paths["profile"],
+        paths["zsh"],
+        "-f",
+        "-c",
+        script,
+    ]
     started_ns = time.time_ns()
     result = subprocess.run(
         command,
@@ -369,6 +488,7 @@ def _run_preamble(record, paths):
                 "GSTACK_STATE_DIR": str(paths["gstack_home"]),
                 "OPENCLAW_SESSION": "1",
                 "TMPDIR": str(paths["temp_root"]),
+                "ZDOTDIR": str(paths["temp_root"]),
             },
         ),
     )
@@ -499,6 +619,10 @@ def _codex_json(
 ):
     if not isinstance(developer_instructions, str) or not developer_instructions.strip():
         raise ValueError("Codex reviewer requires trusted developer instructions")
+    developer_instructions += (
+        "\nThe user JSON includes bounded cross-file context from the frozen exact-HEAD "
+        "snapshot. Use it to inspect unchanged consumers and schemas. Do not edit files."
+    )
     schema_path = paths["outputs"] / f"{name}-schema.json"
     output_path = paths["outputs"] / f"{name}.json"
     _safe_write(schema_path, json.dumps(schema, sort_keys=True))
@@ -596,6 +720,7 @@ def _review_one(name, record, paths):
         {
             "frozen_diff_sha256": hashlib.sha256(paths["diff"].encode()).hexdigest(),
             "untrusted_frozen_diff": paths["diff"],
+            "untrusted_exact_head_cross_file_context": paths["reference_context"],
         },
         sort_keys=True,
     )
@@ -736,6 +861,7 @@ schema JSON."""
     validation_data = json.dumps(
         {
             "untrusted_frozen_diff": paths["diff"],
+            "untrusted_exact_head_cross_file_context": paths["reference_context"],
             "untrusted_source_excerpts": source_excerpts,
             "untrusted_raw_findings": raw_findings,
         },
@@ -807,6 +933,7 @@ Return only schema JSON."""
 
 
 def produce(record_path):
+    _require_supported_runner()
     if record_path.is_symlink():
         raise ValueError("review record may not be symlinked")
     record_path = record_path.resolve()
@@ -871,6 +998,9 @@ def produce(record_path):
         tempfile.mkdtemp(prefix=f"codex-review-{issue}-{head[:12]}-", dir="/tmp")
     ).resolve()
     try:
+        context_root = _frozen_checkout(
+            temp_root / "frozen-repo", head, git_command, git_env
+        )
         profile = evidence / "review.sb"
         sandbox = _trusted_tool("sandbox-exec", home, workspace)
         zsh = _trusted_tool("zsh", home, workspace)
@@ -892,9 +1022,11 @@ def produce(record_path):
             "session_root": session_root,
             "session_index": session_index,
             "temp_root": temp_root,
+            "context_root": context_root,
             "git_command": git_command,
             "git_env": git_env,
         }
+        paths["reference_context"] = _reference_context(context_root, paths["diff"])
         profile_hash = _sandbox_profile(
             profile,
             evidence,
@@ -902,6 +1034,7 @@ def produce(record_path):
             session_root,
             session_index,
             temp_root,
+            context_root,
         )
         preamble = _run_preamble(record, paths)
         runtime_errors = []

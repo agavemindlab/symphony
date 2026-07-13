@@ -287,6 +287,7 @@ class ReviewGateTest(unittest.TestCase):
         }
         paths = {
             "diff": "diff --git a/a.py b/a.py\n+dangerous()",
+            "reference_context": {"unchanged_references": []},
             "git_command": ["/usr/bin/git", "-C", "/repo"],
             "git_env": {},
         }
@@ -328,7 +329,7 @@ class ReviewGateTest(unittest.TestCase):
         self.assertNotIn("GH_TOKEN", env)
         self.assertNotIn("AWS_SECRET_ACCESS_KEY", env)
 
-    def test_codex_reviewer_disables_model_tools_under_outer_sandbox(self):
+    def test_codex_reviewer_disables_tools_and_uses_bounded_context(self):
         producer = load_producer()
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -340,6 +341,10 @@ class ReviewGateTest(unittest.TestCase):
                 "session_root": root / "sessions",
                 "gstack_home": root / "gstack",
                 "temp_root": root / "temp",
+                "context_root": root / "context",
+                "reference_context": {
+                    "unchanged_references": ["consumer.py:1: dangerous()"],
+                },
                 "sandbox": "/usr/bin/sandbox-exec",
                 "profile": root / "review.sb",
                 "codex": "/opt/homebrew/bin/codex",
@@ -381,10 +386,13 @@ class ReviewGateTest(unittest.TestCase):
             self.assertIn("shell_tool", command)
             self.assertIn("unified_exec", command)
             self.assertIn("--strict-config", command)
-            self.assertIn(
-                'developer_instructions="trusted review instructions"', command
+            config = command[command.index("-c") + 1]
+            self.assertTrue(
+                config.startswith('developer_instructions="trusted review instructions')
             )
+            self.assertIn("bounded cross-file context", config)
             self.assertEqual("literal diff", run.call_args.kwargs["input"])
+            self.assertEqual(paths["temp_root"], run.call_args.kwargs["cwd"])
             self.assertNotIn("--dangerously-bypass-approvals-and-sandbox", command)
             json.dumps(provenance)
             with (
@@ -430,6 +438,10 @@ class ReviewGateTest(unittest.TestCase):
                 "home": home,
                 "workspace": workspace,
                 "temp_root": temp,
+                "context_root": root / "context",
+                "reference_context": {
+                    "unchanged_references": ["consumer.py:1: dangerous()"],
+                },
                 "gstack_home": home / ".gstack",
                 "sandbox": "/usr/bin/sandbox-exec",
                 "profile": workspace / "review.sb",
@@ -460,6 +472,10 @@ class ReviewGateTest(unittest.TestCase):
             self.assertEqual(temp, run.call_args.kwargs["cwd"])
             payload = json.loads(run.call_args.kwargs["input"])
             self.assertEqual(paths["diff"], payload["untrusted_frozen_diff"])
+            self.assertEqual(
+                paths["reference_context"],
+                payload["untrusted_exact_head_cross_file_context"],
+            )
             self.assertRegex(payload["frozen_diff_sha256"], r"^[0-9a-f]{64}$")
             json.dumps(result)
 
@@ -562,6 +578,30 @@ class ReviewGateTest(unittest.TestCase):
                 {"/allowed/deleted"},
                 producer._changed_paths({"/allowed/deleted": (1,)}, {}),
             )
+            hardlink_root = root / "hardlink-root"
+            hardlink_root.mkdir()
+            os.link(outside, hardlink_root / "linked")
+            with self.assertRaisesRegex(ValueError, "contains a hard link"):
+                producer._external_snapshot((hardlink_root,), root / "missing-index")
+
+            context = root / "context"
+            context.mkdir()
+            (context / "changed.py").write_text("def parse(payload): pass\n")
+            (context / "consumer.py").write_text("parse(payload)\n")
+            diff = (
+                "diff --git a/changed.py b/changed.py\n"
+                "+++ b/changed.py\n+def parse(payload): pass\n"
+            )
+            references = producer._reference_context(context, diff)
+            self.assertEqual(
+                ["consumer.py:1: parse(payload)"],
+                references["unchanged_references"],
+            )
+            with (
+                mock.patch.object(producer, "MAX_CONTEXT_BYTES", 10),
+                self.assertRaisesRegex(ValueError, "output bound"),
+            ):
+                producer._reference_context(context, diff)
 
     def test_each_pass_binds_a_trusted_gstack_checklist(self):
         producer = load_producer()
@@ -586,6 +626,58 @@ class ReviewGateTest(unittest.TestCase):
             self.assertIn(
                 content, producer._prompt("testing", self.base, self.head, content)
             )
+
+    def test_preamble_disables_user_zsh_startup_files(self):
+        producer = load_producer()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            home, workspace, temp = root / "home", root / "workspace", root / "temp"
+            skill = root / "review-skill.md"
+            skill.write_text("trusted preamble")
+            workspace.mkdir()
+            temp.mkdir()
+            paths = {
+                "home": home,
+                "workspace": workspace,
+                "gstack_home": home / ".gstack" / "head",
+                "temp_root": temp,
+                "sandbox": "/usr/bin/sandbox-exec",
+                "profile": workspace / "review.sb",
+                "zsh": "/bin/zsh",
+            }
+
+            def completed(*_args, **_kwargs):
+                (home / ".gstack" / "sessions").mkdir(parents=True)
+                (home / ".gstack" / "sessions" / "1").write_text("created")
+                (home / ".gstack" / "analytics").mkdir()
+                stdout = "\n".join(
+                    (
+                        "TELEMETRY: off",
+                        "CHECKPOINT_MODE: explicit",
+                        "CHECKPOINT_PUSH: false",
+                        "SPAWNED_SESSION: true",
+                    )
+                )
+                return subprocess.CompletedProcess([], 0, stdout, "")
+
+            helpers = {name: "a" * 64 for name in (
+                "gstack-update-check",
+                "gstack-config",
+                "gstack-repo-mode",
+                "gstack-slug",
+                "gstack-timeline-log",
+            )}
+            with (
+                mock.patch.object(
+                    producer, "_gstack_preamble", return_value=(skill, "echo ok", helpers)
+                ),
+                mock.patch.object(producer.subprocess, "run", side_effect=completed) as run,
+            ):
+                result = producer._run_preamble({"review_head": self.head}, paths)
+            command = run.call_args.args[0]
+            self.assertEqual(["/bin/zsh", "-f", "-c"], command[3:6])
+            self.assertEqual(str(temp), run.call_args.kwargs["env"]["ZDOTDIR"])
+            self.assertEqual("completed", result["status"])
 
     def test_fixed_git_ignores_path_and_git_dir_injection(self):
         expected = subprocess.run(
@@ -614,6 +706,16 @@ class ReviewGateTest(unittest.TestCase):
             self.gate.TRUSTED_TOOL_CANDIDATES["gh"],
         )
 
+    def test_fixed_producer_requires_the_darwin_seatbelt_runner(self):
+        producer = load_producer()
+        with (
+            mock.patch.object(producer.sys, "platform", "linux"),
+            self.assertRaisesRegex(ValueError, "needs a Darwin runner"),
+        ):
+            producer._require_supported_runner()
+        with mock.patch.object(producer.sys, "platform", "darwin"):
+            self.assertIsNone(producer._require_supported_runner())
+
     def test_managed_auth_symlink_is_allowed_by_link_location_only(self):
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp)
@@ -637,6 +739,9 @@ class ReviewGateTest(unittest.TestCase):
             root = Path(tmp).resolve()
             evidence = root / "evidence"
             evidence.mkdir()
+            temp_root = root / "codex-review-test"
+            context_root = temp_root / "frozen-repo"
+            context_root.mkdir(parents=True)
             profile = evidence / "review.sb"
             producer._sandbox_profile(
                 profile,
@@ -644,7 +749,8 @@ class ReviewGateTest(unittest.TestCase):
                 root / "gstack",
                 root / "sessions",
                 root / "session_index.jsonl",
-                root / "codex-review-test",
+                temp_root,
+                context_root,
             )
             injected = evidence / "injection.sb"
             producer._sandbox_profile(
@@ -653,7 +759,8 @@ class ReviewGateTest(unittest.TestCase):
                 root / "gstack",
                 root / "sessions",
                 root / "session_index.jsonl",
-                root / "codex-review-test",
+                temp_root,
+                context_root,
             )
             self.assertEqual(
                 1,
@@ -680,6 +787,17 @@ class ReviewGateTest(unittest.TestCase):
             self.assertEqual(0, allowed.returncode, allowed.stderr)
             self.assertNotEqual(0, denied.returncode)
             self.assertFalse(denied_path.exists())
+            context_denied = subprocess.run(
+                [
+                    "/usr/bin/sandbox-exec",
+                    "-f",
+                    profile,
+                    "/usr/bin/touch",
+                    context_root / "denied",
+                ],
+                capture_output=True,
+            )
+            self.assertNotEqual(0, context_denied.returncode)
 
     def test_small_and_large_code_diffs_require_the_same_core_matrix(self):
         self.assertEqual([], self.errors())
@@ -934,6 +1052,8 @@ class ReviewGateTest(unittest.TestCase):
         )
         with self.assertRaisesRegex(ValueError, "canonical PR URL"):
             self.gate._pr_identity("ssh://github.com/example/repo/pull/1")
+        with self.assertRaisesRegex(ValueError, "canonical PR URL"):
+            self.gate._pr_identity("https://attacker.example/example/repo/pull/1")
 
         pr = {
             "url": self.record["pr_url"],
@@ -1363,6 +1483,7 @@ class ReviewGateTest(unittest.TestCase):
                         mock.patch.object(
                             producer, "_run_preamble", side_effect=preamble
                         ),
+                        mock.patch.object(producer, "_require_supported_runner"),
                         mock.patch.object(
                             producer, "_review_one", side_effect=review_one
                         ),

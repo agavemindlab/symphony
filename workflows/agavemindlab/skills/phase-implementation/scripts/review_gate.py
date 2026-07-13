@@ -850,7 +850,7 @@ def _pr_identity(pr_url):
     parts = parsed.path.strip("/").split("/")
     if (
         parsed.scheme != "https"
-        or not parsed.hostname
+        or parsed.hostname != "github.com"
         or len(parts) != 4
         or parts[2] != "pull"
         or not parts[3].isdigit()
