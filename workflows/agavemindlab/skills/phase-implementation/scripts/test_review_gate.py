@@ -537,6 +537,10 @@ class ReviewGateTest(unittest.TestCase):
         ):
             self.gate._run(["git", "status", "--porcelain"])
         self.assertEqual(60, run.call_args.kwargs["timeout"])
+        command = run.call_args.args[0]
+        self.assertIn("core.fsmonitor=false", command)
+        self.assertIn(f"core.hooksPath={os.devnull}", command)
+        self.assertEqual(os.devnull, run.call_args.kwargs["env"]["GIT_CONFIG_GLOBAL"])
 
     def test_attempt_markers_and_atomic_writes_prevent_same_turn_rerolls(self):
         producer = load_producer()
@@ -574,11 +578,10 @@ class ReviewGateTest(unittest.TestCase):
                     {"review_head": self.head, "status": "completed", "turn": "turn-a"}
                 )
             )
-            with (
-                mock.patch.dict(os.environ, {"CODEX_THREAD_ID": "turn-b"}),
-                self.assertRaisesRegex(ValueError, "completed capture"),
-            ):
-                self.gate._reserve_attempt(record_path, self.head)
+            with mock.patch.dict(os.environ, {"CODEX_THREAD_ID": "turn-b"}):
+                fresh, fresh_lock = self.gate._reserve_attempt(record_path, self.head)
+                self.gate._finish_attempt(fresh, self.head, "failed", lock=fresh_lock)
+            self.assertEqual("failed", json.loads(fresh.read_text())["status"])
 
             symlink_record = root / "symlink" / "review-gate.json"
             symlink_record.parent.mkdir()
@@ -1119,6 +1122,28 @@ class ReviewGateTest(unittest.TestCase):
         self.assertIn("required PR check is not successful: test", errors)
         self.assertIn("PR has unresolved change requests: reviewer", errors)
         self.assertFalse(any("base commit" in error for error in errors))
+
+        def snapshot_run(command):
+            if command[:2] == ["git", "remote"]:
+                return "https://github.com/example/repo.git"
+            if command[:3] == ["gh", "pr", "view"]:
+                return json.dumps({**pr, "reviews": [], "comments": []})
+            endpoint = command[-1]
+            if endpoint.endswith("/reviews"):
+                return json.dumps(
+                    [[{"id": 7, "user": {"login": "human"}, "body": "review", "state": "COMMENTED", "submitted_at": "2026-07-13T09:00:00Z"}]]
+                )
+            if "/issues/" in endpoint:
+                return json.dumps([[{"id": 8, "body": "comment"}]])
+            return json.dumps([[]])
+
+        with (
+            mock.patch.object(self.gate, "_run", side_effect=snapshot_run),
+            mock.patch.object(self.gate, "_required_checks", return_value=[]),
+        ):
+            snapshot, _ = self.gate._github_snapshot(record)
+        self.assertEqual([7], [item["id"] for item in snapshot["reviews"]])
+        self.assertEqual([8], [item["id"] for item in snapshot["comments"]])
 
         unrelated = {
             **pr,

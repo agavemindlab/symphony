@@ -244,7 +244,8 @@ an actionable blocker handoff until an equivalent write-audit sandbox exists.
    entire review run. Discard all old pass and finding verdicts, restore a clean
    committed tree, push the new commit, and rerun the full matrix. Before
    handoff, fetch PR feedback once more and require current `HEAD` and the PR
-   head both equal `review_head`; new feedback or a mismatch restarts the loop.
+   head both equal `review_head`; new feedback restarts the feedback sweep, and
+   any resulting HEAD mismatch restarts the full review loop.
    Record every created `/tmp/codex-{adv,review}-*` path and remove it before
    verification; a surviving path is non-clean.
 

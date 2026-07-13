@@ -337,8 +337,6 @@ def _reserve_attempt(record_path, head):
                 or not _text(attempt.get("turn"))
             ):
                 raise ValueError("review attempt marker is invalid")
-            if attempt["status"] == "completed":
-                raise ValueError("review HEAD already has a completed capture")
         path = root / f"{hashlib.sha256(turn.encode()).hexdigest()}.json"
         _exclusive_write(
             path,
@@ -804,7 +802,17 @@ def _run_result(command):
     }
     if name == "git":
         env["GIT_CONFIG_NOSYSTEM"] = "1"
-        command = [command[0], "-C", str(Path.cwd().resolve()), *command[1:]]
+        env["GIT_CONFIG_GLOBAL"] = os.devnull
+        command = [
+            command[0],
+            "-c",
+            "core.fsmonitor=false",
+            "-c",
+            f"core.hooksPath={os.devnull}",
+            "-C",
+            str(Path.cwd().resolve()),
+            *command[1:],
+        ]
     else:
         for variable in ("GH_TOKEN", "GITHUB_TOKEN"):
             if os.environ.get(variable):
@@ -894,6 +902,51 @@ def _github_snapshot(record):
             ]
         )
     )
+    reviews = _flatten_pages(
+        json.loads(
+            _run(
+                [
+                    "gh",
+                    "api",
+                    "--hostname",
+                    host,
+                    "--paginate",
+                    "--slurp",
+                    f"repos/{repo}/pulls/{pr_number}/reviews",
+                ]
+            )
+            or "[]"
+        )
+    )
+    pr["reviews"] = [
+        {
+            "id": item.get("id"),
+            "author": {"login": (item.get("user") or {}).get("login")},
+            "body": item.get("body"),
+            "state": item.get("state"),
+            "submittedAt": item.get("submitted_at"),
+        }
+        for item in reviews
+    ]
+    comments = _flatten_pages(
+        json.loads(
+            _run(
+                [
+                    "gh",
+                    "api",
+                    "--hostname",
+                    host,
+                    "--paginate",
+                    "--slurp",
+                    f"repos/{repo}/issues/{pr_number}/comments",
+                ]
+            )
+            or "[]"
+        )
+    )
+    pr["comments"] = [
+        {"id": item.get("id"), "body": item.get("body")} for item in comments
+    ]
     pr["_requiredChecks"] = _required_checks(pr_url)
     inline = _flatten_pages(
         json.loads(

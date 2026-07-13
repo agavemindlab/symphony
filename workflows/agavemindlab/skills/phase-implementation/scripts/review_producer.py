@@ -195,6 +195,7 @@ def _git_env(home):
         "LANG": "C.UTF-8",
         "LC_ALL": "C.UTF-8",
         "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_CONFIG_GLOBAL": os.devnull,
     }
 
 
@@ -963,7 +964,15 @@ def produce(record_path):
         raise ValueError("record lacks issue_identifier")
     git = _trusted_tool("git", home, workspace)
     git_env = _git_env(home)
-    git_command = [git, "-C", str(workspace)]
+    git_command = [
+        git,
+        "-c",
+        "core.fsmonitor=false",
+        "-c",
+        f"core.hooksPath={os.devnull}",
+        "-C",
+        str(workspace),
+    ]
     if _output([*git_command, "rev-parse", "--show-toplevel"], env=git_env) != str(
         workspace
     ):
@@ -1025,7 +1034,14 @@ def produce(record_path):
             "home": home,
             "gstack_home": config_path.parent,
             "diff": _output(
-                [*git_command, "diff", "--no-ext-diff", f"{base}...{head}"], env=git_env
+                [
+                    *git_command,
+                    "diff",
+                    "--no-ext-diff",
+                    "--binary",
+                    f"{base}...{head}",
+                ],
+                env=git_env,
             ),
             "outputs": evidence,
             "profile": profile,
@@ -1076,11 +1092,8 @@ def produce(record_path):
         findings, finding_errors = _validate_and_audit(raw_findings, record, paths)
         runtime_errors.extend(finding_errors)
         writes_after = _external_snapshot(
-            (home / ".gstack", session_root, temp_root), session_index
+            (home / ".gstack", session_root), session_index
         )
-        temp_writes = [
-            path for path in writes_after if Path(path).is_relative_to(temp_root)
-        ]
     finally:
         if temp_root.exists() and not temp_root.is_symlink():
             _cleanup_temp(temp_root)
@@ -1094,9 +1107,7 @@ def produce(record_path):
         [*git_command, "status", "--porcelain"], env=git_env
     ):
         runtime_errors.append("HEAD or worktree changed during review")
-    writes = sorted(
-        _changed_paths(writes_before, writes_after) | {str(temp_root), *temp_writes}
-    )
+    writes = sorted(_changed_paths(writes_before, writes_after) | {str(temp_root)})
     return {
         "producer": {
             "kind": "fixed-review-producer",
