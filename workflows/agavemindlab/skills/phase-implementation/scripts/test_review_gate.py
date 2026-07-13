@@ -549,9 +549,9 @@ class ReviewGateTest(unittest.TestCase):
             )
 
         managed_temp = deepcopy(self.record)
-        managed_temp["writes"].extend(
-            ["/tmp/codex-adv-1234/child", "/private/tmp/codex-review-5678/child"]
-        )
+        managed_temp["writes"].append("/tmp/codex-adv-1234/child")
+        if os.path.realpath("/tmp") == "/private/tmp":
+            managed_temp["writes"].append("/private/tmp/codex-review-5678/child")
         self.assertEqual([], self.errors(managed_temp))
 
         if os.path.realpath("/tmp") != "/private/tmp":
@@ -1068,7 +1068,7 @@ class ReviewGateTest(unittest.TestCase):
                     tools = {
                         "git": "/usr/bin/git",
                         "sandbox-exec": "/usr/bin/sandbox-exec",
-                        "zsh": "/bin/zsh",
+                        "zsh": "/bin/sh",
                         "codex": "/usr/bin/true",
                         "claude": "/usr/bin/true",
                     }
