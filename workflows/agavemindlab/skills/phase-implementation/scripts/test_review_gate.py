@@ -74,12 +74,6 @@ class ReviewGateTest(unittest.TestCase):
     def errors(self, record=None):
         return self.gate.evaluate(record or self.record)
 
-    @staticmethod
-    def replay_handoff(gate_result):
-        if gate_result.returncode:
-            return {"state": "Implementation", "artifacts": []}
-        return {"state": "Human Review", "artifacts": ["## Implementation"]}
-
     def test_small_and_large_code_diffs_require_the_same_core_matrix(self):
         self.assertEqual([], self.errors())
 
@@ -107,6 +101,10 @@ class ReviewGateTest(unittest.TestCase):
             self.assertEqual(
                 [*self.gate.ALWAYS_PASSES, "design"], json.loads(result.stdout)["passes"]
             )
+            dispatched = []
+            for name in json.loads(result.stdout)["passes"]:
+                dispatched.append(name)
+            self.assertEqual([*self.gate.ALWAYS_PASSES, "design"], dispatched)
 
     def test_failed_timeout_unavailable_and_unparsable_passes_fail_closed(self):
         for status in ("failed", "timeout", "unavailable", "unparsable"):
@@ -142,6 +140,13 @@ class ReviewGateTest(unittest.TestCase):
         bad_config = deepcopy(self.record)
         bad_config["config"]["telemetry"] = "community"
         self.assertIn("config telemetry must be 'off'", self.errors(bad_config))
+
+        boolean_evidence = deepcopy(self.record)
+        boolean_evidence["passes"][0]["evidence"] = True
+        boolean_evidence["applicability"]["api-contract"]["reason"] = True
+        errors = self.errors(boolean_evidence)
+        self.assertIn("required pass core-correctness lacks evidence", errors)
+        self.assertIn("N/A pass api-contract lacks a reason", errors)
 
     def test_findings_are_validated_dismissed_or_downgraded_before_action(self):
         true_finding = {
@@ -223,6 +228,11 @@ class ReviewGateTest(unittest.TestCase):
         empty_validator["raw_findings"] = [{"id": "raw-false"}]
         empty_validator["findings"] = [finding]
         self.assertIn("finding 1 lacks an independent validator", self.errors(empty_validator))
+
+        boolean_line = deepcopy(empty_validator)
+        boolean_line["findings"][0]["validator"] = "validator-2"
+        boolean_line["findings"][0]["line"] = True
+        self.assertIn("finding 1 lacks file:line evidence", self.errors(boolean_line))
 
         still_p1 = deepcopy(self.record)
         finding = deepcopy(overstated)
@@ -391,8 +401,8 @@ class ReviewGateTest(unittest.TestCase):
             )
             self.assertEqual(0, clean_a.returncode, clean_a.stdout)
             self.assertEqual(
-                {"state": "Human Review", "artifacts": ["## Implementation"]},
-                self.replay_handoff(clean_a),
+                ["publish_implementation_artifact", "move_human_review"],
+                json.loads(clean_a.stdout)["handoff_actions"],
             )
             snapshot_a = subprocess.run(
                 [sys.executable, SCRIPT, "--snapshot", record_path],
@@ -433,13 +443,23 @@ class ReviewGateTest(unittest.TestCase):
             self.assertEqual(1, incomplete_b.returncode)
             self.assertIn("missing required pass: core-correctness", json.loads(incomplete_b.stdout)["errors"])
             self.assertEqual(
-                {"state": "Implementation", "artifacts": []},
-                self.replay_handoff(incomplete_b),
+                [],
+                json.loads(incomplete_b.stdout)["handoff_actions"],
             )
 
-            record_b["passes"] = [
-                {**item, "review_base": base, "review_head": head_b} for item in record_a["passes"]
-            ]
+            dispatched_b = []
+            record_b["passes"] = []
+            for item in record_a["passes"]:
+                dispatched_b.append(item["name"])
+                record_b["passes"].append(
+                    {
+                        **item,
+                        "review_base": base,
+                        "review_head": head_b,
+                        "evidence": f"{item['name']} freshly completed on {head_b}",
+                    }
+                )
+            self.assertEqual([item["name"] for item in record_a["passes"]], dispatched_b)
             record_b["pr_feedback_digest"] = github_env(head_b)[1]
             record_path.write_text(json.dumps(record_b))
             subprocess.run(["git", "push", "fork", "review"], cwd=repo, check=True, capture_output=True)
@@ -452,8 +472,8 @@ class ReviewGateTest(unittest.TestCase):
             )
             self.assertEqual(0, clean_b.returncode, clean_b.stdout)
             self.assertEqual(
-                {"state": "Human Review", "artifacts": ["## Implementation"]},
-                self.replay_handoff(clean_b),
+                ["publish_implementation_artifact", "move_human_review"],
+                json.loads(clean_b.stdout)["handoff_actions"],
             )
 
     def test_grotto_resolves_the_same_gate_script(self):

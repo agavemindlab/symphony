@@ -258,7 +258,8 @@ unique open PR from the upstream repository, current branch, base branch, and
 exact HEAD; checks CI and the recorded feedback digest; then rereads local and
 PR HEAD, feedback, and worktree state immediately before verdict. Its exit
 status 0 is the sole machine handoff predicate;
-preserve its JSON output as review evidence. Any other exit is non-clean: leave
+preserve its JSON output as review evidence and perform only its two emitted
+`handoff_actions`. A non-clean result emits no handoff actions: leave
 the issue in Implementation without publishing the artifact or moving its state. This
 required-review failure is not eligible for the blocked-access Human Review
 escape hatch.

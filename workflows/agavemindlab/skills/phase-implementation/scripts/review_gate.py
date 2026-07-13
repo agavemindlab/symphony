@@ -36,6 +36,10 @@ REQUIRED_CONFIG = {
 SEVERITIES = {"P0", "P1", "P2", "P3", "P4"}
 
 
+def _text(value):
+    return isinstance(value, str) and bool(value.strip())
+
+
 def _under(path, root):
     try:
         return os.path.commonpath((path, root)) == root
@@ -77,7 +81,7 @@ def required_passes(record):
         if decision.get("required") is True:
             expected.append(name)
         elif decision.get("required") is False:
-            if not decision.get("reason"):
+            if not _text(decision.get("reason")):
                 errors.append(f"N/A pass {name} lacks a reason")
         else:
             errors.append(f"pass {name} lacks applicability decision")
@@ -92,22 +96,26 @@ def _validate_finding(finding, number, errors):
 
     path = finding.get("path")
     line = finding.get("line")
-    if not path or not isinstance(line, int) or line < 1:
+    if not _text(path) or type(line) is not int or line < 1:
         errors.append(f"finding {number} lacks file:line evidence")
-    if not finding.get("validation_evidence"):
+    if not _text(finding.get("validation_evidence")):
         errors.append(f"finding {number} lacks independent validation evidence")
     validator = finding.get("validator")
-    if not finding.get("reporter") or not validator or validator == finding.get("reporter"):
+    if (
+        not _text(finding.get("reporter"))
+        or not _text(validator)
+        or validator == finding.get("reporter")
+    ):
         errors.append(f"finding {number} lacks an independent validator")
 
     if disposition in {"validated", "downgraded"}:
         severity = finding.get("final_severity")
-        if not finding.get("severity_evidence") or not severity:
+        if not _text(finding.get("severity_evidence")) or not severity:
             errors.append(f"finding {number} lacks independent severity audit")
         elif severity not in SEVERITIES:
             errors.append(f"finding {number} has invalid final severity")
         auditor = finding.get("auditor")
-        if not auditor or auditor in {finding.get("reporter"), validator}:
+        if not _text(auditor) or auditor in {finding.get("reporter"), validator}:
             errors.append(f"finding {number} lacks an independent severity auditor")
     if disposition in {"validated", "downgraded"} and finding.get("final_severity") in {"P0", "P1"}:
         errors.append(f"audited blocking finding remains: {path}:{line}")
@@ -205,7 +213,7 @@ def evaluate(record):
         status = item.get("status")
         if status != "completed":
             errors.append(f"required pass {name} is {status}")
-        if not item.get("evidence"):
+        if not _text(item.get("evidence")):
             errors.append(f"required pass {name} lacks evidence")
         if item.get("review_base") != base or item.get("review_head") != head:
             errors.append(f"required pass {name} reviewed a different range")
@@ -214,9 +222,9 @@ def evaluate(record):
     raw_ids = [finding.get("id") for finding in raw_findings]
     final_findings = record.get("findings") or []
     final_ids = [finding.get("raw_finding_id") for finding in final_findings]
-    if any(not finding_id for finding_id in raw_ids) or len(raw_ids) != len(set(raw_ids)):
+    if any(not _text(finding_id) for finding_id in raw_ids) or len(raw_ids) != len(set(raw_ids)):
         errors.append("raw findings require unique non-empty ids")
-    if any(not finding_id for finding_id in final_ids) or len(final_ids) != len(set(final_ids)):
+    if any(not _text(finding_id) for finding_id in final_ids) or len(final_ids) != len(set(final_ids)):
         errors.append("final findings require unique raw_finding_id values")
     if set(raw_ids) != set(final_ids):
         errors.append("every raw finding requires exactly one final disposition")
@@ -358,6 +366,9 @@ def main(argv):
         json.dumps(
             {
                 "verdict": "clean" if not errors else "non-clean",
+                "handoff_actions": (
+                    ["publish_implementation_artifact", "move_human_review"] if not errors else []
+                ),
                 "review_head": record.get("review_head"),
                 "errors": errors,
             },
