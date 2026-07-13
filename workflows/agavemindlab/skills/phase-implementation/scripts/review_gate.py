@@ -40,6 +40,10 @@ def _text(value):
     return isinstance(value, str) and bool(value.strip())
 
 
+def _identity(value):
+    return value.strip() if _text(value) else None
+
+
 def _under(path, root):
     try:
         return os.path.commonpath((path, root)) == root
@@ -100,12 +104,9 @@ def _validate_finding(finding, number, errors):
         errors.append(f"finding {number} lacks file:line evidence")
     if not _text(finding.get("validation_evidence")):
         errors.append(f"finding {number} lacks independent validation evidence")
-    validator = finding.get("validator")
-    if (
-        not _text(finding.get("reporter"))
-        or not _text(validator)
-        or validator == finding.get("reporter")
-    ):
+    reporter = _identity(finding.get("reporter"))
+    validator = _identity(finding.get("validator"))
+    if not reporter or not validator or validator == reporter:
         errors.append(f"finding {number} lacks an independent validator")
 
     if disposition in {"validated", "downgraded"}:
@@ -114,8 +115,8 @@ def _validate_finding(finding, number, errors):
             errors.append(f"finding {number} lacks independent severity audit")
         elif severity not in SEVERITIES:
             errors.append(f"finding {number} has invalid final severity")
-        auditor = finding.get("auditor")
-        if not _text(auditor) or auditor in {finding.get("reporter"), validator}:
+        auditor = _identity(finding.get("auditor"))
+        if not auditor or auditor in {reporter, validator}:
             errors.append(f"finding {number} lacks an independent severity auditor")
     if disposition in {"validated", "downgraded"} and finding.get("final_severity") in {"P0", "P1"}:
         errors.append(f"audited blocking finding remains: {path}:{line}")

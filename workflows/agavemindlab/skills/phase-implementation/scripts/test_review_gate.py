@@ -101,10 +101,6 @@ class ReviewGateTest(unittest.TestCase):
             self.assertEqual(
                 [*self.gate.ALWAYS_PASSES, "design"], json.loads(result.stdout)["passes"]
             )
-            dispatched = []
-            for name in json.loads(result.stdout)["passes"]:
-                dispatched.append(name)
-            self.assertEqual([*self.gate.ALWAYS_PASSES, "design"], dispatched)
 
     def test_failed_timeout_unavailable_and_unparsable_passes_fail_closed(self):
         for status in ("failed", "timeout", "unavailable", "unparsable"):
@@ -217,6 +213,17 @@ class ReviewGateTest(unittest.TestCase):
         biased["raw_findings"] = [{"id": "raw-overstated"}]
         biased["findings"] = [biased_finding]
         self.assertIn("finding 1 lacks an independent severity auditor", self.errors(biased))
+
+        padded = deepcopy(self.record)
+        padded_finding = deepcopy(overstated)
+        padded_finding["validator"] = f" {padded_finding['reporter']} "
+        padded["raw_findings"] = [{"id": "raw-overstated"}]
+        padded["findings"] = [padded_finding]
+        self.assertIn("finding 1 lacks an independent validator", self.errors(padded))
+
+        padded_finding["validator"] = overstated["validator"]
+        padded_finding["auditor"] = f" {overstated['validator']} "
+        self.assertIn("finding 1 lacks an independent severity auditor", self.errors(padded))
 
         omitted = deepcopy(self.record)
         omitted["raw_findings"] = [{"id": "raw-p1"}]
@@ -447,10 +454,8 @@ class ReviewGateTest(unittest.TestCase):
                 json.loads(incomplete_b.stdout)["handoff_actions"],
             )
 
-            dispatched_b = []
             record_b["passes"] = []
             for item in record_a["passes"]:
-                dispatched_b.append(item["name"])
                 record_b["passes"].append(
                     {
                         **item,
@@ -459,7 +464,6 @@ class ReviewGateTest(unittest.TestCase):
                         "evidence": f"{item['name']} freshly completed on {head_b}",
                     }
                 )
-            self.assertEqual([item["name"] for item in record_a["passes"]], dispatched_b)
             record_b["pr_feedback_digest"] = github_env(head_b)[1]
             record_path.write_text(json.dumps(record_b))
             subprocess.run(["git", "push", "fork", "review"], cwd=repo, check=True, capture_output=True)
