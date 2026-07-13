@@ -43,6 +43,14 @@ WRITE_POLICY = (
     "/tmp/codex-{adv,review}-*",
 )
 PRODUCER = Path(__file__).with_name("review_producer.py")
+TRUSTED_TOOL_CANDIDATES = {
+    "git": (Path("/usr/bin/git"), Path("/opt/homebrew/bin/git")),
+    "gh": (
+        Path("/usr/bin/gh"),
+        Path("/opt/homebrew/bin/gh"),
+        Path("/usr/local/bin/gh"),
+    ),
+}
 
 
 def _text(value):
@@ -103,10 +111,7 @@ def _sha256(path):
 
 
 def _trusted_tool(name):
-    candidates = {
-        "git": (Path("/usr/bin/git"), Path("/opt/homebrew/bin/git")),
-        "gh": (Path("/opt/homebrew/bin/gh"), Path("/usr/local/bin/gh")),
-    }[name]
+    candidates = TRUSTED_TOOL_CANDIDATES[name]
     workspace = Path.cwd().resolve()
     for candidate in candidates:
         if not candidate.exists():

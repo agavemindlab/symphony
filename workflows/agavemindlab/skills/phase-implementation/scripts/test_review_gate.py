@@ -437,6 +437,16 @@ class ReviewGateTest(unittest.TestCase):
         ):
             self.assertEqual(expected, self.gate._run(["git", "rev-parse", "HEAD"]))
 
+    def test_trusted_gh_candidates_include_linux_and_homebrew_paths(self):
+        self.assertEqual(
+            (
+                Path("/usr/bin/gh"),
+                Path("/opt/homebrew/bin/gh"),
+                Path("/usr/local/bin/gh"),
+            ),
+            self.gate.TRUSTED_TOOL_CANDIDATES["gh"],
+        )
+
     def test_managed_auth_symlink_is_allowed_by_link_location_only(self):
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp)
