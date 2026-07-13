@@ -137,8 +137,11 @@ def _change_request_authors(pr):
     for review in pr.get("reviews") or []:
         author = (review.get("author") or {}).get("login")
         submitted = review.get("submittedAt") or ""
+        state = review.get("state")
+        if state not in {"APPROVED", "CHANGES_REQUESTED", "DISMISSED"}:
+            continue
         if author and (author not in latest or submitted >= latest[author][0]):
-            latest[author] = (submitted, review.get("state"))
+            latest[author] = (submitted, state)
     return sorted(author for author, (_, state) in latest.items() if state == "CHANGES_REQUESTED")
 
 

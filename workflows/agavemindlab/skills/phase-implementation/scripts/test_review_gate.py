@@ -316,6 +316,19 @@ class ReviewGateTest(unittest.TestCase):
         self.gate._check_pr(superseded, {**record, "pr_url": superseded["url"]}, errors)
         self.assertNotIn("PR has unresolved change requests: reviewer", errors)
 
+        commented = deepcopy(pr)
+        commented["reviewDecision"] = ""
+        commented["reviews"].append(
+            {
+                "author": {"login": "reviewer"},
+                "submittedAt": "2026-07-13T09:02:00Z",
+                "state": "COMMENTED",
+            }
+        )
+        errors = []
+        self.gate._check_pr(commented, {**record, "pr_url": commented["url"]}, errors)
+        self.assertIn("PR has unresolved change requests: reviewer", errors)
+
         changed = deepcopy(pr)
         changed["comments"] = [{"id": "new-feedback", "body": "please fix"}]
         self.assertNotEqual(
