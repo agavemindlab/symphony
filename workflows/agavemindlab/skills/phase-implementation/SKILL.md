@@ -253,10 +253,11 @@ python3 "$SYMPHONY_WORKFLOW_DIR/skills/phase-implementation/scripts/review_gate.
   .symphony/review-gate.json
 ```
 
-The snapshot runs after the final PR feedback sweep. The verifier derives the
-unique open PR from the upstream repository, current branch, base branch, and
-exact HEAD; checks CI and the recorded feedback digest; then rereads local and
-PR HEAD, feedback, and worktree state immediately before verdict. Its exit
+The snapshot runs after the final PR feedback sweep. The verifier resolves the
+recorded canonical PR URL, verifies it belongs to the upstream repository, and
+requires its open state, base branch, and exact HEAD without relying on a local
+branch name. It checks CI and the recorded feedback digest, then rereads local
+and PR HEAD, feedback, and worktree state immediately before verdict. Its exit
 status 0 is the sole machine handoff predicate. Treat its two emitted
 `handoff_actions` as the only gate-authorized phase transitions, while still
 performing the Main Flow and Phase Artifact Protocol's required rework,
