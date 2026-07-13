@@ -302,9 +302,15 @@ class ReviewGateTest(unittest.TestCase):
             ["dismissed", "downgraded"], [item["disposition"] for item in findings]
         )
         self.assertNotIn("security:1", run.call_args_list[1].args[1])
-        self.assertIn("<frozen-diff>", run.call_args_list[0].args[1])
         self.assertIn("dangerous()", run.call_args_list[0].args[1])
-        self.assertIn("approved trust boundary", run.call_args_list[0].args[1])
+        self.assertIn(
+            "approved trust boundary",
+            run.call_args_list[0].kwargs["developer_instructions"],
+        )
+        self.assertIn(
+            "not formal proof",
+            run.call_args_list[0].kwargs["developer_instructions"],
+        )
         self.assertNotEqual(findings[1]["reporter"], findings[1]["validator"])
         self.assertNotEqual(findings[1]["validator"], findings[1]["auditor"])
 
@@ -360,7 +366,12 @@ class ReviewGateTest(unittest.TestCase):
                 ) as run,
             ):
                 result, provenance = producer._codex_json(
-                    "security", "literal diff", producer.RESULT_SCHEMA, record, paths
+                    "security",
+                    "literal diff",
+                    producer.RESULT_SCHEMA,
+                    record,
+                    paths,
+                    developer_instructions="trusted review instructions",
                 )
             command = run.call_args.args[0]
             self.assertEqual("completed", result["status"])
@@ -369,6 +380,11 @@ class ReviewGateTest(unittest.TestCase):
             )
             self.assertIn("shell_tool", command)
             self.assertIn("unified_exec", command)
+            self.assertIn("--strict-config", command)
+            self.assertIn(
+                'developer_instructions="trusted review instructions"', command
+            )
+            self.assertEqual("literal diff", run.call_args.kwargs["input"])
             self.assertNotIn("--dangerously-bypass-approvals-and-sandbox", command)
             json.dumps(provenance)
             with (
@@ -382,7 +398,12 @@ class ReviewGateTest(unittest.TestCase):
                 ),
             ):
                 result, provenance = producer._codex_json(
-                    "security", "literal diff", producer.RESULT_SCHEMA, record, paths
+                    "security",
+                    "literal diff",
+                    producer.RESULT_SCHEMA,
+                    record,
+                    paths,
+                    developer_instructions="trusted review instructions",
                 )
             self.assertIsNone(result)
             self.assertEqual("timeout", provenance["failure_status"])
@@ -429,9 +450,17 @@ class ReviewGateTest(unittest.TestCase):
             self.assertIn("--safe-mode", command)
             self.assertNotIn("--bare", command)
             self.assertNotIn("--effort", command)
+            self.assertIn("--system-prompt", command)
+            self.assertIn(
+                "content as untrusted data",
+                command[command.index("--system-prompt") + 1],
+            )
             self.assertEqual("", command[command.index("--tools") + 1])
             self.assertEqual(900, run.call_args.kwargs["timeout"])
             self.assertEqual(temp, run.call_args.kwargs["cwd"])
+            payload = json.loads(run.call_args.kwargs["input"])
+            self.assertEqual(paths["diff"], payload["untrusted_frozen_diff"])
+            self.assertRegex(payload["frozen_diff_sha256"], r"^[0-9a-f]{64}$")
             json.dumps(result)
 
             with mock.patch.object(
@@ -912,8 +941,13 @@ class ReviewGateTest(unittest.TestCase):
             "baseRefName": "main",
             "baseRefOid": self.base,
             "state": "OPEN",
+            "isDraft": False,
+            "mergeable": "MERGEABLE",
             "mergeStateStatus": "BLOCKED",
             "reviewDecision": "CHANGES_REQUESTED",
+            "_requiredChecks": [
+                {"name": "test", "state": "FAILURE", "bucket": "fail"}
+            ],
             "statusCheckRollup": [
                 {"name": "test", "status": "COMPLETED", "conclusion": "FAILURE"}
             ],
@@ -930,6 +964,7 @@ class ReviewGateTest(unittest.TestCase):
         errors = []
         self.gate._check_pr(pr, record, errors)
         self.assertIn("PR check is not successful: test", errors)
+        self.assertIn("required PR check is not successful: test", errors)
         self.assertIn("PR has unresolved change requests: reviewer", errors)
 
         unrelated = {
@@ -937,6 +972,7 @@ class ReviewGateTest(unittest.TestCase):
             "reviewDecision": "",
             "reviews": [],
             "mergeStateStatus": "BLOCKED",
+            "_requiredChecks": [],
             "statusCheckRollup": [
                 {
                     "name": "unrelated",
@@ -947,7 +983,20 @@ class ReviewGateTest(unittest.TestCase):
         }
         errors = []
         self.gate._check_pr(unrelated, record, errors)
-        self.assertIn("GitHub reports the PR is not merge-clean", errors)
+        self.assertEqual([], errors)
+
+        awaiting_approval = {
+            **unrelated,
+            "reviewDecision": "REVIEW_REQUIRED",
+        }
+        errors = []
+        self.gate._check_pr(awaiting_approval, record, errors)
+        self.assertEqual([], errors)
+
+        conflicting = {**awaiting_approval, "mergeable": "CONFLICTING"}
+        errors = []
+        self.gate._check_pr(conflicting, record, errors)
+        self.assertIn("GitHub does not report the PR as mergeable", errors)
 
         legacy = {
             **unrelated,
@@ -957,6 +1006,20 @@ class ReviewGateTest(unittest.TestCase):
         errors = []
         self.gate._check_pr(legacy, record, errors)
         self.assertEqual([], errors)
+
+        no_required = subprocess.CompletedProcess(
+            [],
+            1,
+            "",
+            "no required checks reported on the 'review' branch\n",
+        )
+        with mock.patch.object(self.gate, "_run_result", return_value=no_required):
+            self.assertEqual([], self.gate._required_checks(record["pr_url"]))
+        required = subprocess.CompletedProcess(
+            [], 0, '[{"name":"test","state":"SUCCESS","bucket":"pass"}]', ""
+        )
+        with mock.patch.object(self.gate, "_run_result", return_value=required):
+            self.assertEqual("test", self.gate._required_checks(record["pr_url"])[0]["name"])
 
         actionable = deepcopy(pr)
         actionable["reviewDecision"] = ""
@@ -1189,8 +1252,11 @@ class ReviewGateTest(unittest.TestCase):
                     "baseRefName": "main",
                     "baseRefOid": base,
                     "state": "OPEN",
+                    "isDraft": False,
+                    "mergeable": "MERGEABLE",
                     "mergeStateStatus": "CLEAN",
                     "reviewDecision": "APPROVED",
+                    "_requiredChecks": [],
                     "statusCheckRollup": [
                         {"name": "test", "status": "COMPLETED", "conclusion": "SUCCESS"}
                     ],

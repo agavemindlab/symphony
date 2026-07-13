@@ -616,6 +616,10 @@ def _check_pr(pr, record, errors):
         errors.append("PR base commit does not match review base")
     if pr.get("state") != "OPEN":
         errors.append("PR is not open")
+    if pr.get("isDraft") is True:
+        errors.append("PR is still a draft")
+    if pr.get("mergeable") != "MERGEABLE":
+        errors.append("GitHub does not report the PR as mergeable")
     change_request_authors = _change_request_authors(pr)
     if pr.get("reviewDecision") == "CHANGES_REQUESTED" or change_request_authors:
         errors.append(
@@ -625,8 +629,6 @@ def _check_pr(pr, record, errors):
     checks = pr.get("statusCheckRollup") or []
     if not checks:
         errors.append("PR status checks are empty")
-    if pr.get("mergeStateStatus") != "CLEAN":
-        errors.append("GitHub reports the PR is not merge-clean")
     for check in checks:
         conclusion = check.get("conclusion") or check.get("state")
         status = check.get("status")
@@ -634,10 +636,13 @@ def _check_pr(pr, record, errors):
             errors.append(
                 f"PR check is not complete: {check.get('name') or check.get('context')}"
             )
-        if conclusion != "SUCCESS":
+        if conclusion not in {"SUCCESS", "SKIPPED", "NEUTRAL"}:
             errors.append(
                 f"PR check is not successful: {check.get('name') or check.get('context')}"
             )
+    for check in pr.get("_requiredChecks") or []:
+        if check.get("bucket") != "pass":
+            errors.append(f"required PR check is not successful: {check.get('name')}")
 
 
 def _check_final_snapshot(
@@ -788,7 +793,7 @@ def evaluate(record):
     return errors
 
 
-def _run(command):
+def _run_result(command):
     name = command[0]
     if name not in {"git", "gh"}:
         raise ValueError(f"gate refuses untrusted command: {name}")
@@ -807,8 +812,37 @@ def _run(command):
             if os.environ.get(variable):
                 env[variable] = os.environ[variable]
     return subprocess.run(
-        command, capture_output=True, text=True, check=True, timeout=60, env=env
-    ).stdout.strip()
+        command, capture_output=True, text=True, timeout=60, env=env
+    )
+
+
+def _run(command):
+    result = _run_result(command)
+    result.check_returncode()
+    return result.stdout.strip()
+
+
+def _required_checks(pr_url):
+    result = _run_result(
+        [
+            "gh",
+            "pr",
+            "checks",
+            pr_url,
+            "--required",
+            "--json",
+            "name,state,bucket,workflow",
+        ]
+    )
+    if result.returncode == 0:
+        checks = json.loads(result.stdout or "[]")
+        if not isinstance(checks, list):
+            raise ValueError("GitHub required-check snapshot is malformed")
+        return checks
+    message = (result.stdout + result.stderr).strip()
+    if result.returncode == 1 and message.startswith("no required checks reported on the '"):
+        return []
+    result.check_returncode()
 
 
 def _pr_identity(pr_url):
@@ -858,10 +892,11 @@ def _github_snapshot(record):
                 "--repo",
                 f"{host}/{repo}",
                 "--json",
-                "headRefOid,baseRefName,baseRefOid,state,url,mergeStateStatus,reviewDecision,statusCheckRollup,reviews,comments",
+                "headRefOid,baseRefName,baseRefOid,state,url,isDraft,mergeable,mergeStateStatus,reviewDecision,statusCheckRollup,reviews,comments",
             ]
         )
     )
+    pr["_requiredChecks"] = _required_checks(pr_url)
     inline = _flatten_pages(
         json.loads(
             _run(
