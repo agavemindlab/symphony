@@ -397,17 +397,22 @@ workpad Plan item), it invokes the `symphony-issue` skill. Two tiers:
 
 Canonical project routing registry for spawned issues:
 
+The first column is the exact Linear project name. Route by ownership of the
+work, not by where it was discovered. "Repo-local" means code or configuration
+in that product repository; shared cluster, cloud, organization, and runtime
+controls belong to `gl-infra`.
+
 | Linear project | Project owns | Route here for |
 |----------------|--------------|----------------|
-| `symphony` | Symphony orchestration and shared workflow behavior | workflow prompts, phase skills, agent state, Linear/GitHub review flow, Maestro advisor behavior |
-| `grotto` | Grotto repository delivery | app/repo code, repo CI, release workflow, repo-owned runbooks, repo-owned environment gate logic |
-| `gl-infra` | Operational infrastructure | clusters/namespaces, DB/Redis/PVC/storage, secrets, NetworkPolicy, RBAC, GitHub protected environments, operator profiles, runtime accounts, reset/seed, feature-flag allowlists |
-| `gl-skills` | Reusable agent capability packages | standalone skills/plugins/tools that are not specific to the Symphony workflow itself or one product repo |
-| `voxvault` | VoxVault repository delivery | app/repo code, repo CI, release workflow, repo-owned runbooks, repo-owned environment gate logic |
-| `tuneframe` | TuneFrame repository delivery | app/repo code, repo CI, release workflow, repo-owned runbooks, repo-owned environment gate logic |
-| `pastok-website` | Pastok website repository delivery | app/repo code, repo CI, release workflow, repo-owned runbooks, repo-owned environment gate logic |
+| `symphony` | Symphony engine, orchestration, and shared workflow source | orchestrator code, workflow prompts, Symphony-specific phase skills, agent state, Linear/GitHub review flow, Maestro behavior, and shared workflow mechanics; not product code, infrastructure, or standalone reusable skills |
+| `grotto` | Pastok web product repository | Grotto backend/frontend, document storage/search/chat, upload/transcription pipeline, application database schema/migrations, Docker/Compose, repo-local CI/deploy/release workflows, runbooks, and repo-local gates; not shared database or cluster provisioning |
+| `gl-infra` | Shared cloud, cluster, organization, and runtime infrastructure | AWS/EKS/Kubernetes clusters and namespaces, Terraform/Ansible/Helmfile, shared DB/Redis/PVC/storage/networking/observability, RBAC/service accounts/secrets, GitHub protected environments, operator profiles, runtime accounts, reset/seed, and feature-flag allowlists; not product code, repo-local CI/deploy files, or application migrations |
+| `gl-skills` | Reusable agent capability and knowledge packages | standalone skills, plugins, contexts, knowledge, catalogs, installers, validators, and related tools used by multiple agents/projects; not Symphony's own orchestration skills or product/infra implementation |
+| `voxvault` | Pastok's iOS/watchOS client repository | Swift/Xcode app code, Apple Watch and Action Button recording, mobile UI/widgets/extensions, audio capture and Grotto sync, mobile tests/docs, and repo-owned build/signing/release configuration; not Grotto backend or shared infrastructure |
+| `tuneframe` | TuneFrame web product repository | Next.js app, simulated music-video generation flow, gallery, pricing and Stripe test-mode integration, public sample assets, app tests, repo-local CI/deploy/release workflows, and app-owned gates; not payment/cluster/secret infrastructure |
+| `pastok-website` | Pastok marketing/product website repository | website UI and components, product copy/pricing/FAQ/privacy, feature demos/assets, website tests, repo-local CI/deploy/release workflows, and app-owned gates; not the Grotto backend, VoxVault client, or shared infrastructure |
 
-Known Linear projects that are not spawned-issue targets in this workflow:
+Known names that are not spawned-issue targets in this workflow:
 `grandline` is the multi-project launcher/profile, and `lain` has no workflow
 directory or project mapping here. If discovered work appears to route to either
 one, do not create/propose there; ask for human routing clarification with the
