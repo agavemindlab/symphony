@@ -1389,16 +1389,22 @@ defmodule SymphonyElixir.Orchestrator do
       {:ok, issues} ->
         cleanup_issues = Enum.filter(issues, &startup_terminal_workspace_cleanup_issue?/1)
 
-        cleanup_issues
-        |> Enum.with_index(1)
-        |> Enum.each(fn
-          {%Issue{} = issue, index} ->
-            print_startup_cleanup_progress("terminal workspaces", {:issue, issue, index, length(cleanup_issues)})
-            cleanup_issue_workspace(issue)
+        Task.Supervisor.async_stream_nolink(
+          SymphonyElixir.TaskSupervisor,
+          Enum.with_index(cleanup_issues, 1),
+          fn
+            {%Issue{} = issue, index} ->
+              print_startup_cleanup_progress("terminal workspaces", {:issue, issue, index, length(cleanup_issues)})
+              cleanup_issue_workspace(issue)
 
-          {_issue, _index} ->
-            :ok
-        end)
+            {_issue, _index} ->
+              :ok
+          end,
+          max_concurrency: 4,
+          ordered: false,
+          timeout: :infinity
+        )
+        |> Stream.run()
 
       {:error, reason} ->
         print_startup_cleanup_progress("terminal workspaces", {:skip, reason})
