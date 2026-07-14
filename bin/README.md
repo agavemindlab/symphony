@@ -3,7 +3,8 @@
 `bin/symphony-run <project>` is the operator entry point for running Symphony
 against a project workflow under `workflows/<project>/`. It composes the
 environment, selects the profile, validates required variables, then execs the
-Elixir Symphony binary with the selected workflow file.
+Elixir Symphony binary with the selected workflow file. The launcher requires
+Python 3; GitHub App mode additionally requires `openssl` and `curl`.
 
 ```sh
 bin/symphony-run <project>
@@ -91,6 +92,56 @@ readers dedup by event_id).
 
 Set `SYMPHONY_PORT` in any environment layer to pass `--port` to the Symphony
 CLI and enable the dashboard.
+
+## GitHub App authentication
+
+If `GITHUB_APP_ENABLED=true` and all three GitHub App variables are set after
+the environment layers load, the launcher mints a short-lived installation
+token before starting Symphony:
+
+- `GITHUB_APP_ID`
+- `GITHUB_APP_INSTALLATION_ID`
+- `GITHUB_APP_PRIVATE_KEY_PATH`
+
+The private key path should point to a machine-local file outside the repo, such
+as a file under `~/.config/symphony/github-apps/`. Do not commit private key
+material.
+
+In GitHub App mode, the launcher:
+
+- exports the installation token as both `GH_TOKEN` and `GITHUB_TOKEN`;
+- reads the installation account from GitHub and exports `GITHUB_FORK_OWNER` as
+  that account, so workspace creation targets the org installation;
+- exports bot commit identity through `GIT_AUTHOR_NAME`,
+  `GIT_AUTHOR_EMAIL`, `GIT_COMMITTER_NAME`, and `GIT_COMMITTER_EMAIL`.
+
+`GITHUB_APP_BOT_NAME` and `GITHUB_APP_BOT_EMAIL` may override the default commit
+identity. In an App-enabled project, if any required GitHub App variable is
+missing while another is set, the launcher exits instead of silently falling
+back, because partial app config usually means the bot identity rollout is
+broken.
+
+GitHub App repository access and API permissions are configured on the GitHub
+App installation, not in repo env files. The current `gl-symphony` installation
+is installed on all `agavemindlab` repositories and has `contents:write`,
+`pull_requests:write`, `issues:write`, `workflows:write`, `metadata:read`,
+`actions:read`, `checks:read`, and `statuses:read`, which covers branch pushes,
+PR operations, comments, workflow-file updates, and read-only check/status
+inspection for installed repositories. If an operation targets a repository
+outside the installation or needs a permission the installation does not grant,
+GitHub returns an API error; fix the installation instead of adding a PAT
+fallback in app mode.
+
+When `GITHUB_APP_ENABLED` is unset or not `true`, the launcher keeps the
+existing profile/PAT behavior even if the shared profile contains GitHub App
+credentials. The committed rollout currently enables the app only in
+`workflows/symphony/project.env`; aggregate `grandline` and other project
+launchers continue using their profile identity.
+
+Existing Symphony processes and workspaces keep the tokens they were started
+with. Restart the `bin/symphony-run symphony` process after changing the switch
+or App env; restart other project launchers only when changing their own auth
+mode.
 
 ## Manual run (without the launcher)
 

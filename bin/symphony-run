@@ -1,130 +1,311 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/usr/bin/env python3
 
-usage() {
-  printf 'Usage: %s <project> [--maestro]\n' "${0##*/}" >&2
-}
+import base64
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
 
-die() {
-  printf 'symphony-run: %s\n' "$*" >&2
-  exit 1
-}
 
-maestro_mode=0
-positional=()
-for arg in "$@"; do
-  case "$arg" in
-    --maestro) maestro_mode=1 ;;
-    -*)
-      usage
-      exit 64
-      ;;
-    *) positional+=("$arg") ;;
-  esac
+APP_VARS = (
+    "GITHUB_APP_ID",
+    "GITHUB_APP_INSTALLATION_ID",
+    "GITHUB_APP_PRIVATE_KEY_PATH",
+)
+ENV_DUMP = (
+    "import os,sys; "
+    'sys.stdout.buffer.write(b"".join(k+b"="+v+b"\\0" for k,v in os.environb.items()))'
+)
+SOURCE_ENV = r"""
+set -aeuo pipefail
+python=$1
+dump=$2
+shift 2
+for file in "$@"; do
+  source "$file"
 done
+exec "$python" -c "$dump"
+"""
 
-if [ "${#positional[@]}" -ne 1 ]; then
-  usage
-  exit 64
-fi
 
-project="${positional[0]}"
+def die(message, code=1):
+    print(f"symphony-run: {message}", file=sys.stderr)
+    raise SystemExit(code)
 
-# --maestro is shorthand for the Maestro reviewer instance: same project dir,
-# the MAESTRO_WORKFLOW.md file, and the maestro profile. Explicit caller env
-# still wins over the shorthand defaults.
-if [ "$maestro_mode" -eq 1 ]; then
-  SYMPHONY_WORKFLOW_FILE="${SYMPHONY_WORKFLOW_FILE:-MAESTRO_WORKFLOW.md}"
-  SYMPHONY_PROFILE="${SYMPHONY_PROFILE:-maestro}"
-fi
 
-script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+def usage():
+    print(f"Usage: {Path(sys.argv[0]).name} <project> [--maestro]", file=sys.stderr)
 
-if [ -n "${SYMPHONY_REPO_ROOT:-}" ]; then
-  repo_root="$(cd -- "$SYMPHONY_REPO_ROOT" && pwd)"
-else
-  repo_root="$(cd -- "$script_dir/.." && pwd)"
-fi
 
-workflow_dir="$repo_root/workflows/$project"
-workflow_name="${SYMPHONY_WORKFLOW_FILE:-WORKFLOW.md}"
-case "$workflow_name" in
-  ""|*/*) die "SYMPHONY_WORKFLOW_FILE must be a file name, got: $workflow_name" ;;
-esac
+def parse_args(args):
+    maestro = False
+    positional = []
+    for arg in args:
+        if arg == "--maestro":
+            maestro = True
+        elif arg.startswith("-"):
+            usage()
+            raise SystemExit(64)
+        else:
+            positional.append(arg)
+    if len(positional) != 1:
+        usage()
+        raise SystemExit(64)
+    return positional[0], maestro
 
-default_workflow_file="$workflow_dir/WORKFLOW.md"
-if [ -L "$default_workflow_file" ]; then
-  link_target="$(readlink "$default_workflow_file")"
-  namespace="$(basename "$(dirname "$link_target")")"
-else
-  namespace="$project"
-fi
-workflow_file="$workflow_dir/$workflow_name"
-defaults_env="$repo_root/workflows/$namespace/project.env.defaults"
-project_env="$workflow_dir/project.env"
-local_env="$workflow_dir/project.env.local"
 
-[ -f "$workflow_file" ] || die "workflow file not found: $workflow_file"
-[ -f "$project_env" ] || die "project env file not found: $project_env"
+def source_env(files, env):
+    result = subprocess.run(
+        ["bash", "-c", SOURCE_ENV, "symphony-run", sys.executable, ENV_DUMP, *map(str, files)],
+        env=env,
+        stdout=subprocess.PIPE,
+        check=False,
+    )
+    if result.returncode:
+        raise SystemExit(result.returncode)
 
-caller_profile="${SYMPHONY_PROFILE:-}"
+    return {
+        os.fsdecode(key): os.fsdecode(value)
+        for entry in result.stdout.split(b"\0")
+        if entry
+        for key, separator, value in [entry.partition(b"=")]
+        if separator
+    }
 
-set -a
-[ ! -f "$defaults_env" ] || source "$defaults_env"
-source "$project_env"
-set +a
 
-if [ -n "$caller_profile" ]; then
-  SYMPHONY_PROFILE="$caller_profile"
-else
-  SYMPHONY_PROFILE="${SYMPHONY_PROFILE:-grandline}"
-fi
-export SYMPHONY_PROFILE
+def base64url(value):
+    return base64.urlsafe_b64encode(value).rstrip(b"=").decode()
 
-if [ -z "${SYMPHONY_PROJECT_SLUG:-}" ] && [ -z "${SYMPHONY_PROJECT_SLUGS:-}" ] && [ -z "${SYMPHONY_PROJECT_NAME:-}" ] && [ -z "${SYMPHONY_PROJECT_NAMES:-}" ]; then
-  die "SYMPHONY_PROJECT_SLUG, SYMPHONY_PROJECT_SLUGS, SYMPHONY_PROJECT_NAME, or SYMPHONY_PROJECT_NAMES is not set by $project_env"
-fi
 
-if [ -z "${SYMPHONY_PROJECT_SLUGS:-}" ] && [ -z "${SYMPHONY_PROJECT_NAMES:-}" ]; then
-  [ -n "${SYMPHONY_BASE_BRANCH:-}" ] || die "SYMPHONY_BASE_BRANCH is not set by $project_env"
-  [ -n "${SYMPHONY_REPO:-}" ] || die "SYMPHONY_REPO is not set by $project_env"
-fi
+def github_app_jwt(env):
+    now = int(time.time())
+    header = base64url(json.dumps({"alg": "RS256", "typ": "JWT"}, separators=(",", ":")).encode())
+    payload = base64url(
+        json.dumps(
+            {"iat": now - 60, "exp": now + 540, "iss": env["GITHUB_APP_ID"]},
+            separators=(",", ":"),
+        ).encode()
+    )
+    body = f"{header}.{payload}".encode()
+    result = subprocess.run(
+        ["openssl", "dgst", "-sha256", "-sign", env["GITHUB_APP_PRIVATE_KEY_PATH"]],
+        input=body,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=env,
+        check=False,
+    )
+    if result.returncode:
+        die("failed to sign GitHub App JWT")
+    return f"{body.decode()}.{base64url(result.stdout)}"
 
-selected_profile="$SYMPHONY_PROFILE"
-profile_env="$HOME/.config/symphony/$SYMPHONY_PROFILE.env"
-[ -f "$profile_env" ] || die "profile env file not found: $profile_env"
 
-set -a
-source "$profile_env"
-source "$project_env"
-[ ! -f "$local_env" ] || source "$local_env"
-set +a
+def github_app_api(method, path, jwt, env):
+    descriptor, body_path = tempfile.mkstemp()
+    os.close(descriptor)
+    try:
+        result = subprocess.run(
+            [
+                "curl",
+                "-sS",
+                "-L",
+                "-o",
+                body_path,
+                "-w",
+                "%{http_code}",
+                "-X",
+                method,
+                "-H",
+                "Accept: application/vnd.github+json",
+                "-H",
+                f"Authorization: Bearer {jwt}",
+                "-H",
+                "X-GitHub-Api-Version: 2022-11-28",
+                f"{env.get('GITHUB_API_URL') or 'https://api.github.com'}{path}",
+            ],
+            env=env,
+            stdout=subprocess.PIPE,
+            text=True,
+            check=False,
+        )
+        if result.returncode:
+            die(f"GitHub App API request failed: {method} {path}")
 
-SYMPHONY_PROFILE="$selected_profile"
+        body = Path(body_path).read_text(errors="replace")
+        status = result.stdout.strip()
+        if not status.startswith("2"):
+            preview = body[:400].replace("\n", " ")
+            die(f"GitHub App API request failed ({status}): {method} {path}: {preview}")
+        return body
+    finally:
+        Path(body_path).unlink(missing_ok=True)
 
-[ -n "${LINEAR_API_KEY:-}" ] || die "LINEAR_API_KEY is not set by $profile_env"
 
-export GH_PROMPT_DISABLED="${GH_PROMPT_DISABLED:-true}"
-export SYMPHONY_WORKSPACE_ROOT="${SYMPHONY_WORKSPACE_ROOT:-$HOME/symphony-workspaces}"
-export SYMPHONY_MAESTRO_WORKSPACE_ROOT="${SYMPHONY_MAESTRO_WORKSPACE_ROOT:-$SYMPHONY_WORKSPACE_ROOT-maestro}"
-export SYMPHONY_PROFILE
+def json_field(payload, field):
+    try:
+        value = json.loads(payload)
+        for key in field.split("."):
+            value = value[key]
+    except (KeyError, TypeError, ValueError):
+        return None
+    return None if value is None or str(value) == "" else str(value)
 
-# The maestro instance must not fight the main instance for its dashboard
-# port (project.env's SYMPHONY_PORT belongs to the main instance); it gets
-# a dashboard only when the profile sets SYMPHONY_MAESTRO_PORT.
-if [ "$maestro_mode" -eq 1 ]; then
-  SYMPHONY_PORT="${SYMPHONY_MAESTRO_PORT:-}"
-fi
 
-printf 'symphony-run: starting project=%s profile=%s workflow=%s logs=%s\n' \
-  "$project" \
-  "$SYMPHONY_PROFILE" \
-  "$workflow_file" \
-  "$repo_root/elixir/log/symphony.log" >&2
+def configure_github_app_auth(env):
+    if env.get("GITHUB_APP_ENABLED") != "true":
+        return
 
-cd "$repo_root/elixir"
-mise exec -- mix escript.build >/dev/null
-symphony_args=(--i-understand-that-this-will-be-running-without-the-usual-guardrails)
-[ -z "${SYMPHONY_PORT:-}" ] || symphony_args+=(--port "$SYMPHONY_PORT")
-symphony_args+=("$workflow_file")
-exec mise exec -- ./bin/symphony "${symphony_args[@]}"
+    configured = [name for name in APP_VARS if env.get(name)]
+    if not configured:
+        return
+    missing = [name for name in APP_VARS if not env.get(name)]
+    if missing:
+        die(f"GitHub App env is incomplete; missing: {' '.join(missing)}")
+
+    key_path = env["GITHUB_APP_PRIVATE_KEY_PATH"]
+    if not os.access(key_path, os.R_OK):
+        die(f"GITHUB_APP_PRIVATE_KEY_PATH is not readable: {key_path}")
+    if not shutil.which("openssl", path=env.get("PATH")):
+        die("openssl is required to mint a GitHub App token")
+    if not shutil.which("curl", path=env.get("PATH")):
+        die("curl is required to mint a GitHub App token")
+
+    jwt = github_app_jwt(env)
+    installation_id = env["GITHUB_APP_INSTALLATION_ID"]
+    installation = github_app_api("GET", f"/app/installations/{installation_id}", jwt, env)
+    account = json_field(installation, "account.login")
+    if not account:
+        die("GitHub App installation response did not include account.login")
+    app_slug = json_field(installation, "app_slug") or "github-app"
+
+    access_token = github_app_api(
+        "POST", f"/app/installations/{installation_id}/access_tokens", jwt, env
+    )
+    token = json_field(access_token, "token")
+    if not token:
+        die("GitHub App access token response did not include token")
+
+    bot_name = env.get("GITHUB_APP_BOT_NAME") or f"{app_slug}[bot]"
+    bot_email = env.get("GITHUB_APP_BOT_EMAIL") or f"{bot_name}@users.noreply.github.com"
+    env.update(
+        {
+            "GH_TOKEN": token,
+            "GITHUB_TOKEN": token,
+            "GITHUB_FORK_OWNER": account,
+            "GIT_AUTHOR_NAME": bot_name,
+            "GIT_AUTHOR_EMAIL": bot_email,
+            "GIT_COMMITTER_NAME": bot_name,
+            "GIT_COMMITTER_EMAIL": bot_email,
+        }
+    )
+
+
+def require_file(path, description):
+    if not path.is_file():
+        die(f"{description} not found: {path}")
+
+
+def main():
+    project, maestro = parse_args(sys.argv[1:])
+    env = dict(os.environ)
+
+    if maestro:
+        if not env.get("SYMPHONY_WORKFLOW_FILE"):
+            env["SYMPHONY_WORKFLOW_FILE"] = "MAESTRO_WORKFLOW.md"
+        if not env.get("SYMPHONY_PROFILE"):
+            env["SYMPHONY_PROFILE"] = "maestro"
+
+    script_dir = Path(__file__).resolve().parent
+    repo_root = Path(env["SYMPHONY_REPO_ROOT"]).resolve() if env.get("SYMPHONY_REPO_ROOT") else script_dir.parent
+    workflow_dir = repo_root / "workflows" / project
+    workflow_name = env.get("SYMPHONY_WORKFLOW_FILE") or "WORKFLOW.md"
+    if "/" in workflow_name:
+        die(f"SYMPHONY_WORKFLOW_FILE must be a file name, got: {workflow_name}")
+
+    default_workflow = workflow_dir / "WORKFLOW.md"
+    namespace = Path(os.readlink(default_workflow)).parent.name if default_workflow.is_symlink() else project
+    workflow_file = workflow_dir / workflow_name
+    defaults_env = repo_root / "workflows" / namespace / "project.env.defaults"
+    project_env = workflow_dir / "project.env"
+    local_env = workflow_dir / "project.env.local"
+    require_file(workflow_file, "workflow file")
+    require_file(project_env, "project env file")
+
+    caller_profile = env.get("SYMPHONY_PROFILE") or ""
+    env = source_env([path for path in (defaults_env, project_env) if path.is_file()], env)
+    selected_profile = caller_profile or env.get("SYMPHONY_PROFILE") or "grandline"
+    env["SYMPHONY_PROFILE"] = selected_profile
+
+    project_keys = (
+        "SYMPHONY_PROJECT_SLUG",
+        "SYMPHONY_PROJECT_SLUGS",
+        "SYMPHONY_PROJECT_NAME",
+        "SYMPHONY_PROJECT_NAMES",
+    )
+    if not any(env.get(name) for name in project_keys):
+        die(
+            "SYMPHONY_PROJECT_SLUG, SYMPHONY_PROJECT_SLUGS, SYMPHONY_PROJECT_NAME, "
+            f"or SYMPHONY_PROJECT_NAMES is not set by {project_env}"
+        )
+    if not env.get("SYMPHONY_PROJECT_SLUGS") and not env.get("SYMPHONY_PROJECT_NAMES"):
+        if not env.get("SYMPHONY_BASE_BRANCH"):
+            die(f"SYMPHONY_BASE_BRANCH is not set by {project_env}")
+        if not env.get("SYMPHONY_REPO"):
+            die(f"SYMPHONY_REPO is not set by {project_env}")
+
+    profile_env = Path(env["HOME"]) / ".config" / "symphony" / f"{selected_profile}.env"
+    require_file(profile_env, "profile env file")
+    env = source_env(
+        [path for path in (profile_env, project_env, local_env) if path.is_file()], env
+    )
+    env["SYMPHONY_PROFILE"] = selected_profile
+    if not env.get("LINEAR_API_KEY"):
+        die(f"LINEAR_API_KEY is not set by {profile_env}")
+
+    configure_github_app_auth(env)
+    env["GH_PROMPT_DISABLED"] = env.get("GH_PROMPT_DISABLED") or "true"
+    env["SYMPHONY_WORKSPACE_ROOT"] = env.get("SYMPHONY_WORKSPACE_ROOT") or str(
+        Path(env["HOME"]) / "symphony-workspaces"
+    )
+    env["SYMPHONY_MAESTRO_WORKSPACE_ROOT"] = env.get("SYMPHONY_MAESTRO_WORKSPACE_ROOT") or (
+        env["SYMPHONY_WORKSPACE_ROOT"] + "-maestro"
+    )
+    if maestro:
+        env["SYMPHONY_PORT"] = env.get("SYMPHONY_MAESTRO_PORT") or ""
+
+    print(
+        f"symphony-run: starting project={project} profile={selected_profile} "
+        f"workflow={workflow_file} logs={repo_root / 'elixir/log/symphony.log'}",
+        file=sys.stderr,
+    )
+    elixir_dir = repo_root / "elixir"
+    build = subprocess.run(
+        ["mise", "exec", "--", "mix", "escript.build"],
+        cwd=elixir_dir,
+        env=env,
+        stdout=subprocess.DEVNULL,
+        check=False,
+    )
+    if build.returncode:
+        raise SystemExit(build.returncode)
+
+    args = [
+        "mise",
+        "exec",
+        "--",
+        "./bin/symphony",
+        "--i-understand-that-this-will-be-running-without-the-usual-guardrails",
+    ]
+    if env.get("SYMPHONY_PORT"):
+        args.extend(["--port", env["SYMPHONY_PORT"]])
+    args.append(str(workflow_file))
+    os.chdir(elixir_dir)
+    os.execvpe("mise", args, env)
+
+
+if __name__ == "__main__":
+    main()
