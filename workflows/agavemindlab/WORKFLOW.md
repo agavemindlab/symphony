@@ -405,6 +405,7 @@ Canonical project routing registry for spawned issues:
 | `gl-skills` | Reusable agent capability packages | standalone skills/plugins/tools that are not specific to the Symphony workflow itself or one product repo |
 | `voxvault` | VoxVault repository delivery | app/repo code, repo CI, release workflow, repo-owned runbooks, repo-owned environment gate logic |
 | `tuneframe` | TuneFrame repository delivery | app/repo code, repo CI, release workflow, repo-owned runbooks, repo-owned environment gate logic |
+| `pastok-website` | Pastok website repository delivery | app/repo code, repo CI, release workflow, repo-owned runbooks, repo-owned environment gate logic |
 
 Known Linear projects that are not spawned-issue targets in this workflow:
 `grandline` is the multi-project launcher/profile, and `lain` has no workflow
