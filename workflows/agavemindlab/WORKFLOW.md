@@ -311,7 +311,14 @@ procedure for that phase.
 
 Each phase artifact version is a top-level Linear comment identified by its heading (see Phase Map). A fresh phase with no current artifact publishes with `commentCreate`. A same-phase rework, including a clarification-answer resume, resolves the old artifact with `commentResolve`, then publishes a fresh top-level artifact with `commentCreate` and puts the change summary on the new artifact. Once a phase artifact has been published, do not edit its body with `commentUpdate`; keep `commentUpdate` to raw tool mechanics, non-phase comments, or other explicitly non-review artifacts. No phase edits another phase's artifact, and no comments are posted outside this protocol.
 
-When content conflicts, precedence is: human reply in artifact thread > current artifact body > previous artifact > original issue description. Reconcile by writing the revised content into the next artifact version, not by rewriting the old artifact body.
+After a `## Requirements` artifact exists, the issue description is intake
+context only and never overrides the current artifact chain or human replies;
+never use the issue-level `updatedAt` to infer a description revision or grant
+it precedence. Conflicting human feedback triggers phase rework and must be
+folded into a new artifact before downstream work continues; otherwise content
+precedence is: human reply in artifact thread > current artifact body > previous
+artifact > original issue description. Reconcile by writing the revised content
+into the next artifact version, not by rewriting the old artifact body.
 
 ### Status card
 

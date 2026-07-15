@@ -291,6 +291,16 @@ defmodule SymphonyElixir.CoreTest do
     refute skill =~ "Post or update the `## Design` artifact"
   end
 
+  test "approved artifact chain outranks a newer-looking issue description" do
+    workflow = shared_workflow_prompt()
+
+    assert workflow =~ "the issue description is intake"
+    assert workflow =~ "context only and never overrides the current artifact chain"
+    assert workflow =~ "never use the issue-level `updatedAt`"
+    assert workflow =~ "Conflicting human feedback triggers phase rework"
+    assert workflow =~ "folded into a new artifact before downstream work continues"
+  end
+
   test "cross-phase rollback supersedes stale target-through-awaiting artifacts" do
     workflow = shared_workflow_prompt()
 
