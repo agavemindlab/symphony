@@ -30,7 +30,9 @@ opening this skill. Build from three sources — not the Linear summary alone:
   do not work off the one-line Linear summary.
 - The **approved Linear `## Requirements` and `## Design`** — what the human
   actually signed off on: `S<N>` IDs, the `验收方案`, the approved approach, and
-  risks. These are **authoritative on scope and commitments**.
+  risks. These and their later human replies are **authoritative on scope and
+  commitments**; once Requirements exists, the issue description is intake
+  context only and must not select the review budget or override this chain.
 - The **workpad** (`.symphony/workpad.md`) — execution continuation: the plan
   checklist, spawned/proposed issues that bound scope, and progress notes.
 
@@ -160,16 +162,143 @@ Markdown sections:
    is impossible, record the reason and closest safe alternative proof; surface
    the caveat in the artifact `风险/注意`.
 8. **Verify** — invoke `verification-before-completion`.
-9. **Pre-landing review** — invoke `review` (gstack) on the branch / PR diff.
-   Treat findings as Implementation feedback: fix, rerun validation, commit,
-   push, and repeat until clean or explicitly recorded in `风险/注意`.
-10. **PR feedback sweep** — see protocol below.
-11. **Post artifact** — write the `## Implementation` artifact and move to
+9. **Bounded pre-landing review** — set `MAX_REVIEW_ATTEMPTS = 5` for this
+   Implementation agent turn. The counter starts at 0 when the turn starts and
+   never carries into another turn; mirror each attempt in workpad Notes only
+   as evidence:
+   - Before invoking review, require a clean worktree and query GitHub for the
+     current PR `baseRefName`, `baseRefOid`, and `headRefOid`. Require local
+     HEAD and the fork branch Head to equal `headRefOid`; record the current
+     Base and Head as this attempt's audit evidence, then increment the counter.
+     The counter is turn-local and the attempt is consumed even if review is
+     interrupted or unavailable.
+   - Before any PR lookup or push in this phase, repair an interrupted remap
+     only when, under already-recorded trusted PR metadata, effective fetch is
+     the singleton PR base and effective push is non-empty and entirely PR
+     head: normalize both raw directions to explicit singleton PR-head URLs and
+     re-enumerate; otherwise abort review/push and publish `ESCALATED`. Before
+     each attempt, snapshot the repo-local raw `remote.origin.url` and
+     `remote.origin.pushurl` sequences exactly, including order, duplicate
+     values, and an absent `pushurl`. In the same Git config environment used
+     by review and push, enumerate with `git remote get-url --all origin` and
+     `git remote get-url --push --all origin`; raw values are restoration
+     evidence, not authorization evidence. Require every effective destination
+     to be GitHub HTTPS/SSH whose normalized `owner/repo` exactly equals the
+     PR's queried `baseRepository.nameWithOwner` or
+     `headRepository.nameWithOwner` for its direction. Reject everything else,
+     including a correct first push URL plus an unauthorized second URL or a
+     raw URL that rewrites to the wrong host or repository; an absent raw
+     `pushurl` still uses Git's effective push fallback and must pass the same
+     check. For review, set explicit singleton raw destinations: effective
+     fetch sequence must be exactly one PR base repository destination and
+     effective push sequence must be exactly one PR head repository
+     destination, so the standard review's own `git fetch origin <base>` is
+     canonical while push remains on the fork. Restore the exact raw sequences
+     and `pushurl` absence using an EXIT/HUP/INT/TERM trap in
+     one dedicated keeper process outside the review process tree; never let the review shell
+     or its descendants inherit the restoration trap. Then re-enumerate
+     both complete effective sequences and require the original values, order,
+     counts, repository identities, refs, and OIDs; repeat immediately before
+     push. This remap does not authorize any push to upstream or any review
+     engine change. Require a non-shallow checkout; disable tag following and
+     automatic Git maintenance during the transaction and restore their prior
+     configuration in the same trap.
+   - Invoke the installed review skill through its normal skill entry
+     (`$review` or `/review`) exactly once. Do not reimplement its checklist,
+     substitute frozen SHAs into its commands, invoke `codex exec`/`codex review`
+     directly, or hand-roll specialist/adversarial prompts. The review skill's
+     standard nested passes and Fix-First behavior belong to this attempt.
+     After it returns, record the branch/Base/Head and Codex session evidence
+     that the standard review reported; this is audit metadata, not a custom
+     review range.
+   - Emit `REVIEW_ATTEMPT_START N` immediately before the review call and
+     `REVIEW_ATTEMPT_END N` immediately after it returns, recording their event
+     ids and timestamps. Within that interval, record each blocking family's
+     source severity (`CRITICAL`, validated P0, or validated P1), stable family,
+     violated invariant, and `new | recurring | resolved` state. Key the stable
+     family by that invariant so different wording or file location cannot
+     create a new family and Maestro can compare attempts from the session
+     transcript. An unknown severity fails closed for human clarification; do
+     not silently downgrade it. Audit the parent interval and its recursive child rollout
+     closure; record parent session, attempt, Base, exact Head, every child id
+     and terminal event id.
+
+     Keep raw arguments, `workdir`, and lexical/canonical paths only in the
+     managed transcript. For explicit write-capable actions, canonicalize
+     targets through lexical `..` normalization and the nearest existing
+     ancestor's `realpath`. Only the exact canonical-base fetch
+     (`git fetch origin <PR base>` in the assigned checkout) may write finite `repo_git_metadata`:
+     `.git/FETCH_HEAD`, `.git/objects/**`, the
+     current base's `.git/refs/remotes/origin/<base>`, its reflog, and their
+     lock/temp siblings. The fetch touching any other `.git` target or another
+     checkout, or another review action touching any `.git` target, is a
+     violation. Config, hooks, info, index, HEAD, ORIG_HEAD, worktrees, other
+     refs, skill, prompt, rule, credential/auth, and secret targets remain
+     `forbidden`.
+
+     The only host classes are the review's `$HOME/.gstack/` session,
+     analytics, and current-repo project runtime files; `$HOME/.codex/` session
+     artifacts whose ids belong to this recursive closure; and non-escaping
+     `/tmp/codex-adv-*` or `/tmp/codex-review-*` paths. Use of another gstack skill,
+     unmatched descendants, another checkout, every external system, and every
+     other or unresolved target are `unclassified`. A write-capable action
+     without a resolvable target still emits one `unclassified` sentinel row.
+
+     Population proof is the three-source evidence union: explicit transcript
+     actions, before/after manifest deltas for the finite Git metadata and four
+     runtime roots, and review session/temp lifecycle events. Do not require a
+     transcript row for process-internal `git fetch` or cleanup writes. Publish
+     only safe explicit-action rows keyed by `(event_id, target_ordinal)` with
+     operation, class, predicate id, canonical-target SHA-256, outcome, and
+     violation reason; never copy raw arguments or protected paths to Linear.
+     Require explicit-action source ids to equal distinct row event ids,
+     complete target ordinals, the evidence union to cover every observed
+     mutation, `unclassified = 0`, every child terminal, and exception grants
+     or uses outside this phase-required `review` equal 0. Put the closure tuple
+     and evidence-source counts in the artifact's `审计证据`, and link the managed
+     rollout closure. Any audit violation
+     fails closed as Draft + `ESCALATED`; do not add a parser, tracer, sandbox,
+     wrapper, or second review engine.
+   - Use the standard review's result as-is. Do not parse its receipt,
+     reclassify raw findings, or implement a second finding validator. Query
+     GitHub again and require the fetched `refs/remotes/origin/<base>` to equal
+     the attempt's recorded `baseRefOid`, and the PR Head, local HEAD, and fork
+     branch Head to equal the recorded Head. Record any later Base movement as
+     audit evidence for Deployment's best-effort recheck.
+   - On attempts 1–4 only, if the standard review completes with no unresolved blocking finding
+     (including validated P0/P1 or its native `CRITICAL` severity), validation and
+     checks and the audit above pass, the worktree is clean, and the review's
+     reported/receipt Head, local Head, fork Head, and PR Head all equal the
+     recorded pre-review Head, stop early and ensure the PR is Ready for Review
+     (not Draft) before publishing `CLEAN`.
+     If making the PR Ready for Review fails on any attempt, keep or convert it
+     to Draft, publish `ESCALATED`, and end the turn immediately without changing
+     code or invoking another review.
+   - If a validated blocking finding cannot be repaired without expanding or
+     contradicting the approved Design, do not use the remaining attempts:
+     keep or convert the PR to Draft, publish `ESCALATED`, and end the turn so
+     Maestro can decide whether Design must be reworked.
+   - On attempts 1–4, validate, commit, push, and start the next attempt after
+     any in-scope repair. If review is unavailable or interrupted, keep or
+     convert the PR to Draft, publish `ESCALATED`, and end the turn immediately
+     without changing code or invoking another review.
+   - Attempt 5 uses the same standard Fix-First review mode, but it is the final
+     automatic review. After it returns, do not edit, commit, push, or invoke
+     review again. Any post-review index/worktree/untracked or Head mutation
+     forces `ESCALATED`; preserve those local changes for human rework. If the
+     review is unavailable, the audit above fails, still has an unresolved blocking finding, or its
+     reported/receipt Head, local Head, fork Head, and PR Head do not all equal
+     the clean pre-review Head, keep or convert the PR to Draft and publish
+     `ESCALATED`; otherwise ensure the PR is Ready for Review before publishing
+     `CLEAN` under the same validation and Head checks above. Keep the complete
+     attempt history in workpad Notes and the Codex transcript. Never invoke
+     attempt 6 in this turn.
+10. **Post artifact** — write the `## Implementation` artifact and move to
    `Human Review`.
 
 ## PR feedback sweep protocol
 
-Run this loop before posting the artifact:
+Run this sweep during each bounded review pass before posting the artifact:
 
 1. Identify the PR number from issue attachments / links.
 2. Ensure a code review is requested per the project's reviewer
@@ -187,8 +316,8 @@ Run this loop before posting the artifact:
    - Not applied: reply with explicit technical pushback.
 5. Update the workpad `plan` / `acceptance_criteria` with each feedback
    item and its resolution.
-6. Re-run validation after feedback changes and push updates.
-7. Repeat until no outstanding actionable comments remain.
+6. Apply the pass-specific repair or escalation rule from Implementation flow
+   step 9.
 
 When responding to review feedback, follow `receiving-code-review`
 discipline: verify before implementing, technical correctness over social
@@ -203,6 +332,12 @@ comfort.
 
 <用人话一句话说明本轮是否已准备好 review / rework / merge，点名 PR，说明影响，并给出建议动作。>
 
+### Review verdict
+
+**Review verdict**: <`CLEAN` | `ESCALATED`>
+
+**Review attempts**: <`N/5`>
+
 ### Root cause / recommendation（根因/结论）
 
 <用中文说明 accepted root cause / chosen approach。讲清楚为什么这个改动能解决
@@ -210,7 +345,7 @@ comfort.
 
 ### Human action needed
 
-> 👉 **需要人工处理**：<正常审查：审查 PR；无异议请将 issue 移至 `Merging`，需要修改则移至 `Rework`。>
+> 👉 **需要人工处理**：<`CLEAN`：审查 PR；无异议请将 issue 移至 `Merging`，需要修改则移至 `Rework`。`ESCALATED`：等待 Maestro 从本 artifact footer 的 Codex session id 读取 transcript，建议回 Design 或继续 Implementation；不要移至 `Merging`。>
 > - 若 blocked：写成可执行 runbook，包含操作系统/账号/项目/workspace、要配置的 key/权限/变量及类型或 sensitive 标记、secret 值从哪里取得或生成但不贴值、配置后如何重跑验证、通过判据。
 
 ### 风险/注意（optional: non-merge caveats only）
@@ -261,7 +396,8 @@ comfort.
 >>> 🔎 审计证据（默认折叠）
 - Spec: <source issue/comment, e.g. DEV-123 `## Design` or Source comment: URL>
 - PR: <PR URL>
-- Head: `<full head sha>`
+- Base: `<full canonical PR baseRefOid reviewed by the standard review>`
+- Head: `<full exact PR headRefOid reviewed by the standard review>`
 - CI / checks: `<workflow/check>` <passed|failed|pending>
 - Automated review: `<reviewer>` <approved|commented|timed out>，只作为自动
   review evidence，不等于人工批准
@@ -354,11 +490,20 @@ Then update workpad `current_phase` to the target phase and open the target phas
   checkbox checked.
 - For app-behavior changes, local runtime acceptance has produced concrete
   evidence, or the substitution path is documented.
-- Validation/tests green for the latest commit.
-- PR pushed; PR checks green; PR linked on the issue.
+- For `CLEAN`, validation/tests are green for the exact reserved Head, the
+  canonical Base and exact Head are recorded as full `Base` and `Head` SHAs,
+  and the PR is pushed, linked on the issue, and green. For `ESCALATED`, record
+  the exact condition that ended the turn, including remaining `CRITICAL`
+  findings or a validation, publishing, pair-binding, or availability failure.
 - PR feedback sweep complete: every substantive comment has a reply.
+- For PR-producing work, review verdict is `CLEAN`, or the bounded current-turn
+  budget ended `ESCALATED` with a Draft PR and a Codex session id in the footer;
+  no-PR `Type:Spike` follows its findings
+  exit above.
 - `## Implementation` artifact posted.
-- Issue labeled `symphony:maestro` and moved to `Human Review`.
+- Main Flow moved the issue to `Human Review` through its verdict-aware `stop`
+  handler.
 
-The human approves by moving the issue to `Merging`. On the next session,
-Main Flow writes the approval reply on this artifact and runs Deployment.
+The human approves a `CLEAN` artifact by moving the issue to `Merging`. An
+`ESCALATED` artifact cannot enter Deployment; Maestro routes it to Design
+rework or another bounded Implementation turn from the recorded trajectory.

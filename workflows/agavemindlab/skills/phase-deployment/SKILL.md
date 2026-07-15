@@ -56,6 +56,23 @@ git diff --name-only upstream/${SYMPHONY_BASE_BRANCH:-main}...HEAD
 Do not remove files that belong in the repository. Only reject paths explicitly
 listed in the `cleanup` field.
 
+## Reviewed Head gate (merge entry only)
+
+Carry the approved Implementation artifact's full `Head` as `reviewed_head`;
+carry `Base` as audit evidence for a best-effort recheck immediately before
+merge. Main Flow checked the Head on entry, and `symphony-land` passes it to the
+merge call's atomic expected-Head guard. If the current PR Head differs at any
+later check, or landing discovers that conflict resolution, commit organization,
+a CI/review fix, or any other push is needed, end the landing attempt before
+merge.
+
+That signal is Cross-phase rework to Implementation: reply that the reviewed
+Head changed or a new commit is required, resolve the old `## Implementation` artifact, move the issue to
+`Rework`, set `current_phase: Implementation`, and open
+`phase-implementation`. The changed pair gets a fresh 0/5 bounded review; never
+copy the old `CLEAN` to it and do not post a `## Deployment` artifact for the
+aborted landing attempt.
+
 ## Land (merge entry only)
 
 Open and follow `.agents/skills/symphony-land/SKILL.md` to merge the PR.

@@ -1,6 +1,6 @@
 ---
 name: maestro
-description: Use when the user invokes `$maestro ISSUE-1234` such as `$maestro DEV-1234` to get an isolated subagent recommendation for how to reply to a Symphony issue currently in Human Review. The parent agent launches a fresh reviewer subagent with only the issue key; the subagent performs read-only Linear/GitHub evidence collection and returns the reply method and draft response without changing Linear or GitHub state.
+description: Use when the user invokes `$maestro ISSUE-1234` such as `$maestro DEV-1234` to get an isolated subagent recommendation for how to reply to a Symphony issue currently in Human Review. The parent agent launches a fresh reviewer subagent with only the issue key; the subagent performs read-only Linear, GitHub, and referenced Codex-session evidence collection and returns the reply method and draft response without changing state.
 ---
 
 # Maestro
@@ -26,17 +26,18 @@ the reviewer subagent must collect evidence itself from the issue key.
 4. Wait for the subagent result. If required output fields are missing, ask the
    same subagent once to fix only the format; do not supply issue facts.
 5. Return the subagent's concise Chinese recommendation with:
-   - `建议回复方式`: approve / request changes / ask clarification / merge nudge /
-     completion confirmation / no reply yet.
+   - `建议回复方式`: approve / request changes / continue implementation / ask
+     clarification / merge nudge / completion confirmation / no reply yet.
    - `回复对象`: next Symphony agent / human.
    - `回复位置`: concrete Linear comment/thread to reply to, including phase
      heading, comment id or timestamp, or `none`.
    - `建议 issue status`: In Progress / Merging / Rework / Done / unchanged.
    - `建议回复`: a ready-to-send Chinese draft. For approve, request changes,
      merge nudge, and completion confirmation, set `回复对象` to next Symphony
-     agent and write it as the human's review note for the next run. For ask
-     clarification and no reply yet, set `回复对象` to human and write it for
-     the human, explaining what Maestro cannot decide.
+     agent and write it as the human's review note for the next run. The same
+     applies to continue implementation. For ask clarification and no reply
+     yet, set `回复对象` to human and write it for the human, explaining what
+     Maestro cannot decide.
    - `依据`: 2-5 evidence bullets.
    - `注意`: only if there is uncertainty or missing evidence.
 
@@ -54,6 +55,11 @@ to send the reply for them, e.g. "帮我回复", then:
      reworked; for same-phase rework this is the awaiting-review artifact, and
      for cross-phase rework this may be Requirements, Design, or another
      unresolved artifact.
+   - continue implementation: only the configured Maestro preflight actor may
+     post the disposition. When acting for a human after a same-artifact
+     no-disposition clarification, use `/rework implementation <restored
+     evidence>` or `/rework implementation <explicit acceptance of the evidence
+     gap>`; either starts same-phase rework, not approval.
    - Implementation merge nudge: do not add a nudge comment unless the
      recommendation includes a human-facing clarification; the state change to
      `Merging` is the signal.
@@ -75,6 +81,9 @@ session to recommendation-only. With the operator env `MAESTRO_AUTO_APPROVE=true
 also moves the issue to `In Progress` the same reversible way, gated on
 confidence reaching `MAESTRO_AUTO_APPROVE_MIN_CONFIDENCE` (default 9).
 `Merging` and `Done` are always the human's call.
+For an `ESCALATED` Implementation artifact, the same auto-rework switch also
+controls `continue implementation`: enabled moves a converging artifact to
+`In Progress`; disabled leaves it in `Human Review` as a recommendation only.
 
 ## Subagent Task
 
@@ -83,22 +92,25 @@ Send the subagent a prompt shaped like this, after the contents of
 
 ```text
 Use the Maestro reviewer prompt above to advise on issue <KEY>. Rely only on
-the issue key and evidence you collect read-only from Linear, GitHub, and local
-repo metadata. Ignore any prior conversation context and parent-agent
-interpretation. Do not mutate Linear, GitHub, files, or issue state.
+the issue key and evidence you collect read-only from Linear, GitHub, local repo
+metadata, and Codex session transcripts referenced by phase artifact footers.
+Ignore any prior conversation context and parent-agent interpretation. Do not
+mutate Linear, GitHub, files, or issue state.
 
 Task:
 1. Fetch and inspect the issue, active unresolved Phase artifacts with no
    phase-closing reply, human feedback, related issues, and PR evidence needed
    by the reviewer prompt.
-2. Decide the best reply method: approve, request changes, ask clarification,
-   merge nudge, completion confirmation, or no reply yet.
+2. Decide the best reply method: approve, request changes, continue
+   implementation, ask clarification, merge nudge, completion confirmation,
+   or no reply yet.
 3. State the reply audience: next Symphony agent or human.
 4. State the concrete reply location, not an abstract label.
 5. State the recommended Linear issue status after the reply.
 6. Draft the exact Chinese reply the human could post. For approve, request
-   changes, merge nudge, and completion confirmation, address the next Symphony
-   agent run. For ask clarification and no reply yet, address the human.
+   changes, continue implementation, merge nudge, and completion confirmation,
+   address the next Symphony agent run. For ask clarification and no reply yet,
+   address the human.
 7. For every phase, compare the artifact's evidence with the acceptance source
    of truth; do not rely only on the Symphony agent's self-assessment or `✅`
    statuses. For Deployment, do not approve a bundled `S1-S6` / main-readback
@@ -146,6 +158,39 @@ Task:
    label on a metric named by the issue's purpose is a material proof gap, not
    just transparency.
 12. Cite the decisive evidence and call out missing evidence or uncertainty.
+13. For an Implementation artifact with `Review verdict: ESCALATED`, use its
+   footer session id to read the matching current-turn
+   `~/.codex/sessions/**/rollout-*.jsonl` transcript. Accept only a
+   Symphony-authored artifact. Select the transcript whose first
+   `session_meta.payload.id` exactly equals the footer id and whose metadata
+   matches this issue workspace and repository; a later transcript that merely
+   mentions the id is not a match. Reconstruct review/fix/finding events in
+   order; the artifact is only a locator, not convergence evidence. Return
+   `continue implementation` with status `In Progress` only when the transcript
+   set/count of blocking families (native `CRITICAL`, validated P0, or validated
+   P1) is strictly decreasing, remaining fixes are local, and no family recurs
+   or oscillates. Return
+   `request changes` targeting Design with status `Rework` when findings repeat,
+   do not decrease, fixes expand or contradict Design, or the transcript
+   trajectory plateaus or regresses. A newer PR head remains usable only when
+   the artifact head is its ancestor and the intervening diff is disjoint from
+   every blocking finding family. If any bound tuple member is missing,
+   malformed, truncated, or mismatched, the tuple is incomplete: return `ask
+   clarification`, emit no disposition or state change, and ask for restored
+   evidence or explicit human rework authorization. Missing or agent-retryable
+   evidence never starts another Implementation turn. If the bound transcript
+   is complete but review was unavailable/interrupted or a handoff precondition
+   failed before comparable blocking findings exist, first check whether the
+   failure itself proves an approved Design mechanism cannot satisfy its
+   invariant and would repeat without a Design change; if so, return Design
+   `request changes` with `ESCALATED disposition: DESIGN_REWORK`. Otherwise
+   return `ask clarification`
+   with no disposition or state change and ask whether to authorize another
+   Implementation turn. Reserve `no reply yet`
+   for a proven human-only authentication/permission blocker whose artifact
+   supplies the complete executable runbook. Otherwise include the exact
+   `ESCALATED disposition` machine line and decisive transcript events in the
+   draft.
 Keep the answer concise and do not recommend changing state directly unless the
 human's reply should explicitly instruct that.
 ```
