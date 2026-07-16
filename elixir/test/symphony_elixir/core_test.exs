@@ -323,8 +323,12 @@ defmodule SymphonyElixir.CoreTest do
     refute implementation_skill =~ "before/after manifest"
     refute implementation_skill =~ "target_ordinal"
 
-    assert workflow =~ "an `ESCALATED` Implementation artifact is never approval"
-    assert workflow =~ "Maestro's reply is advisory and cannot reactivate the issue"
+    assert workflow =~ "ESCALATED human gate"
+    assert workflow =~ "every Maestro-authored reply as advisory"
+
+    {gate_position, _} = :binary.match(workflow, "ESCALATED human gate")
+    {intent_position, _} = :binary.match(workflow, "Fast path — explicit commands")
+    assert gate_position < intent_position
     assert maestro_workflow =~ "Maestro only recommends: never change the issue state"
     assert maestro_workflow =~ "keep `Human Review`"
     assert maestro_reviewer =~ "current-turn Codex session"

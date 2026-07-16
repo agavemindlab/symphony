@@ -258,6 +258,15 @@ Symphony only starts the agent when the issue is in an active state (`Todo`, `In
 
    **If the awaiting-review artifact still carries an unresolved clarification gate** (`### NEEDS CLARIFICATION`, or the legacy `[NEEDS CLARIFICATION]` marker) (the phase stopped on its blocked path, not for ordinary review), a new human reply in its thread is an **answer to that question**, not an approval or a new change request. Target phase = the current (awaiting-review) phase; do **not** write an approval reply. Re-open that phase's skill, which follows its own "On resume" path: fold each answer into a revised artifact, drop the resolved gate, and re-decide advance/stop. When the revised artifact needs review, publication follows the same-phase Rework cycle even if the Linear state is `In Progress`: resolve the old artifact, post a fresh top-level artifact, and put the clarification summary on the new artifact; do not `commentUpdate` the old artifact. If an answer does not actually resolve a gate, the skill keeps it open, refines the question, and stops again (its "When blocked" / "On resume" defines the re-ask and the two-round escalation). This branch takes precedence over the intent read below.
 
+   **ESCALATED human gate — run before every remaining intent rule.** When the
+   awaiting Implementation artifact has `Review verdict: ESCALATED`, ignore
+   every Maestro-authored reply as advisory, even if it says request changes,
+   carries an old machine disposition, or already moved the issue to an active
+   state. Require a newer human action: `/rework implementation` or a
+   human-authored move to `In Progress` resumes Implementation; `/rework design`
+   targets Design. Without that human action, return the issue to `Human Review`
+   and stop. Never treat `ESCALATED` as approval or open Deployment.
+
    **Fast path — explicit commands.** When a new human feedback comment begins with a slash command, route it literally instead of reading intent (the clarification-gate branch above and the two exceptions below still take precedence):
    - `/approve` → **Approval** of the awaiting-review artifact, handled exactly as the Approval bullet below.
    - `/rework [phase]` → **Change request** targeting the named phase (`requirements` | `design` | `implementation` | `deployment`; omitted → the awaiting-review phase). Text after the command is the change direction; a same-phase `/rework` with no direction is handled by the no-direction `Rework` rule below.
@@ -273,15 +282,7 @@ Symphony only starts the agent when the issue is in an active state (`Todo`, `In
 
    **If the phase never reached review** (no awaiting-review artifact — e.g. an interrupted session resuming mid-phase) → target phase = the current phase, no approval reply.
 
-   Three **exceptions** override the generic `In Progress → approval → advance` read above:
-
-   **Exception 0 — an `ESCALATED` Implementation artifact is never approval.**
-   Maestro's reply is advisory and cannot reactivate the issue. A newer human
-   `/rework implementation` or human-authored move to `In Progress` resumes a
-   fresh bounded Implementation turn; `/rework design` targets Design. A
-   question, approval/merge request, ambiguous `Rework`, or no newer human
-   action leaves the issue in `Human Review`. Never open Deployment from an
-   `ESCALATED` artifact.
+   Two **exceptions** override the generic `In Progress → approval → advance` read above:
 
    **Exception 1 — Implementation → Deployment is gated by `Merging`.** Deployment is irreversible (it merges and deploys) and is entered **only** via the `Merging` state (step 3). When the awaiting-review phase is Implementation, an approval detected in `In Progress` (with or without feedback) must **not** advance to Deployment, open `phase-deployment`, or write a Deployment approval reply. Treat it as "implementation accepted, awaiting the human's merge decision": leave the `## Implementation` artifact awaiting review, reply nudging `实现已通过 review，如需合并请将 issue 置为 Merging`, return the issue to `Human Review`, and stop.
 
