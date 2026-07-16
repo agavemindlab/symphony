@@ -333,12 +333,12 @@ Evidence a reviewer cannot re-run must say why (interactive capture,
 credentialed env).
 
 For any `S<N>` classified `延迟验收` in Requirements' `关键假设`, `Merge 后验证`
-must carry a **self-contained, runnable** spec — the exact query, the pass/fail
+must carry a **self-contained, runnable** spec — the exact check, the pass/fail
 predicate, and the window length — not a vague "monitor the dashboard" note.
 It has to survive branch cleanup and be runnable months later by a fresh
-session that only has production-log access, because Deployment carries it into
-`待验证项` and re-runs it verbatim (re-entered via `In Progress`) once the window
-closes. Do not record a `延迟验收` criterion's status as `✅ 通过` here — at
+session using the named production evidence source, because Deployment carries
+it into `待验证项` and re-runs it verbatim (re-entered via `In Progress`) once the
+window closes. Do not record a `延迟验收` criterion's status as `✅ 通过` here — at
 handoff its window has not even started; it stays pending until Deployment
 verifies it.
 

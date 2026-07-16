@@ -20,7 +20,7 @@ description:
 - Squash-merge the PR once checks pass, then watch the `main` workflows for
   the merge commit.
 - Continue until the PR is merged and post-merge runs finish, or until the
-  workflow reaches an explicit failure, wait, or clarification exit.
+  workflow reaches an explicit failure or clarification exit.
 - No need to delete remote branches after merge if the repo auto-deletes head
   branches; check `AGENTS.md` for the project's branch deletion policy.
 
@@ -158,9 +158,10 @@ gated_head=$(gh pr view --json headRefOid -q .headRefOid)
 # Implement a polling loop appropriate to the project's CI setup, or
 # use the project's land watcher script if one exists under .agents/skills/symphony-land/.
 if [ -f .agents/skills/symphony-land/land_watch.py ]; then
-  python3 .agents/skills/symphony-land/land_watch.py
+  python3 .agents/skills/symphony-land/land_watch.py || exit $?
 else
   echo "No land_watch.py found; poll manually with: gh pr checks && gh pr view --json reviews" >&2
+  exit 1
 fi
 
 # Squash-merge only the head that passed the gate.

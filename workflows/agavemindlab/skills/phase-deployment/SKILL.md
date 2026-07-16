@@ -110,7 +110,7 @@ When a post-merge acceptance check requires logged-in user state:
 1. **Verify what is checkable now.** For each unresolved `S<N>`, run its check
    and record evidence: immediate signals at deploy (smoke tests, endpoint
    health, error-rate baseline), and any `延迟验收` whose window has already
-   elapsed (run its recorded `待验证项` query against the production log and
+   elapsed (run its recorded `待验证项` check against the named evidence source and
    judge it against the predicate — never weaken the predicate to pass it).
 2. **Leave genuinely-pending items `⚠️ 待观察`** with a concrete reason and a
    concrete way to make the condition happen:
@@ -197,8 +197,9 @@ not create a fix PR while `current_phase` remains Deployment.
 
 ## Exit
 
-After posting `## Deployment` on merge entry, or replying in its thread with a
-verification re-entry result:
+After posting `## Deployment` on merge entry, or replacing the current artifact
+on verification re-entry through the workflow's same-phase Rework cycle so the
+fresh top-level artifact contains the authoritative updated ledger:
 
 1. Move the issue back to `Human Review`.
 2. Stop. Do **not** move the issue to `Done`.

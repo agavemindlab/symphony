@@ -111,10 +111,12 @@ work was discovered:
 5. **Surface**: return the new issue's identifier to the calling phase, which lists it in its
    artifact (Design 未覆盖范围 / Implementation 风险 / Deployment 后续事项).
 
-**Failure handling:** `issueCreate` ok but `issueRelationCreate` fails → do
-**not** roll back; note `关系未设成，请人工补` in the artifact. Creation itself
-fails in a non-blocking context → record in workpad notes, downgrade the item
-to a `建议新建` list entry, never stall the main flow.
+**Failure handling:** In Fulfill mode, establish every required blocking
+relation before adding `symphony` or moving the new issue to `Todo`; a relation
+failure leaves it in intake and stops fulfillment with the exact error. Other
+relation failures are not rolled back; note `关系未设成，请人工补` in the
+artifact. Creation failure in a non-blocking context becomes a `建议新建` list
+entry and never stalls the main flow.
 
 ## Tier B — propose, then create on consent
 
@@ -163,15 +165,17 @@ Main Flow scans unresolved `## 建议新建 issue` comments for a new reply, the
 interprets the reply's **intent** (not a fixed keyword list):
 
 - **Consent** (e.g. `同意 / 建吧 / 可以 / 👍`) → create the recorded item with
-  the Tier A create/link/record/persist steps, except consent makes it
-  **schedulable** (invariant 1, Tier B): state = the team's `Todo`, labels =
-  `Type:Xxx` + `symphony`, assignee = creator. Relations by kind:
+  the Tier A create/link/record/persist steps, then make it **schedulable** only
+  after its required relations succeed (invariant 1, Tier B): state = the
+  team's `Todo`, labels = `Type:Xxx` + `symphony`, assignee = creator. Relations
+  by kind:
   - *blocking* → new issue `blocks` the current issue; after creating it,
     move the current issue to `Todo` and end the session — the blocked-by
     gate resumes it automatically once the blocker is terminal.
   - *sub-issue* → `parentId` = current issue **and** each child `blocks` the
-    current issue, so Symphony runs the children first and auto-resumes the
-    parent for integration and acceptance once every child is terminal.
+    current issue; move the parent to `Todo` and end the session, so Symphony
+    runs the children first and auto-resumes the parent for integration and
+    acceptance once every child is terminal.
   Then reply `已创建 ENG-123` in the proposal thread, resolve the proposal
   comment, flip the workpad entry `待同意 → 已创建`.
 - **Rejection** (e.g. `不用了 / 先不建`) → resolve the proposal comment, flip
