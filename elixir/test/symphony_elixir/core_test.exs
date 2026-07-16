@@ -322,7 +322,8 @@ defmodule SymphonyElixir.CoreTest do
     assert implementation_skill =~ "cannot be repaired without expanding or"
     assert implementation_skill =~ "do not use the remaining attempts"
     assert implementation_skill =~ "Maestro can decide whether Design must be reworked"
-    assert implementation_skill =~ "dedicated keeper process outside the review process tree"
+    assert implementation_skill =~ "process-local Git runtime configuration"
+    refute implementation_skill =~ "dedicated keeper process outside the review process tree"
     assert design_skill =~ "Descendants must not inherit a guard"
     assert maestro_workflow =~ "failure itself"
     assert maestro_workflow =~ "The Design is not"
@@ -535,6 +536,7 @@ defmodule SymphonyElixir.CoreTest do
           "review fix",
           "missing or mismatched Head ends the landing attempt",
           "do not edit, commit, or push here",
+          ".agents/skills/symphony-land/land_watch.py",
           "--match-head-commit \"$reviewed_head\""
         ] do
       assert land_skill =~ contract
@@ -558,6 +560,23 @@ defmodule SymphonyElixir.CoreTest do
     refute land_skill =~ "CI pushes an auto-fix commit"
     refute land_skill =~ "--pre-merge-head"
     refute land_skill =~ "[codex] review <id> acknowledged"
+    refute land_skill =~ "scripts/land_watch.py"
+    refute land_skill =~ "|| \\\n+  echo \"No land_watch.py found"
+
+    for status <- [0, 2, 3, 4, 7] do
+      command = "python3 -c 'raise SystemExit(#{status})' || exit $?; printf MERGE"
+      {output, actual_status} = System.cmd("sh", ["-c", command])
+
+      if status == 0 do
+        assert {output, actual_status} == {"MERGE", 0}
+      else
+        assert output == ""
+        assert actual_status == status
+      end
+    end
+
+    assert {"", 1} =
+             System.cmd("sh", ["-c", "test -f definitely-missing-land-watch.py || exit 1; printf MERGE"])
 
     refute File.exists?(
              Path.join(
@@ -755,9 +774,10 @@ defmodule SymphonyElixir.CoreTest do
           "session, analytics, and current-repo project runtime files",
           "session artifacts whose ids belong to this recursive closure",
           "non-escaping `/tmp/codex-adv-*` or `/tmp/codex-review-*` paths",
-          "three-source evidence union",
-          "process-internal `git fetch` or cleanup writes",
-          "evidence union to cover every observed mutation",
+          "authoritative population",
+          "corroboration only",
+          "cannot attribute a concurrent writer",
+          "owned population to cover every observed review mutation",
           "canonical-target SHA-256",
           "never copy raw arguments or protected paths to Linear"
         ] do
@@ -817,8 +837,8 @@ defmodule SymphonyElixir.CoreTest do
           "still emits one `unclassified` sentinel row",
           "explicit-action source ids to equal distinct row event ids",
           "`unclassified = 0`",
-          "three-source evidence union",
-          "before/after manifest deltas",
+          "authoritative population",
+          "corroboration only",
           "review session/temp lifecycle events",
           "artifact's `审计证据`",
           "link the managed rollout closure",
@@ -879,25 +899,17 @@ defmodule SymphonyElixir.CoreTest do
     normalized = String.replace(skill, ~r/\s+/, " ")
 
     for contract <- [
-          "repo-local raw `remote.origin.url` and `remote.origin.pushurl` sequences",
-          "order, duplicate values, and an absent `pushurl`",
-          "`git remote get-url --all origin` and `git remote get-url --push --all origin`",
-          "same Git config environment used by review and push",
-          "raw values are restoration evidence, not authorization evidence",
-          "every effective destination",
-          "effective fetch sequence must be exactly one PR base repository destination",
-          "effective push sequence must be exactly one PR head repository destination",
-          "Restore the exact raw sequences and `pushurl` absence",
-          "re-enumerate both complete effective sequences",
+          "process-local Git runtime configuration",
+          "empty `remote.origin.url` and `remote.origin.pushurl` values",
+          "singleton credential-free PR base fetch and PR head push URLs",
+          "`CONFIG_READY`",
+          "repo-local config hash",
+          "raw URL stays inside that non-tracing process",
           "correct first push URL plus an unauthorized second URL",
           "raw URL that rewrites to the wrong host or repository",
-          "absent raw `pushurl` still uses Git's effective push fallback",
-          "effective fetch is the singleton PR base and effective push is non-empty and entirely PR head",
           "standard review's own `git fetch origin <base>`",
           "normalized `owner/repo` exactly equals the PR's queried `baseRepository.nameWithOwner`",
           "require the fetched `refs/remotes/origin/<base>` to equal the attempt's recorded `baseRefOid`",
-          "using an EXIT/HUP/INT/TERM trap",
-          "Before any PR lookup or push in this phase, repair an interrupted remap",
           "does not authorize any push to upstream"
         ] do
       assert normalized =~ contract
@@ -906,8 +918,41 @@ defmodule SymphonyElixir.CoreTest do
     assert skill =~ "full `Base` and `Head` SHAs"
     refute skill =~ "copy gstack review"
     refute skill =~ "custom review range"
-    refute normalized =~ "restore the fetch URL from the fork push URL"
-    refute normalized =~ "preserve the fork's fetch URL and existing push configuration"
+
+    for removed <- ["interrupted remap", "repo-local raw", "dedicated keeper", "Restore the exact raw sequences"] do
+      refute normalized =~ removed
+    end
+
+    repo_root = Path.expand("..", File.cwd!())
+    before = File.read!(Path.join(repo_root, ".git/config"))
+
+    runtime = [
+      "GIT_CONFIG_COUNT=6",
+      "GIT_CONFIG_KEY_0=remote.origin.url",
+      "GIT_CONFIG_VALUE_0=",
+      "GIT_CONFIG_KEY_1=remote.origin.url",
+      "GIT_CONFIG_VALUE_1=https://github.com/agavemindlab/symphony.git",
+      "GIT_CONFIG_KEY_2=remote.origin.pushurl",
+      "GIT_CONFIG_VALUE_2=",
+      "GIT_CONFIG_KEY_3=remote.origin.pushurl",
+      "GIT_CONFIG_VALUE_3=https://github.com/hongqn/symphony.git",
+      "GIT_CONFIG_KEY_4=remote.origin.tagOpt",
+      "GIT_CONFIG_VALUE_4=--no-tags",
+      "GIT_CONFIG_KEY_5=maintenance.auto",
+      "GIT_CONFIG_VALUE_5=false"
+    ]
+
+    assert {"https://github.com/agavemindlab/symphony.git\n", 0} =
+             System.cmd("env", runtime ++ ["git", "remote", "get-url", "--all", "origin"], cd: repo_root)
+
+    assert {"https://github.com/hongqn/symphony.git\n", 0} =
+             System.cmd(
+               "env",
+               runtime ++ ["git", "remote", "get-url", "--push", "--all", "origin"],
+               cd: repo_root
+             )
+
+    assert File.read!(Path.join(repo_root, ".git/config")) == before
   end
 
   test "Maestro routes ESCALATED Implementation by convergence" do
@@ -1021,7 +1066,7 @@ defmodule SymphonyElixir.CoreTest do
              "all earlier Implementation artifacts"
   end
 
-  test "Design v18 review and routing contracts cover every transition row" do
+  test "Design v21 review and routing contracts cover every transition row" do
     repo_root = Path.expand("..", File.cwd!())
     workflow = File.read!(Path.join(repo_root, "workflows/agavemindlab/WORKFLOW.md"))
 
@@ -1035,6 +1080,18 @@ defmodule SymphonyElixir.CoreTest do
     normalized = fn contract -> String.replace(contract, ~r/\s+/, " ") end
     implementation = normalized.(implementation)
     workflow = normalized.(workflow)
+
+    for {row, contract} <- [
+          {:runtime_ready, "Emit `CONFIG_READY` only after that exact inherited environment reports the singleton identities and the repo-local config hash is unchanged"},
+          {:shared_config_mutation, "shared config mutation, a keeper, restore, or shape-based recovery is forbidden and forces Draft + `ESCALATED` with no review"},
+          {:start_without_ready, "A START without `CONFIG_READY` has the same outcome."},
+          {:transient_owned_action, "A closure-owned transient action remains in the population when the manifest is unchanged"},
+          {:concurrent_manifest_delta, "a shared delta without a closure-owned event is not attributed"},
+          {:denied_outside_attempt, "An outside-root attempt proven failed without mutation is a `denied_attempt`"},
+          {:unknown_outside_attempt, "success, unknown outcome, or an unresolved target is `unclassified`"}
+        ] do
+      assert implementation =~ contract, "missing transaction/audit row #{row}"
+    end
 
     for {row, contract} <- [
           {:canonical_fetch_repo_metadata, "Only the exact canonical-base fetch (`git fetch origin <PR base>` in the assigned checkout) may write finite `repo_git_metadata`"},

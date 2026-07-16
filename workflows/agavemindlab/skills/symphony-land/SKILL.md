@@ -111,8 +111,7 @@ git log --stat --format='%H %s' "upstream/${SYMPHONY_BASE_BRANCH:-main}..HEAD"
 # Watch review feedback, PR checks, mergeability, and PR head updates.
 # Implement a polling loop appropriate to the project's CI setup, or
 # use the project's land watcher script if one exists under .agents/skills/symphony-land/.
-python3 .agents/skills/symphony-land/scripts/land_watch.py 2>/dev/null || \
-  echo "No land_watch.py found; poll manually with: gh pr checks && gh pr view --json reviews" >&2
+python3 .agents/skills/symphony-land/land_watch.py || exit $?
 
 # Squash-merge only the Head recorded in the approved artifact.
 test "$(gh pr view --json headRefOid -q .headRefOid)" = "$reviewed_head"
@@ -127,7 +126,7 @@ gh pr merge --squash --match-head-commit "$reviewed_head" \
 ## Async Watch Helper
 
 If the project provides an asyncio watcher script at
-`.agents/skills/symphony-land/scripts/land_watch.py`, prefer it to monitor review
+`.agents/skills/symphony-land/land_watch.py`, prefer it to monitor review
 comments, CI, and head updates in parallel. Typical exit codes:
 
 - 2: Review comments detected (address feedback)

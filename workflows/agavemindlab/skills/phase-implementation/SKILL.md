@@ -172,37 +172,28 @@ Markdown sections:
      Base and Head as this attempt's audit evidence, then increment the counter.
      The counter is turn-local and the attempt is consumed even if review is
      interrupted or unavailable.
-   - Before any PR lookup or push in this phase, repair an interrupted remap
-     only when, under already-recorded trusted PR metadata, effective fetch is
-     the singleton PR base and effective push is non-empty and entirely PR
-     head: normalize both raw directions to explicit singleton PR-head URLs and
-     re-enumerate; otherwise abort review/push and publish `ESCALATED`. Before
-     each attempt, snapshot the repo-local raw `remote.origin.url` and
-     `remote.origin.pushurl` sequences exactly, including order, duplicate
-     values, and an absent `pushurl`. In the same Git config environment used
-     by review and push, enumerate with `git remote get-url --all origin` and
-     `git remote get-url --push --all origin`; raw values are restoration
-     evidence, not authorization evidence. Require every effective destination
-     to be GitHub HTTPS/SSH whose normalized `owner/repo` exactly equals the
-     PR's queried `baseRepository.nameWithOwner` or
-     `headRepository.nameWithOwner` for its direction. Reject everything else,
-     including a correct first push URL plus an unauthorized second URL or a
-     raw URL that rewrites to the wrong host or repository; an absent raw
-     `pushurl` still uses Git's effective push fallback and must pass the same
-     check. For review, set explicit singleton raw destinations: effective
-     fetch sequence must be exactly one PR base repository destination and
-     effective push sequence must be exactly one PR head repository
-     destination, so the standard review's own `git fetch origin <base>` is
-     canonical while push remains on the fork. Restore the exact raw sequences
-     and `pushurl` absence using an EXIT/HUP/INT/TERM trap in
-     one dedicated keeper process outside the review process tree; never let the review shell
-     or its descendants inherit the restoration trap. Then re-enumerate
-     both complete effective sequences and require the original values, order,
-     counts, repository identities, refs, and OIDs; repeat immediately before
-     push. This remap does not authorize any push to upstream or any review
-     engine change. Require a non-shallow checkout; disable tag following and
-     automatic Git maintenance during the transaction and restore their prior
-     configuration in the same trap.
+   - Run review with process-local Git runtime configuration; never mutate,
+     snapshot, remap, or restore repo-local config. In one non-tracing process,
+     admit every effective fetch/push destination only when its normalized
+     `owner/repo` exactly equals the PR's queried `baseRepository.nameWithOwner`
+     or `headRepository.nameWithOwner` for that direction, while
+     the raw URL stays inside that non-tracing process and output contains only
+     counts, ordered hashes, `pushurl` presence, and normalized identities.
+     Reject a correct first push URL plus an unauthorized second URL, a raw URL
+     that rewrites to the wrong host or repository, or any unresolved identity.
+     For the review process tree, use `GIT_CONFIG_COUNT/KEY_N/VALUE_N` with
+     empty `remote.origin.url` and `remote.origin.pushurl` values followed by
+     singleton credential-free PR base fetch and PR head push URLs. Apply
+     `remote.origin.tagOpt`, `maintenance.auto`, and `gc.auto` in the same
+     runtime environment. Emit `CONFIG_READY` only after that exact inherited
+     environment reports the singleton identities and the repo-local config
+     hash is unchanged; only then emit `REVIEW_ATTEMPT_START`. Process exit
+     removes the override, so shared config mutation, a keeper, restore, or
+     shape-based recovery is forbidden and forces Draft + `ESCALATED` with no
+     review. A START without `CONFIG_READY` has the same outcome. Require a
+     non-shallow checkout. The standard review's own
+     `git fetch origin <base>` remains canonical, and this does not authorize
+     any push to upstream or any review engine change.
    - Invoke the installed review skill through its normal skill entry
      (`$review` or `/review`) exactly once. Do not reimplement its checklist,
      substitute frozen SHAs into its commands, invoke `codex exec`/`codex review`
@@ -244,16 +235,22 @@ Markdown sections:
      other or unresolved target are `unclassified`. A write-capable action
      without a resolvable target still emits one `unclassified` sentinel row.
 
-     Population proof is the three-source evidence union: explicit transcript
-     actions, before/after manifest deltas for the finite Git metadata and four
-     runtime roots, and review session/temp lifecycle events. Do not require a
-     transcript row for process-internal `git fetch` or cleanup writes. Publish
-     only safe explicit-action rows keyed by `(event_id, target_ordinal)` with
+     The authoritative population is every managed action in the parent
+     attempt interval and recursive child closure plus review session/temp
+     lifecycle events. Before/after manifests for the finite Git metadata and
+     four runtime roots are corroboration only: they cannot attribute a
+     concurrent writer or replace a closure-owned event. Process-internal
+     lifecycle writes still need lifecycle evidence. A closure-owned transient
+     action remains in the population when the manifest is unchanged; a shared
+     delta without a closure-owned event is not attributed. An outside-root
+     attempt proven failed without mutation is a `denied_attempt`; success,
+     unknown outcome, or an unresolved target is `unclassified`. Publish only safe
+     explicit-action rows keyed by `(event_id, target_ordinal)` with
      operation, class, predicate id, canonical-target SHA-256, outcome, and
      violation reason; never copy raw arguments or protected paths to Linear.
      Require explicit-action source ids to equal distinct row event ids,
-     complete target ordinals, the evidence union to cover every observed
-     mutation, `unclassified = 0`, every child terminal, and exception grants
+     complete target ordinals, the owned population to cover every observed
+     review mutation, `unclassified = 0`, every child terminal, and exception grants
      or uses outside this phase-required `review` equal 0. Put the closure tuple
      and evidence-source counts in the artifact's `审计证据`, and link the managed
      rollout closure. Any audit violation
