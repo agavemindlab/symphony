@@ -132,7 +132,7 @@ Frontmatter fields:
 Markdown sections:
 - `## Plan`: hierarchical checklist mirroring the implementation plan.
 - `## Acceptance Criteria`: mirror every Requirements `S<N>` as an
-  executable checkbox. Do not restate criterion text.
+  executable checkbox.
 - `## Validation`: targeted test commands.
 - `## Notes`: progress notes with timestamps; skills invoked.
 
@@ -347,24 +347,17 @@ verifies it.
 Use only when completion is blocked by missing required tools or
 auth/permissions that cannot be resolved in-session.
 
-A blocker is a claim about what the environment **actually refused**, never an
-assumption. Before writing any `🚨 Blocked`: attempt the operation and capture
-the real error (exact command + stderr/exit); honor any human grant in the
-issue thread (e.g. "you can access `~/data/...`") by actually attempting that
-access. Do **not** assume an access boundary the environment has not actually
-imposed: a path being outside the repo is not, on its own, proof a read will
-fail — find out by attempting it and reading the real result. The
-repo-write-confinement and read-scope rules in your workflow instructions are *behavioral
-policy you self-enforce*, not a sandbox you can lean on. A real blocker is a
-captured command + error (missing auth / secrets / tools, or an endpoint that
-genuinely refuses you) — never an assumption.
+A blocker is a captured failure of an operation the workflow authorizes, not
+an assumption. Attempt authorized operations, including explicit human grants,
+and record the exact command plus error. Do not probe an unreferenced external
+path when its authorization is unclear; use `### NEEDS CLARIFICATION` instead.
 
 Only after a real, captured failure with no in-session workaround, write a
 blocker description in the workpad `notes` covering: what is missing; the exact
 command + error proving it; why it blocks acceptance; and a runbook detailed
 enough that a human, or an authorized agent, can unblock it without redoing
-research. Before handoff, inspect the repo, PR, configured services, and public
-docs needed to identify where and how to perform the operation. For secrets,
+research. Before handoff, inspect authorized repo, PR, service, and public-doc
+evidence needed to identify where and how to perform the operation. For secrets,
 name the source or generation path, never the value. If the operation is still
 unclear after that research, use a visible `### NEEDS CLARIFICATION` gate
 instead of writing a vague blocker.

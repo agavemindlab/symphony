@@ -19,8 +19,8 @@ description:
   Merging gate.
 - Squash-merge the PR once checks pass, then watch the `main` workflows for
   the merge commit.
-- Do not yield to the user until the PR is merged and the post-merge runs are
-  complete, or until a failure has been reported and a rollback decision is made.
+- Continue until the PR is merged and post-merge runs finish, or until the
+  workflow reaches an explicit failure, wait, or clarification exit.
 - No need to delete remote branches after merge if the repo auto-deletes head
   branches; check `AGENTS.md` for the project's branch deletion policy.
 
@@ -101,15 +101,8 @@ description:
     respond inline with a justification and ask the user before changing code.
 18. **Pushback template:** When disagreeing, reply inline with: acknowledge +
     rationale + offer alternative.
-19. **Ambiguity gate:** When ambiguity blocks progress, use the clarification
-    flow (assign PR to current GH user, mention them, wait for response). Do not
-    implement until ambiguity is resolved.
-    - If you are confident you know better than the reviewer, you may proceed
-      without asking the user, but reply inline with your rationale.
-20. **Per-comment mode:** For each review comment, choose one of: accept,
-    clarify, or push back. Reply inline stating the mode before changing code.
-21. **Reply before change:** Always respond with intended action before pushing
-    code changes (inline for review comments, issue thread for automated reviews).
+19. **Ambiguity gate:** When ambiguity blocks progress, use the phase's visible
+    clarification gate and stop; do not modify or merge the PR.
 
 ## Commands
 
@@ -164,8 +157,11 @@ gated_head=$(gh pr view --json headRefOid -q .headRefOid)
 # Watch review feedback, PR checks, mergeability, and PR head updates.
 # Implement a polling loop appropriate to the project's CI setup, or
 # use the project's land watcher script if one exists under .agents/skills/symphony-land/.
-python3 .agents/skills/symphony-land/scripts/land_watch.py 2>/dev/null || \
+if [ -f .agents/skills/symphony-land/land_watch.py ]; then
+  python3 .agents/skills/symphony-land/land_watch.py
+else
   echo "No land_watch.py found; poll manually with: gh pr checks && gh pr view --json reviews" >&2
+fi
 
 # Squash-merge only the head that passed the gate.
 gh pr merge --squash --match-head-commit "$gated_head" \
@@ -179,7 +175,7 @@ gh pr merge --squash --match-head-commit "$gated_head" \
 ## Async Watch Helper
 
 If the project provides an asyncio watcher script at
-`.agents/skills/symphony-land/scripts/land_watch.py`, prefer it to monitor review
+`.agents/skills/symphony-land/land_watch.py`, prefer it to monitor review
 comments, CI, and head updates in parallel. Typical exit codes:
 
 - 2: Review comments detected (address feedback)
@@ -199,11 +195,10 @@ If no watcher script is present, poll manually using:
 - If no PR checks appear after the bounded wait, continue only after review
   feedback and mergeability are clean; the post-merge watch still decides
   whether a `main` workflow run was expected.
-- Use judgment to identify flaky failures. If a failure is a flake (e.g., a
-  timeout on only one platform), you may proceed without fixing it.
+- Rerun a suspected flaky check; never treat a failed required check as green.
 - If CI pushes an auto-fix commit (authored by GitHub Actions), it does not
   trigger a fresh CI run. Detect the updated PR head, pull locally, merge
-  the upstream base if needed, add a real author commit, and force-push to
+  the upstream base if needed, add a real author commit, and push to
   retrigger CI, then restart the checks loop.
 - If mergeability is `UNKNOWN`, wait and re-check.
 - Do not merge while review comments (human or automated) are outstanding.
@@ -283,8 +278,6 @@ direction.
 
 - The PR title and description should reflect the full scope of the change, not
   just the most recent fix.
-- Classify each review comment as one of: correctness, design, style,
-  clarification, scope.
 - For correctness feedback, provide concrete validation (test, log, or
   reasoning) before closing it.
 - When accepting feedback, include a one-line rationale in the root-level

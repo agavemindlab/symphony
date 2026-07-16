@@ -27,7 +27,7 @@ description:
 3. Extract the session identifier and trace that session from start to terminal event.
 4. Classify the failure: hook failure, startup failure, turn failure, timeout/stall, retry loop, or cleanup failure.
 5. Record the exact command/log slice and probable root cause in the workpad.
-6. Fix only after root cause is supported by evidence.
+6. Fix only when requested and after root cause is supported by evidence.
 
 ## Commands
 

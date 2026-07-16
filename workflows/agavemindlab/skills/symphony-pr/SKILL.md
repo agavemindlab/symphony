@@ -35,9 +35,10 @@ description: |
 ## Reviewer configuration
 
 The designated automated reviewer is the `AUTOMATED_REVIEWER` environment
-variable. If it is non-empty, request review from that account after every PR
-create/update with a code, test, or documentation diff. If it is empty, skip
-the automated review request and proceed directly to human handoff.
+variable. If it is non-empty and no human reviewer request is pending, request
+review from that account after every PR create/update with a code, test, or
+documentation diff. If it is empty, skip the automated review request and
+proceed directly to human handoff.
 
 ## Related Skills
 
@@ -208,15 +209,8 @@ fi
 # Initial push: push feature branches to the fork (`origin`).
 git push -u origin HEAD
 
-# If that failed because the remote moved, use the symphony-pull skill.
-# After pull-skill resolution and re-validation, retry the normal push:
-git push -u origin HEAD
-
 # If the configured remote rejects the push for auth, permissions, or
 # workflow restrictions, stop and surface the exact error.
-
-# Only if history was rewritten locally:
-git push --force-with-lease origin HEAD
 
 if [ -z "$upstream_repo" ] || [ "$upstream_repo" = "$upstream_url" ]; then
   echo "Could not derive GitHub upstream repo from remote URL: $upstream_url" >&2
@@ -314,7 +308,6 @@ gh pr view "$pr_number" --repo "$upstream_repo" --json url -q .url
 
 ## Notes
 
-- Do not use `--force`; only use `--force-with-lease` as the last resort.
 - Distinguish sync problems from remote auth/permission problems:
   - Use the `symphony-pull` skill for non-fast-forward or stale-branch issues.
   - Surface auth, permissions, or workflow restrictions directly instead of

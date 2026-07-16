@@ -111,7 +111,7 @@ Continuation context:
 - This is retry attempt #{{ attempt }} because the ticket is still in an active state.
 - Resume from the current workspace state instead of restarting from scratch.
 - Do not repeat already-completed investigation or validation unless needed for new code changes.
-- Do not end the turn while the issue remains in an active state unless blocked by missing required permissions, secrets, or tools.
+- Continue the target phase to its documented `advance`, `stop`, or blocked exit; do not abandon it merely because the turn is long.
 {% endif %}
 
 Issue context:
@@ -139,7 +139,7 @@ Instructions:
 3. Final messages must report completed actions and blockers only. Do not include generic "next steps for user".
 4. **Subagent use is explicitly authorized.** Do not wait for additional user confirmation before using subagents.
 
-Confine all **writes** to the provided repository copy, except that phase-required gstack `review` may create or update only its own runtime state under `$HOME/.gstack/`, managed nested-Codex sessions under `$HOME/.codex/`, and `/tmp/codex-adv-*` or `/tmp/codex-review-*`. It must not mutate configuration, skills, prompts, rules, or credentials. This exception authorizes no other gstack skill, path, checkout, or external system.
+Confine all **filesystem writes** to the provided repository copy, except that phase-required gstack `review` may create or update only its own runtime state under `$HOME/.gstack/`, managed nested-Codex sessions under `$HOME/.codex/`, and `/tmp/codex-adv-*` or `/tmp/codex-review-*`. It must not mutate configuration, skills, prompts, rules, or credentials. This exception authorizes no other gstack skill, path, checkout, or external system.
 
 Reading outside the repo is allowed **when the task points you there** — a path named in the issue, its thread, `AGENTS.md`, or the repo's own config (eval corpora, datasets, fixtures, logs, sibling checkouts) is readable even though it lives outside the repo. That reference is the authorization: do **not** self-block or demand a human action to read a path the task already names. Do not go further: do not rummage through unrelated paths, other projects, or secret stores (`~/.ssh`, credential / `.env` files) unless the task explicitly requires it, and never copy such contents into a Linear artifact. If a needed read genuinely falls outside what the task references and you cannot tell whether it is authorized, treat that as a real blocker and ask.
 
@@ -326,7 +326,7 @@ procedure for that phase.
 
 ## Phase Artifact Protocol
 
-Each phase artifact version is a top-level Linear comment identified by its heading (see Phase Map). A fresh phase with no current artifact publishes with `commentCreate`. A same-phase rework, including a clarification-answer resume, resolves the old artifact with `commentResolve`, then publishes a fresh top-level artifact with `commentCreate` and puts the change summary on the new artifact. Once a phase artifact has been published, do not edit its body with `commentUpdate`; keep `commentUpdate` to raw tool mechanics, non-phase comments, or other explicitly non-review artifacts. No phase edits another phase's artifact, and no comments are posted outside this protocol.
+Each phase artifact version is a top-level Linear comment identified by its heading (see Phase Map). A fresh phase with no current artifact publishes with `commentCreate`. A same-phase rework, including a clarification-answer resume, resolves the old artifact with `commentResolve`, then publishes a fresh top-level artifact with `commentCreate` and puts the change summary on the new artifact. Once a phase artifact has been published, do not edit its body with `commentUpdate`; keep `commentUpdate` to raw tool mechanics, non-phase comments, or other explicitly non-review artifacts. No phase edits another phase's artifact; non-phase comments are posted only where this workflow explicitly authorizes them.
 
 After a `## Requirements` artifact exists, the issue description is intake
 context only and never overrides the current artifact chain or human replies;

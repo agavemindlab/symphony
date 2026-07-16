@@ -35,7 +35,7 @@ Linear relation.
 | related | loosely related, no dependency | `related` | **A — autonomous** |
 | downstream blocked | current `blocks` the new issue | `blocks` (current→new) | **A — autonomous** |
 | blocking | current `blocked-by` the new issue | propose only | **B — consent-gated** |
-| sub-issue | decompose current into children | `parentId` | **B — consent-gated** |
+| sub-issue | decompose current into children | `parentId` + child `blocks` current | **B — consent-gated** |
 
 Also assign a type label: `Bug | Feature | Refactor | Performance | Migration | Chore | Spike | Other`.
 
@@ -180,35 +180,3 @@ interprets the reply's **intent** (not a fixed keyword list):
 
 A human may also hand-create the issue instead; if you see it already exists,
 record it and move on. Both paths coexist.
-
-## Workpad `## Spawned Issues`
-
-```md
-## Spawned Issues
-- 已创建 ENG-123 — <title> · related/blocks/parent · <one-line why>
-- 待同意 <proposal-comment-id> — <title> · blocking/sub-issue
-- 已放弃 <proposal-comment-id> — <title> · <reason>
-```
-
-## Worked examples
-
-- **independent follow-up during Implementation** → `related` issue created in
-  the intake state, assignee = creator, listed in the `## Implementation`
-  artifact; workpad `已创建 ENG-123`.
-- **implementation ticket that depends on the current artifact** → `downstream
-  blocked`, linked as current `blocks` new.
-- **multi-project discovery** → split into one issue per target project and
-  link them by the dependency that actually blocks execution.
-- **blocking dependency found** → proposal comment + blocker callout on the
-  artifact + `Human Review`; nothing created until consent.
-- **consent reply in a proposal thread** → issue created schedulable
-  (`symphony` label + `Todo`), relation set, `已创建 ENG-123` replied, proposal
-  comment resolved, workpad `待同意 → 已创建`; a blocking fulfill additionally
-  re-parks the current issue at `Todo` for auto-resume.
-- **sub-issue decomposition consented** → children created schedulable, each
-  `parentId` + `blocks` the parent; the parent stays put and is auto-resumed
-  by the blocked-by gate after the last child completes.
-- **rejection reply** → proposal comment resolved, workpad `已放弃`.
-- **resume with the item already recorded** → skipped, not recreated.
-- **soft-search hit** → no duplicate; relation added to the existing issue,
-  `→ ENG-123` noted in the artifact.

@@ -29,7 +29,6 @@ Produce **two paired outputs** — they serve different readers (see
    - Verification plan (`验收方案`)
    - Intentionally uncovered scope with follow-up issue IDs
    - Any newly-discovered risks
-   - A pointer to `.symphony/design.md`
 
 ## At phase start
 
@@ -60,12 +59,9 @@ slice genuinely cannot fit the parent's design.
 
 Form the approach, ground it in evidence, then adversarially review it. Each
 step below uses a skill that is **natively interactive**, but this workflow is
-unattended: never let one interview the human turn by turn. Run each in the
-batched mode used throughout this phase — simulate it, walk its decision tree
-along your **own recommended answers** to its natural stop, record the analysis
-in `.symphony/design.md` (see `## 设计文档`), and route only what genuinely needs
-a human into the **Batched clarification** block below (one batch, each with
-your recommended resolution).
+unattended: run it with your recommended answers, record the analysis in
+`.symphony/design.md`, and batch only unresolved decisions that could change
+the approach or build.
 
 ### Form the approach — `brainstorming`
 
@@ -105,7 +101,7 @@ review is far cheaper than building on a flawed design).
 - Typically run it — there is a real architectural fork, new component / data
   flow, async / concurrency, a migration, a security boundary, or any
   non-obvious failure mode. When run, enumerate alternatives, consider edge
-  cases and failure modes, and record the analysis in the workpad before
+  cases and failure modes, and record the analysis in `.symphony/design.md` before
   writing the approach.
 - Typically skip it — the change is mechanical with no design latitude: a
   config / dep `Chore`, a one-line fix with an obvious correct shape, a scoped
@@ -357,14 +353,8 @@ are resolved in **one batch** with a recommended answer per question, so the
 human can approve the whole set with a single reply or push back only on the
 items they disagree with.
 
-**What becomes a question — and what doesn't.** The Discovery skills
-(`brainstorming`, `plan-eng-review`) are natively interactive; the batch is how
-you run them unattended. Simulate each review: answer every design question it
-would raise with your **own recommended answer**, walk on down the decision
-tree, and keep going until it reaches its natural stopping point. Collect every
-uncertainty you hit along that full path
-— do not stop early to keep the list short; a batch is cheapest when it is
-complete, because the human answers it in one pass. Then sort each one:
+**What becomes a question — and what doesn't.** Classify only unresolved
+decisions that could change the approach or what gets built:
 
 - **Immaterial** (a safe default exists and a wrong guess costs little) → do
   **not** ask. Take the default, record it in the workpad notes (or `风险/注意`
@@ -407,12 +397,9 @@ ___
 ___
 ```
 
-Give each question as many concrete branches as the decision genuinely has
-(plan-eng-review's framing decides this, not a fixed number), exactly one
-marked `（推荐）`. Every option states its consequence; the recommended one's
-doubles as the rationale. There is **no cap** on questions per round — surface
-every material fork the walk reached; that one complete batch is the efficient
-ask. If the material set comes out so large that the issue is clearly
+Give each question the concrete branches the decision genuinely has, exactly
+one marked `（推荐）`, and state every option's consequence. If the material set
+comes out so large that the issue is clearly
 mis-scoped, that is a signal to propose a `sub-issue` split via `symphony-issue`
 — split because the work is too big, never to hit a question quota. The same
 signal applies while shaping the approach: propose a split when the design
