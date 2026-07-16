@@ -241,23 +241,23 @@ defmodule SymphonyElixir.CoreTest do
     assert get_in(config, ["workspace", "root"]) == "$SYMPHONY_MAESTRO_WORKSPACE_ROOT"
     assert get_in(config, ["hooks", "after_create"]) =~ ".codex/skills/maestro"
 
-    assert prompt =~ "$maestro {{ issue.identifier }}"
+    assert prompt =~ "apply it directly"
+    assert prompt =~ "Read `.agents/skills/maestro/agents/maestro-reviewer.md`"
+    refute prompt =~ "Read `.codex/skills/maestro/agents/maestro-reviewer.md`"
+    assert prompt =~ "Do not invoke `$maestro`"
     assert prompt =~ "fresh Codex session"
-    assert prompt =~ "context forking disabled"
+    assert prompt =~ "spawn a nested reviewer"
     assert prompt =~ "upstream/${SYMPHONY_BASE_BRANCH:-main}"
     assert prompt =~ "Linear / GitHub / repository"
     assert prompt =~ "evidence"
     assert prompt =~ "Maestro OAuth app"
     assert prompt =~ "remove `symphony:maestro`"
-    assert prompt =~ "request changes"
-    assert prompt =~ "`Rework`"
-    assert prompt =~ "`approve`"
-    assert prompt =~ "0-10"
-    assert prompt =~ "keep the issue in `Human Review`"
-    assert prompt =~ "no-action"
+    assert prompt =~ "reviewer recommendation"
+    assert prompt =~ "/rework implementation"
+    assert prompt =~ "/rework design"
+    assert prompt =~ "Maestro only recommends"
+    assert prompt =~ "never change the issue state"
     assert prompt =~ "same artifact/head"
-    assert prompt =~ "Never move the issue to `Merging` or `Done`"
-    assert prompt =~ "Every review/no-action reply"
     assert prompt =~ "phase-closing replies"
     assert prompt =~ "✅ 已批准"
     assert prompt =~ "⏩ 自动进入"
@@ -299,6 +299,36 @@ defmodule SymphonyElixir.CoreTest do
     assert workflow =~ "never use the issue-level `updatedAt`"
     assert workflow =~ "Conflicting human feedback triggers phase rework"
     assert workflow =~ "folded into a new artifact before downstream work continues"
+  end
+
+  test "implementation review is bounded and Maestro cannot restart it" do
+    workflow = shared_workflow_prompt()
+
+    implementation_skill =
+      File.read!(Path.expand("../workflows/agavemindlab/skills/phase-implementation/SKILL.md", File.cwd!()))
+
+    maestro_workflow =
+      File.read!(Path.expand("../workflows/agavemindlab/MAESTRO_WORKFLOW.md", File.cwd!()))
+
+    maestro_reviewer =
+      File.read!(Path.expand("../.codex/skills/maestro/agents/maestro-reviewer.md", File.cwd!()))
+
+    assert implementation_skill =~ "MAX_REVIEW_ATTEMPTS = 5"
+    assert implementation_skill =~ "On attempts 1–4"
+    assert implementation_skill =~ "an unavailable or interrupted review is an infrastructure"
+    assert implementation_skill =~ "Attempt 5 is final"
+    assert implementation_skill =~ "Never invoke attempt"
+    assert implementation_skill =~ "Every `CLEAN` or `ESCALATED` outcome ends this agent turn"
+    refute implementation_skill =~ "recursive child rollout"
+    refute implementation_skill =~ "before/after manifest"
+    refute implementation_skill =~ "target_ordinal"
+
+    assert workflow =~ "an `ESCALATED` Implementation artifact is never approval"
+    assert workflow =~ "Maestro's reply is advisory and cannot reactivate the issue"
+    assert maestro_workflow =~ "Maestro only recommends: never change the issue state"
+    assert maestro_workflow =~ "keep `Human Review`"
+    assert maestro_reviewer =~ "current-turn Codex session"
+    assert maestro_reviewer =~ "Missing optional reviewer output is an"
   end
 
   test "cross-phase rollback supersedes stale target-through-awaiting artifacts" do
@@ -488,7 +518,7 @@ defmodule SymphonyElixir.CoreTest do
   end
 
   @tag :prompt_contract
-  test "commit organization gate preserves clean history and binds rewritten heads safely" do
+  test "landing owns commit organization and Maestro cannot rewrite history" do
     repo_root = Path.expand("..", File.cwd!())
 
     land_skill =
@@ -513,10 +543,10 @@ defmodule SymphonyElixir.CoreTest do
       assert land_skill =~ contract
     end
 
-    for prompt <- [land_skill, maestro_workflow, reviewer] do
-      assert prompt =~ "clean logical"
-      assert prompt =~ "same logical scope"
-    end
+    assert reviewer =~ "clean logical"
+    assert reviewer =~ "same logical scope"
+    assert maestro_workflow =~ "must not rewrite history"
+    refute maestro_workflow =~ "已自动将 issue"
   end
 
   test "workflow defines the status card as a non-routing digest" do
@@ -553,10 +583,11 @@ defmodule SymphonyElixir.CoreTest do
     assert maestro_workflow =~ "{{ routing_brief }}"
     assert maestro_workflow =~ "🤖 Maestro 预审核"
     assert maestro_workflow =~ "建议回复方式"
-    assert maestro_workflow =~ "MAESTRO_AUTO_REWORK"
-    assert maestro_workflow =~ "MAESTRO_AUTO_APPROVE_MIN_CONFIDENCE"
+    assert maestro_workflow =~ "Maestro only recommends"
+    assert maestro_workflow =~ "never change the issue state"
     assert maestro_workflow =~ "remove `symphony:maestro`"
     refute maestro_workflow =~ "✅ 已批准，进入"
+    refute maestro_workflow =~ "已自动将 issue"
     assert main_workflow =~ "symphony:maestro"
   end
 
@@ -627,7 +658,7 @@ defmodule SymphonyElixir.CoreTest do
 
     for evidence <- [
           "Source comment:",
-          "Automated review:",
+          "Automated review",
           "不等于人工批准",
           "S2 direct verification",
           "S1 post-deploy close test",
@@ -803,7 +834,8 @@ defmodule SymphonyElixir.CoreTest do
 
     assert reviewer =~ "mutate Linear, GitHub, files, or issue state"
     refute reviewer =~ "MAESTRO_AUTO_REWORK"
-    assert skill =~ "MAESTRO_AUTO_REWORK"
+    assert skill =~ "recommendation-only"
+    refute skill =~ "MAESTRO_AUTO_REWORK"
   end
 
   test "linear api token resolves from LINEAR_API_KEY env var" do

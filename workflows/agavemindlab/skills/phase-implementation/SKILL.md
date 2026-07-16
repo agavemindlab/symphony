@@ -30,7 +30,9 @@ opening this skill. Build from three sources — not the Linear summary alone:
   do not work off the one-line Linear summary.
 - The **approved Linear `## Requirements` and `## Design`** — what the human
   actually signed off on: `S<N>` IDs, the `验收方案`, the approved approach, and
-  risks. These are **authoritative on scope and commitments**.
+  risks. These and their later human replies are **authoritative on scope and
+  commitments**; once Requirements exists, the issue description is intake
+  context only and must not select the review budget or override this chain.
 - The **workpad** (`.symphony/workpad.md`) — execution continuation: the plan
   checklist, spawned/proposed issues that bound scope, and progress notes.
 
@@ -160,16 +162,45 @@ Markdown sections:
    is impossible, record the reason and closest safe alternative proof; surface
    the caveat in the artifact `风险/注意`.
 8. **Verify** — invoke `verification-before-completion`.
-9. **Pre-landing review** — invoke `review` (gstack) on the branch / PR diff.
-   Treat findings as Implementation feedback: fix, rerun validation, commit,
-   push, and repeat until clean or explicitly recorded in `风险/注意`.
-10. **PR feedback sweep** — see protocol below.
-11. **Post artifact** — write the `## Implementation` artifact and move to
+9. **Bounded pre-landing review** — set `MAX_REVIEW_ATTEMPTS = 5` for this
+   Implementation agent turn. Finish every rebase, merge, squash, and PR-body
+   change before the next review. Each invocation of the installed stock
+   `review` skill consumes one attempt, including an unavailable or interrupted
+   invocation. Do not implement another review engine or audit the review's
+   child sessions, filesystem manifests, or internal receipts.
+   - Before each invocation, require a clean worktree, pushed branch, and green
+     validation for the current Head. Record `REVIEW_ATTEMPT_START N` with the
+     Base and exact Head; invoke stock `review` through its normal skill entry;
+     then record `REVIEW_ATTEMPT_END N` with one outcome: `clean`, `findings`, or
+     `unavailable`. Record blocking findings by stable family and severity so
+     Maestro can compare attempts in this Codex session.
+   - On attempts 1–4, `clean` freezes the reviewed Head: make the PR Ready for
+     Review, publish `CLEAN`, and stop without any later tracked edit, commit,
+     push, rebase, squash, PR-body mutation, or review invocation.
+   - On attempts 1–4, batch-fix every blocking finding that is local to the
+     approved Design, validate, commit, push, and invoke the next attempt. A new
+     or differently worded finding is Implementation feedback, not by itself a
+     Design failure.
+   - On attempts 1–4, an unavailable or interrupted review is an infrastructure
+     outcome, not a code finding. Repair only its invocation precondition when
+     safe, then consume the next attempt; never turn missing optional child
+     output or transcript bookkeeping into P0/P1.
+   - Stop early as `ESCALATED` only when a validated blocking finding directly
+     contradicts an explicit approved Design assumption and cannot be repaired
+     locally. Keep the PR Draft so Maestro can recommend Design rework.
+   - Attempt 5 is final. After it returns, do not change Head or invoke review
+     again. Publish `CLEAN` and make the PR Ready only for a clean exact Head;
+     otherwise keep the PR Draft and publish `ESCALATED`. Never invoke attempt
+     6 in this turn.
+   - Every `CLEAN` or `ESCALATED` outcome ends this agent turn in Human Review.
+     The next turn requires a human state action; Maestro only recommends
+     whether that action should continue Implementation or rework Design.
+10. **Post artifact** — write the `## Implementation` artifact and move to
    `Human Review`.
 
 ## PR feedback sweep protocol
 
-Run this loop before posting the artifact:
+Run this sweep during each bounded review pass before posting the artifact:
 
 1. Identify the PR number from issue attachments / links.
 2. Ensure a code review is requested per the project's reviewer
@@ -187,8 +218,8 @@ Run this loop before posting the artifact:
    - Not applied: reply with explicit technical pushback.
 5. Update the workpad `plan` / `acceptance_criteria` with each feedback
    item and its resolution.
-6. Re-run validation after feedback changes and push updates.
-7. Repeat until no outstanding actionable comments remain.
+6. Apply the pass-specific repair or escalation rule from Implementation flow
+   step 9.
 
 When responding to review feedback, follow `receiving-code-review`
 discipline: verify before implementing, technical correctness over social
@@ -203,6 +234,12 @@ comfort.
 
 <用人话一句话说明本轮是否已准备好 review / rework / merge，点名 PR，说明影响，并给出建议动作。>
 
+### Review verdict
+
+**Review verdict**: <`CLEAN` | `ESCALATED`>
+
+**Review attempts**: <`N/5`>
+
 ### Root cause / recommendation（根因/结论）
 
 <用中文说明 accepted root cause / chosen approach。讲清楚为什么这个改动能解决
@@ -210,7 +247,7 @@ comfort.
 
 ### Human action needed
 
-> 👉 **需要人工处理**：<正常审查：审查 PR；无异议请将 issue 移至 `Merging`，需要修改则移至 `Rework`。>
+> 👉 **需要人工处理**：<`CLEAN`：审查 PR；无异议请将 issue 移至 `Merging`，需要修改则移至 `Rework`。`ESCALATED`：等待 Maestro 从本 artifact footer 的 Codex session id 读取 transcript，建议回 Design 或继续 Implementation；不要移至 `Merging`。>
 > - 若 blocked：写成可执行 runbook，包含操作系统/账号/项目/workspace、要配置的 key/权限/变量及类型或 sensitive 标记、secret 值从哪里取得或生成但不贴值、配置后如何重跑验证、通过判据。
 
 ### 风险/注意（optional: non-merge caveats only）
@@ -261,10 +298,12 @@ comfort.
 >>> 🔎 审计证据（默认折叠）
 - Spec: <source issue/comment, e.g. DEV-123 `## Design` or Source comment: URL>
 - PR: <PR URL>
-- Head: `<full head sha>`
+- Base: `<full canonical PR baseRefOid reviewed by the standard review>`
+- Head: `<full exact PR headRefOid reviewed by the standard review>`
 - CI / checks: `<workflow/check>` <passed|failed|pending>
-- Automated review: `<reviewer>` <approved|commented|timed out>，只作为自动
-  review evidence，不等于人工批准
+- Local review: gstack `review` <clean|findings addressed|findings recorded as risk>
+- Automated review（omit when `AUTOMATED_REVIEWER` is empty）: `<reviewer>`
+  <approved|commented|timed out>，只作为自动 review evidence，不等于人工批准
 - Commands:
   - `<exact command>` → <关键结果，例如 14 passed>
 - Red/Green 过程: <failing check → fix → passing check；没有则写 N/A + 原因>
@@ -354,11 +393,20 @@ Then update workpad `current_phase` to the target phase and open the target phas
   checkbox checked.
 - For app-behavior changes, local runtime acceptance has produced concrete
   evidence, or the substitution path is documented.
-- Validation/tests green for the latest commit.
-- PR pushed; PR checks green; PR linked on the issue.
+- For `CLEAN`, validation/tests are green for the exact reserved Head, the
+  canonical Base and exact Head are recorded as full `Base` and `Head` SHAs,
+  and the PR is pushed, linked on the issue, and green. For `ESCALATED`, record
+  the exact condition that ended the turn, including remaining `CRITICAL`
+  findings or a validation, publishing, pair-binding, or availability failure.
 - PR feedback sweep complete: every substantive comment has a reply.
+- For PR-producing work, review verdict is `CLEAN`, or the bounded current-turn
+  budget ended `ESCALATED` with a Draft PR and a Codex session id in the footer;
+  no-PR `Type:Spike` follows its findings
+  exit above.
 - `## Implementation` artifact posted.
-- Issue labeled `symphony:maestro` and moved to `Human Review`.
+- Main Flow moved the issue to `Human Review` through its verdict-aware `stop`
+  handler.
 
-The human approves by moving the issue to `Merging`. On the next session,
-Main Flow writes the approval reply on this artifact and runs Deployment.
+The human approves a `CLEAN` artifact by moving the issue to `Merging`. An
+`ESCALATED` artifact cannot enter Deployment; Maestro routes it to Design
+rework or another bounded Implementation turn from the recorded trajectory.

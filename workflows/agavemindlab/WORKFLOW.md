@@ -121,7 +121,7 @@ Current status: {{ issue.state }}
 Labels: {{ issue.labels }}
 URL: {{ issue.url }}
 
-Description:
+Original issue description (intake only after a `## Requirements` artifact exists):
 {% if issue.description %}
 {{ issue.description }}
 {% else %}
@@ -139,7 +139,7 @@ Instructions:
 3. Final messages must report completed actions and blockers only. Do not include generic "next steps for user".
 4. **Subagent use is explicitly authorized.** Do not wait for additional user confirmation before using subagents.
 
-Confine all **writes** to the provided repository copy — do not create, modify, or delete files anywhere else (other checkouts, `$HOME`, system paths).
+Confine all **writes** to the provided repository copy, except that phase-required gstack `review` may create or update only its own runtime state under `$HOME/.gstack/`, managed nested-Codex sessions under `$HOME/.codex/`, and `/tmp/codex-adv-*` or `/tmp/codex-review-*`. It must not mutate configuration, skills, prompts, rules, or credentials. This exception authorizes no other gstack skill, path, checkout, or external system.
 
 Reading outside the repo is allowed **when the task points you there** — a path named in the issue, its thread, `AGENTS.md`, or the repo's own config (eval corpora, datasets, fixtures, logs, sibling checkouts) is readable even though it lives outside the repo. That reference is the authorization: do **not** self-block or demand a human action to read a path the task already names. Do not go further: do not rummage through unrelated paths, other projects, or secret stores (`~/.ssh`, credential / `.env` files) unless the task explicitly requires it, and never copy such contents into a Linear artifact. If a needed read genuinely falls outside what the task references and you cannot tell whether it is authorized, treat that as a real blocker and ask.
 
@@ -239,7 +239,12 @@ Symphony only starts the agent when the issue is in an active state (`Todo`, `In
 
 3. Route by Linear state:
    - `Todo` → move to `In Progress`, then continue as `In Progress`.
-   - `Merging` → the human approved the PR. Write an approval reply on `## Implementation`: `✅ 已批准，进入 Deployment（[timestamp]）`. Target phase = Deployment; go to step 6.
+   - `Merging` → require the latest Symphony-authored `## Implementation`
+     artifact to have `Review verdict: CLEAN` for the current PR Head. An
+     absent, malformed, `ESCALATED`, or stale-Head verdict cannot deploy:
+     return the issue to `Human Review` (or `Rework` for a changed Head) and
+     stop. Otherwise write `✅ 已批准，进入 Deployment（[timestamp]）`, target
+     Deployment, and go to step 6.
    - `In Progress`, `Rework` → determine the target phase via steps 4–5.
 
 4. Gather the signals. When the `## 引擎预计算的路由事实` block above is available, treat its artifact states, awaiting phase, and new-comment lists as verified mechanics — do not re-derive them from scratch; fetch full comment bodies only where an excerpt is insufficient. When it is marked unavailable, derive them yourself as below:
@@ -268,20 +273,31 @@ Symphony only starts the agent when the issue is in an active state (`Todo`, `In
 
    **If the phase never reached review** (no awaiting-review artifact — e.g. an interrupted session resuming mid-phase) → target phase = the current phase, no approval reply.
 
-   Two **exceptions** override the generic `In Progress → approval → advance` read above, each on a different phase:
+   Three **exceptions** override the generic `In Progress → approval → advance` read above:
+
+   **Exception 0 — an `ESCALATED` Implementation artifact is never approval.**
+   Maestro's reply is advisory and cannot reactivate the issue. A newer human
+   `/rework implementation` or human-authored move to `In Progress` resumes a
+   fresh bounded Implementation turn; `/rework design` targets Design. A
+   question, approval/merge request, ambiguous `Rework`, or no newer human
+   action leaves the issue in `Human Review`. Never open Deployment from an
+   `ESCALATED` artifact.
 
    **Exception 1 — Implementation → Deployment is gated by `Merging`.** Deployment is irreversible (it merges and deploys) and is entered **only** via the `Merging` state (step 3). When the awaiting-review phase is Implementation, an approval detected in `In Progress` (with or without feedback) must **not** advance to Deployment, open `phase-deployment`, or write a Deployment approval reply. Treat it as "implementation accepted, awaiting the human's merge decision": leave the `## Implementation` artifact awaiting review, reply nudging `实现已通过 review，如需合并请将 issue 置为 Merging`, return the issue to `Human Review`, and stop.
 
    **Exception 2 — post-Deployment `In Progress` means finish verification.** When a concluded `## Deployment` still has unresolved `⚠️ 待观察` items and the issue is `In Progress`, this is a verification continuation, not a phase approval, but only after the pending item's artifact-stated observable signal / `何时可验` condition is now satisfied. With no feedback (or just a verify nudge) and the signal is present → target phase = Deployment, write no approval reply; if the signal is still absent, explain the issue should stay in `Human Review` until the stated condition occurs, return it to `Human Review`, and stop; with substantive feedback → interpret it by content per the rules above.
 
-6. Set the workpad `current_phase` to the target phase and open the matching phase skill (per the Phase Map). The skill does its phase work, publishes its artifact through the Phase Artifact Protocol, and on a **clean** exit hands back one of two outcomes — the skill alone decides which (see its "Exit"); only the Requirements and Design skills ever choose `advance`:
+6. Set the workpad `current_phase` to the target phase and open the matching phase skill (per the Phase Map). The skill does its phase work, publishes its artifact through the Phase Artifact Protocol, and on completion hands back one of two outcomes — the skill alone decides which (see its "Exit"); only the Requirements and Design skills ever choose `advance`:
 
    - **`advance`** → write the `⏩ 自动进入 [Next Phase]` reply on the just-posted artifact, set the workpad `current_phase` to the next phase, keep the issue in `In Progress`, persist the agent state, create `.symphony/stop-after-turn`, and stop this agent run. Do **not** open the next phase skill in this session; the next Symphony dispatch targets the saved phase.
-   - **`stop`** → add the `symphony:maestro` label before moving the issue to `Human Review`, then stop.
+   - **`stop`** → for Implementation, add `symphony:maestro` when `Review verdict` is exactly `CLEAN` or `ESCALATED`, and for no-PR `Type:Spike` findings; for an absent or malformed verdict on PR-producing work, ensure the label is absent. For every eligible outcome above and for other phases, add the `symphony:maestro` label before moving the issue to `Human Review`. Then stop.
 
    (A skill that stops **blocked** — unresolved clarification gate / escalated high-impact decision — moves the issue to `Human Review` itself; the session ends there.)
 
-   This is the only auto-advance mechanism, and Main Flow does not second-guess the skill's choice. A confident issue may progress Requirements → Design → Implementation across successive active dispatches, but the Implementation skill always returns `stop` (the PR awaits the human's merge decision), so the chain still ends at `Human Review`; Deployment is reached only via `Merging` (step 3).
+   This is the only auto-advance mechanism. Main Flow does not shorten the
+   Implementation skill's bounded repair loop. Implementation always returns
+   `stop`, so the chain ends at `Human Review`; Deployment is reached only via
+   `Merging` (step 3).
 
 ## Skill Interaction Protocol
 

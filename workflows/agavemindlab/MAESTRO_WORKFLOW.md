@@ -69,9 +69,6 @@ agent:
   max_turns: 1
 codex:
   command: codex --config shell_environment_policy.inherit=all --config 'model="gpt-5.6-sol"' --config model_reasoning_effort=high app-server
-  # The session blocks silently on the $maestro reviewer subagent for 10-20
-  # minutes; the default 5m stall detector would kill every review mid-wait.
-  stall_timeout_ms: 1800000
   approval_policy: never
   thread_sandbox: workspace-write
   turn_sandbox_policy:
@@ -104,56 +101,39 @@ Maestro OAuth app identity.
    ```
 
    If checkout fails, remove `symphony:maestro` if Linear auth works, then stop.
-3. Use `$maestro {{ issue.identifier }}`. The `$maestro` skill must run with
-   context forking disabled and collect only Linear / GitHub / repository
-   evidence. Do not pass it facts from this prompt beyond the issue key.
-4. Identify the current awaiting-review phase artifact and current PR/head when
-   one exists. If there is already a `🤖 Maestro 预审核:` reply for the same
-   artifact/head, write no second review. Remove `symphony:maestro` and stop.
+3. Identify the current awaiting-review phase artifact and current PR/head when
+   one exists. Record that artifact/head and the latest human feedback/state
+   activity as the pre-review snapshot. A prior reply qualifies for
+   deduplication only when it is a Maestro preflight reply, matches the same
+   artifact/head, and no newer human feedback or human-authored state action
+   exists. For a qualifying reply, write no second review: keep `Human Review`,
+   remove `symphony:maestro`, and stop.
+4. Read `.agents/skills/maestro/agents/maestro-reviewer.md` and apply it directly
+   in this fresh preflight session, collecting Linear / GitHub / repository
+   evidence plus Codex session transcripts referenced by phase artifact
+   footers. Do not invoke `$maestro` or spawn a nested reviewer.
+5. Immediately after reaching a recommendation and before any reply, state, or
+   label write, re-read Linear and GitHub. Require `Human Review` with both labels,
+   the same awaiting artifact and PR head as the pre-review snapshot, and no
+   newer human feedback or human-authored state action. On any mismatch, discard
+   the stale recommendation and stop without mutating Linear; an otherwise
+   eligible item can receive a fresh dispatch.
 
 ## Apply The Recommendation
 
-Never move the issue to `Merging` or `Done`. Every review/no-action reply
-starts with `🤖 Maestro 预审核:` and carries two machine-readable lines so
-analytics can score the verdict later: `建议回复方式: <approve | request
-changes | ask clarification | merge nudge | completion confirmation | no reply
-yet>` and, when a confidence score exists, `置信度：<N>/10`.
+Maestro only recommends: never change the issue state, even when an environment
+flag requests auto-approve or auto-rework. Every reply starts with
+`🤖 Maestro 预审核:`, includes `建议回复方式` and (when available) `置信度：<N>/10`,
+then leaves the issue in `Human Review` and removes `symphony:maestro`.
 
-- If `$maestro` says `request changes` / `rework`, reply in the current
-  artifact thread with the Maestro-chosen request-changes content, include the
-  artifact id and head. Unless the env `MAESTRO_AUTO_REWORK` is `false`/`0`,
-  end the reply with the line `🤖 auto: 已自动将 issue 置为 Rework` and move
-  the issue to `Rework` (reversible — a human who disagrees moves it back with
-  a reason); with auto-rework disabled, keep the issue in `Human Review`.
-  Then remove `symphony:maestro`.
-- If `$maestro` says `approve`, reply in the current artifact thread with the
-  Maestro-chosen approval content, include the artifact id and head, add a
-  `0-10` confidence score plus short rationale. Only when ALL hold — env
-  `MAESTRO_AUTO_APPROVE` is `true`/`1`; the awaiting phase is Requirements or
-  Design (never Implementation, Deployment, or Spike findings); confidence >=
-  `MAESTRO_AUTO_APPROVE_MIN_CONFIDENCE` (default 9) out of 10; and the
-  artifact has no unresolved clarification gate and no 🔴
-  high-impact open question — end the reply with the line
-  `🤖 auto: 已自动批准，置为 In Progress` and move the issue to `In Progress`.
-  Otherwise keep the issue in `Human Review`. Then remove `symphony:maestro`.
-- If `$maestro` says `merge nudge` for an Implementation artifact, first inspect
-  the current PR commits (`gh pr view --json commits` or equivalent). If the
-  history contains fixup/squash, WIP, review-iteration, late lint/test repair,
-  repeated "address review", or several small adjustments in the same logical scope,
-  do not nudge toward `Merging`: reply in the current Implementation
-  artifact thread with `🤖 Maestro 预审核:` and
-  `建议回复方式: request changes`, include the artifact id/head and the commit
-  evidence, ask Symphony to reorganize commits, end with
-  `🤖 auto: 已自动将 issue 置为 Rework` unless `MAESTRO_AUTO_REWORK=false`, move
-  to `Rework` when enabled, then remove `symphony:maestro`. If the history is
-  already clean (including clean logical multi-commit history), reply in the
-  current Implementation artifact thread with the Maestro-chosen merge-nudge
-  content, include the artifact id/head plus
-  `commit organization: no organization needed`, keep the issue in
-  `Human Review`, then remove `symphony:maestro`.
-- If `$maestro` has no actionable approve/rework decision, reply with a concise
-  no-action reason when there is a safe artifact thread, keep the issue in
-  `Human Review`, then remove `symphony:maestro`.
+- For `Review verdict: ESCALATED`, require the reviewer recommendation to cite
+  decisive Codex-session events and draft either `/rework implementation ...`,
+  `/rework design ...`, or a human clarification. Never turn it into approval
+  or a merge nudge.
+- For every other recommendation, reply in the current artifact thread with
+  the artifact id and current Head. A merge nudge may mention untidy commits,
+  but must not rewrite history or reactivate the issue; cleanup happens before
+  a future review only after a human requests rework.
 
 Do not write phase-closing replies such as `✅ 已批准` or `⏩ 自动进入`.
 
