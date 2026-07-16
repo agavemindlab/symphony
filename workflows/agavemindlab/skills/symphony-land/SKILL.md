@@ -34,8 +34,8 @@ description:
 2. Confirm the human approved Merging (the issue is in the `Merging` state)
    and read the approved `## Implementation` artifact before merging. It must
    supply three gate elements:
-   - Full audit-evidence `Base` and `Head`; carry them as `reviewed_base` and
-     `reviewed_head`.
+   - Full audit-evidence `Base` and `Head` plus the artifact `createdAt`; carry
+     them as `reviewed_base`, `reviewed_head`, and `reviewed_at`.
    - A merge-safety read: the `验收对照` and `风险/注意` sections establish
      whether the PR is safe to merge and whether any remaining issue could
      crash services, corrupt/lose data, break background jobs, or only affect
@@ -83,6 +83,8 @@ description:
 ## Commands
 
 ```sh
+set -e
+
 # Ensure branch and PR context
 repo=$(gh repo view --json nameWithOwner -q .nameWithOwner)
 pr_number=$(gh pr view --json number -q .number)
@@ -92,6 +94,7 @@ pr_body=$(gh pr view --json body -q .body)
 # Bind the artifact-reviewed Head before any mutable operation.
 reviewed_base='<artifact Base>'
 reviewed_head='<artifact Head>'
+reviewed_at='<artifact createdAt>'
 current_base=$(gh pr view --json baseRefOid -q .baseRefOid)
 current_head=$(gh pr view --json headRefOid -q .headRefOid)
 test "$current_head" = "$reviewed_head"
@@ -115,11 +118,11 @@ git log --stat --format='%H %s' "upstream/${SYMPHONY_BASE_BRANCH:-main}..HEAD"
 # Give GitHub a bounded checks-appearance window, then bound the visible-check
 # wait without activating a separate feedback/check reducer.
 checks_appear_deadline=$((SECONDS + 120))
-while :; do
-  check_count=$(gh pr view --json statusCheckRollup --jq '.statusCheckRollup | length')
-  [ "$check_count" -gt 0 ] || [ "$SECONDS" -ge "$checks_appear_deadline" ] && break
+while [ "$SECONDS" -lt "$checks_appear_deadline" ]; do
+  gh pr view --json statusCheckRollup --jq '.statusCheckRollup | length' >/dev/null
   sleep 5
 done
+check_count=$(gh pr view --json statusCheckRollup --jq '.statusCheckRollup | length')
 test "$check_count" -eq 0 || python3 -c \
   'import subprocess, sys; sys.exit(subprocess.run(sys.argv[1:], timeout=1800).returncode)' \
   gh pr checks --watch --fail-fast
@@ -127,8 +130,16 @@ test "$check_count" -eq 0 || python3 -c \
 # Immediately before merge, re-read PR state plus top-level, inline, and review
 # feedback. Stop unless every substantive item is addressed and the PR remains
 # mergeable without a changes-requested decision.
-gh pr view --json headRefOid,mergeable,reviewDecision,reviews,comments
+gh pr view --json statusCheckRollup,headRefOid,mergeable,reviewDecision,reviews,comments
 gh api "repos/$repo/pulls/$pr_number/comments"
+current_user=$(gh api user -q .login)
+inline_feedback=$(gh api "repos/$repo/pulls/$pr_number/comments" | jq --arg since "$reviewed_at" --arg me "$current_user" '[.[] | select(.created_at > $since and .user.login != $me)] | length')
+top_level_feedback=$(gh api "repos/$repo/issues/$pr_number/comments" | jq --arg since "$reviewed_at" --arg me "$current_user" '[.[] | select(.created_at > $since and .user.login != $me)] | length')
+review_feedback=$(gh api "repos/$repo/pulls/$pr_number/reviews" | jq --arg since "$reviewed_at" --arg me "$current_user" '[.[] | select(.submitted_at > $since and .user.login != $me) | select(.state == "CHANGES_REQUESTED" or (.state == "COMMENTED" and ((.body // "") | length) > 0))] | length')
+new_feedback_count=$((inline_feedback + top_level_feedback + review_feedback))
+test "$new_feedback_count" -eq 0
+final_check_count=$(gh pr view --json statusCheckRollup --jq '.statusCheckRollup | length')
+test "$final_check_count" -eq 0 || gh pr checks
 test "$(gh pr view --json headRefOid -q .headRefOid)" = "$reviewed_head"
 test "$(gh pr view --json mergeable -q .mergeable)" = "MERGEABLE"
 test "$(gh pr view --json reviewDecision -q '.reviewDecision // ""')" != "CHANGES_REQUESTED"
@@ -147,8 +158,6 @@ gh pr merge --squash --match-head-commit "$reviewed_head" \
 - If no PR checks appear after the bounded wait, continue only after review
   feedback and mergeability are clean; the post-merge watch still decides
   whether a `main` workflow run was expected.
-- Use judgment to identify flaky failures. If a failure is a flake (e.g., a
-  timeout on only one platform), you may proceed without fixing it.
 - If CI or any actor pushes a commit, stop; the new Head needs a fresh
   Implementation review even when its tree is equivalent.
 - If mergeability is `UNKNOWN`, wait and re-check.

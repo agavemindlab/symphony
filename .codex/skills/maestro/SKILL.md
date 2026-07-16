@@ -159,8 +159,9 @@ Task:
    just transparency.
 12. Cite the decisive evidence and call out missing evidence or uncertainty.
 13. For an Implementation artifact with `Review verdict: ESCALATED`, use its
-   footer session id to read the matching current-turn
-   `~/.codex/sessions/**/rollout-*.jsonl` transcript. Accept only a
+   footer session id to read the matching current-turn transcript. Search only
+   the artifact publication date's UTC and operator-local session directories
+   with `rg -l -F -- "$SESSION_ID" <candidate-date-directories>`. Accept only a
    Symphony-authored artifact. Select the transcript whose first
    `session_meta.payload.id` exactly equals the footer id and whose metadata
    matches this issue workspace and repository; a later transcript that merely

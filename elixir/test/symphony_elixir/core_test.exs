@@ -534,6 +534,9 @@ defmodule SymphonyElixir.CoreTest do
           "commit organization",
           "CI fix",
           "review fix",
+          "reviewed_at='<artifact createdAt>'",
+          "new_feedback_count",
+          "test \"$new_feedback_count\" -eq 0",
           "missing or mismatched Head ends the landing attempt",
           "do not edit, commit, or push here",
           "--match-head-commit \"$reviewed_head\""
@@ -547,8 +550,11 @@ defmodule SymphonyElixir.CoreTest do
 
     assert checks_watch < final_feedback
     assert final_feedback < merge
+    assert land_skill =~ "set -e"
     assert land_skill =~ "bounded checks-appearance window"
     assert land_skill =~ "30-minute execution deadline"
+    assert land_skill =~ "statusCheckRollup,headRefOid,mergeable,reviewDecision,reviews,comments"
+    refute land_skill =~ "Use judgment to identify flaky failures"
 
     refute land_skill =~ "immutable `reviewed_base`/`reviewed_head` pair"
 
@@ -937,7 +943,7 @@ defmodule SymphonyElixir.CoreTest do
     end
 
     assert workflow =~ "same-phase rework even when the issue is `In Progress`"
-    assert workflow =~ "names the recurring blocking family and invalid Design assumption"
+    assert workflow =~ "names the recurring blocking family plus invalid Design assumption"
     assert workflow =~ "identifies restored evidence or explicitly accepts the evidence gap"
     assert workflow =~ "Ignore a disposition whose artifact or current PR head does not match"
 
@@ -988,7 +994,7 @@ defmodule SymphonyElixir.CoreTest do
     assert launcher =~ "continue implementation"
     assert launcher =~ "matching current-turn"
     assert launcher =~ "session_meta.payload.id"
-    assert launcher =~ "~/.codex/sessions/**/rollout-*.jsonl"
+    refute launcher =~ "~/.codex/sessions/**/rollout-*.jsonl"
     assert normalized_reviewer =~ "set/count of blocking families"
     assert reviewer =~ "current-turn Codex\n  session transcript is primary evidence"
     assert reviewer =~ "the artifact is only a locator"
@@ -1008,7 +1014,6 @@ defmodule SymphonyElixir.CoreTest do
     assert design_skill =~ "Re-baseline the entire current\nPR diff"
     assert design_skill =~ "must name an existing\nproducer"
     assert workflow =~ "names the recurring blocking family"
-    assert workflow =~ "existing evidence producers"
     assert launcher =~ "tuple is incomplete"
     assert reviewer =~ "human-only authentication/permission blocker"
     assert launcher =~ "human-only authentication/permission blocker"
@@ -1129,8 +1134,9 @@ defmodule SymphonyElixir.CoreTest do
 
     assert implementation =~ "An unknown severity fails closed for human clarification"
     assert implementation =~ "no unresolved blocking finding"
-    assert workflow =~ "names the recurring blocking family and invalid Design assumption"
+    assert workflow =~ "names the recurring blocking family plus invalid Design assumption"
     assert reviewer =~ "<candidate-date-directories>"
+    assert launcher =~ "<candidate-date-directories>"
   end
 
   test "Implementation artifacts omit stale transcript recovery lineage" do
