@@ -228,7 +228,7 @@ defmodule SymphonyElixir.CoreTest do
     end
   end
 
-  test "Maestro workflow is label routed and keeps the human gate" do
+  test "Maestro workflow auto-reworks ordinary changes and keeps the ESCALATED human gate" do
     original_workflow_path = Workflow.workflow_file_path()
     on_exit(fn -> Workflow.set_workflow_file_path(original_workflow_path) end)
     Workflow.set_workflow_file_path(Path.expand("../workflows/symphony/MAESTRO_WORKFLOW.md", File.cwd!()))
@@ -255,8 +255,11 @@ defmodule SymphonyElixir.CoreTest do
     assert prompt =~ "reviewer recommendation"
     assert prompt =~ "/rework implementation"
     assert prompt =~ "/rework design"
-    assert prompt =~ "Maestro only recommends"
-    assert prompt =~ "never change the issue state"
+    assert prompt =~ "Auto-rework ordinary request changes"
+    assert prompt =~ "MAESTRO_AUTO_REWORK"
+    assert prompt =~ "🤖 auto: 已自动将 issue 置为 Rework"
+    assert prompt =~ "Review verdict: ESCALATED"
+    assert prompt =~ "leave the issue in `Human Review`"
     assert prompt =~ "same artifact/head"
     assert prompt =~ "phase-closing replies"
     assert prompt =~ "✅ 已批准"
@@ -301,7 +304,7 @@ defmodule SymphonyElixir.CoreTest do
     assert workflow =~ "folded into a new artifact before downstream work continues"
   end
 
-  test "implementation review is bounded and Maestro cannot restart it" do
+  test "implementation review is bounded and only ordinary Maestro rework can restart work" do
     workflow = shared_workflow_prompt()
 
     implementation_skill =
@@ -325,12 +328,16 @@ defmodule SymphonyElixir.CoreTest do
 
     assert workflow =~ "ESCALATED human gate"
     assert workflow =~ "every Maestro-authored reply as advisory"
+    assert workflow =~ "Maestro auto-rework"
+    assert workflow =~ "🤖 auto: 已自动将 issue 置为 Rework"
 
     {gate_position, _} = :binary.match(workflow, "ESCALATED human gate")
+    {auto_rework_position, _} = :binary.match(workflow, "Maestro auto-rework")
     {intent_position, _} = :binary.match(workflow, "Fast path — explicit commands")
-    assert gate_position < intent_position
-    assert maestro_workflow =~ "Maestro only recommends: never change the issue state"
-    assert maestro_workflow =~ "keep `Human Review`"
+    assert gate_position < auto_rework_position
+    assert auto_rework_position < intent_position
+    assert maestro_workflow =~ "Auto-rework ordinary request changes"
+    assert maestro_workflow =~ "except an `ESCALATED` Implementation review"
     assert maestro_reviewer =~ "current-turn Codex session"
     assert maestro_reviewer =~ "Missing optional reviewer output is an"
   end
@@ -550,7 +557,6 @@ defmodule SymphonyElixir.CoreTest do
     assert reviewer =~ "clean logical"
     assert reviewer =~ "same logical scope"
     assert maestro_workflow =~ "must not rewrite history"
-    refute maestro_workflow =~ "已自动将 issue"
   end
 
   test "workflow defines the status card as a non-routing digest" do
@@ -587,12 +593,14 @@ defmodule SymphonyElixir.CoreTest do
     assert maestro_workflow =~ "{{ routing_brief }}"
     assert maestro_workflow =~ "🤖 Maestro 预审核"
     assert maestro_workflow =~ "建议回复方式"
-    assert maestro_workflow =~ "Maestro only recommends"
-    assert maestro_workflow =~ "never change the issue state"
+    assert maestro_workflow =~ "Auto-rework ordinary request changes"
+    assert maestro_workflow =~ "MAESTRO_AUTO_REWORK"
+    assert maestro_workflow =~ "🤖 auto: 已自动将 issue 置为 Rework"
+    assert maestro_workflow =~ "except an `ESCALATED` Implementation review"
     assert maestro_workflow =~ "remove `symphony:maestro`"
     refute maestro_workflow =~ "✅ 已批准，进入"
-    refute maestro_workflow =~ "已自动将 issue"
     assert main_workflow =~ "symphony:maestro"
+    assert main_workflow =~ "Maestro auto-rework"
   end
 
   test "workflow prompts provide the explicit command fast path" do
@@ -838,8 +846,8 @@ defmodule SymphonyElixir.CoreTest do
 
     assert reviewer =~ "mutate Linear, GitHub, files, or issue state"
     refute reviewer =~ "MAESTRO_AUTO_REWORK"
-    assert skill =~ "recommendation-only"
-    refute skill =~ "MAESTRO_AUTO_REWORK"
+    assert skill =~ "MAESTRO_AUTO_REWORK"
+    assert skill =~ "except an `ESCALATED` Implementation review"
   end
 
   test "linear api token resolves from LINEAR_API_KEY env var" do

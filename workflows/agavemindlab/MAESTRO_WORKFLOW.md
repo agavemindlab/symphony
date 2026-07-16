@@ -106,8 +106,10 @@ Maestro OAuth app identity.
    activity as the pre-review snapshot. A prior reply qualifies for
    deduplication only when it is a Maestro preflight reply, matches the same
    artifact/head, and no newer human feedback or human-authored state action
-   exists. For a qualifying reply, write no second review: keep `Human Review`,
-   remove `symphony:maestro`, and stop.
+   exists. For a qualifying reply, write no second review. If it carries the
+   auto-rework marker below but the issue is still in `Human Review`, retry the
+   `Rework` state update before removing `symphony:maestro`; otherwise keep
+   `Human Review`, remove the label, and stop.
 4. Read `.agents/skills/maestro/agents/maestro-reviewer.md` and apply it directly
    in this fresh preflight session, collecting Linear / GitHub / repository
    evidence plus Codex session transcripts referenced by phase artifact
@@ -121,19 +123,28 @@ Maestro OAuth app identity.
 
 ## Apply The Recommendation
 
-Maestro only recommends: never change the issue state, even when an environment
-flag requests auto-approve or auto-rework. Every reply starts with
-`🤖 Maestro 预审核:`, includes `建议回复方式` and (when available) `置信度：<N>/10`,
-then leaves the issue in `Human Review` and removes `symphony:maestro`.
+Every reply starts with `🤖 Maestro 预审核:`, includes `建议回复方式` and (when
+available) `置信度：<N>/10`, and records the reviewed artifact id and Head.
 
+### Auto-rework ordinary request changes
+
+- When the recommendation is `request changes`, reply in the reviewer-selected
+  artifact thread with its exact `/rework <phase> ...` draft. Unless
+  `MAESTRO_AUTO_REWORK` is `false`/`0`, end the reply with
+  `🤖 auto: 已自动将 issue 置为 Rework`, move the issue to `Rework`, then remove
+  `symphony:maestro`. This applies to ordinary Requirements, Design,
+  Implementation, and Deployment review, except an `ESCALATED` Implementation review.
+  With auto-rework disabled, leave the issue in `Human Review` and remove the
+  label.
 - For `Review verdict: ESCALATED`, require the reviewer recommendation to cite
   decisive Codex-session events and draft either `/rework implementation ...`,
-  `/rework design ...`, or a human clarification. Never turn it into approval
-  or a merge nudge.
-- For every other recommendation, reply in the current artifact thread with
-  the artifact id and current Head. A merge nudge may mention untidy commits,
-  but must not rewrite history or reactivate the issue; cleanup happens before
-  a future review only after a human requests rework.
+  `/rework design ...`, or a human clarification. Never auto-rework it: leave
+  the issue in `Human Review`, remove `symphony:maestro`, and wait for a newer
+  human action.
+- For every other recommendation, reply in the reviewer-selected artifact
+  thread, leave the issue in `Human Review`, then remove `symphony:maestro`. A
+  merge nudge may mention untidy commits, but must not rewrite history or
+  reactivate the issue.
 
 Do not write phase-closing replies such as `✅ 已批准` or `⏩ 自动进入`.
 

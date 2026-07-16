@@ -69,9 +69,11 @@ to send the reply for them, e.g. "帮我回复", then:
    PR comments, merge, deploy, or move to `Done` unless the recommendation says
    `Done` and the user explicitly asked you to act.
 
-Maestro pre-review sessions are recommendation-only: they leave the issue in
-`Human Review`. A later human reply or state action starts any rework,
-approval, merge, or completion transition.
+Maestro pre-review sessions auto-execute `request changes` by default, except an `ESCALATED` Implementation review: they append
+`🤖 auto: 已自动将 issue 置为 Rework` and set the issue to `Rework`. Set
+`MAESTRO_AUTO_REWORK=false` to keep ordinary request changes recommendation-only.
+ESCALATED and all non-rework verdicts stay in `Human Review` until a later human
+reply or state action starts the transition.
 
 ## Subagent Task
 
