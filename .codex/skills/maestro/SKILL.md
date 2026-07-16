@@ -184,14 +184,18 @@ Task:
    failed before comparable blocking findings exist, first check whether the
    failure itself proves an approved Design mechanism cannot satisfy its
    invariant and would repeat without a Design change; if so, return Design
-   `request changes` with `ESCALATED disposition: DESIGN_REWORK`. Otherwise
+   `request changes`. `WORKFLOW.md` owns `symphony.design-rework/v1`; read that
+   owner and draft exactly one compliant `ESCALATED routing record` line.
+   This read-only recommendation surface is not a trusted Main Flow producer.
+   Otherwise
    return `ask clarification`
    with no disposition or state change and ask whether to authorize another
    Implementation turn. Reserve `no reply yet`
    for a proven human-only authentication/permission blocker whose artifact
    supplies the complete executable runbook. Otherwise include the exact
-   `ESCALATED disposition` machine line and decisive transcript events in the
-   draft.
+   `ESCALATED disposition` machine line for Implementation continuation or the
+   owner-defined routing record for Design rework, plus decisive transcript
+   events. Do not copy the owner field list into this skill.
 Keep the answer concise and do not recommend changing state directly unless the
 human's reply should explicitly instruct that.
 ```

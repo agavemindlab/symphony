@@ -47,20 +47,15 @@ artifact.
 
 If this run is a rework of `## Design` (the artifact has unresolved human
 feedback in its thread), follow the same-phase Rework cycle in your workflow instructions.
-When Main Flow routes here with `ESCALATED disposition: DESIGN_REWORK`, read
-the referenced Implementation session transcript and replace the invalid
-assumption with finite invariants, explicit state transitions, and a
-transition-matrix test boundary for the recurring finding family. Fixing only
-the latest examples does not satisfy this rework. Re-baseline the entire current
-PR diff against Requirements and every validated blocking family from that
-review attempt. Every required signal or audit field must name an existing
-producer and prove the current tool emits it; otherwise delete the predicate or
-design the producer within approved scope. If that conflicts with Requirements
-or a non-goal, use Cross-phase rework instead of writing an impossible Design.
-When cleanup correctness
-depends on process lifecycle, assign the guard to one owner outside the guarded
-process tree and test child exit, parent exit, and signals. Descendants must not inherit a guard
-that can restore shared state.
+When Main Flow routes here with a valid `symphony.design-rework/v1` record,
+read the owner contract in `WORKFLOW.md`, the record, and its referenced
+Implementation transcript. Re-baseline the entire current PR diff against
+Requirements and every validated blocking family from that review attempt;
+fixing only the latest examples does not satisfy this rework. Every required
+signal or audit field must name an existing producer and prove the current tool
+emits it; otherwise delete the predicate or design the producer within approved
+scope. If that conflicts with Requirements or a non-goal, use Cross-phase
+rework instead of writing an impossible Design.
 
 ## Sub-issue: fit the parent's design
 

@@ -106,7 +106,7 @@ Maestro OAuth app identity.
    activity as the pre-review snapshot. A prior reply qualifies for
    deduplication only when it is
    a Maestro preflight reply, matches the same artifact/head, and carries a valid
-   recommendation plus its required exact disposition line, with no newer
+   recommendation plus its required exact machine contract, with no newer
    human feedback or human-authored state action. For a qualifying reply, write
    no second review: keep `Human Review`, remove `symphony:maestro` and stop.
    A reply from any other author, with an incomplete machine contract, or
@@ -179,14 +179,17 @@ completion confirmation | no reply yet>` and, when a confidence score exists,
     human explicitly reactivates the next turn by moving the issue to
     `In Progress`. Keep `Human Review`; do not move the issue to `In Progress`
     or `Rework`. Then remove `symphony:maestro`.
-  - **The Design is not converging** — require `建议回复方式: request changes`
-    and `ESCALATED disposition: DESIGN_REWORK` in the reply. Choose this for a
+  - **The Design is not converging** — require `建议回复方式: request changes`.
+    `WORKFLOW.md` owns `symphony.design-rework/v1`; this Maestro OAuth workflow
+    is its only trusted stateful producer. Open that owner section and emit
+    exactly one compliant `ESCALATED routing record` line in the reply.
+    Choose this for a
     repeated or oscillating blocking family, non-decreasing blocking-family set/count,
     cross-cutting fixes that expand/contradict the approved Design, or a
     transcript trajectory that has plateaued or regressed. Cite the decisive
-    session ids/events and require Design to replace the invalid assumption
-    with finite invariants and a transition-matrix test boundary for the
-    recurring finding family, rather than patching only the latest examples.
+    session ids/events; the owner record carries the invalid assumption, finite
+    replacement invariants, and transition-matrix test boundary for the
+    recurring finding family.
     Say that a human explicitly reactivates the next turn by moving the issue
     to `Rework`. Keep `Human Review`; do not move the issue to `In Progress` or
     `Rework`. Then remove `symphony:maestro`.

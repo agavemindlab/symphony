@@ -203,10 +203,10 @@ Implementation:
     findings oscillate or fail to decrease, repairs move the same defect across
     layers, implementation must expand/contradict the approved Design, or the
     current-turn trajectory plateaus or regresses. The draft must cite
-    the decisive transcript events, include `ESCALATED disposition: DESIGN_REWORK`,
-    and require Design to replace the invalid assumption with finite invariants
-    and a transition-matrix test boundary for the recurring finding family,
-    rather than patching only the latest examples; recommend that a human move
+    the decisive transcript events. `WORKFLOW.md` owns
+    `symphony.design-rework/v1`; read that owner and draft exactly one compliant
+    `ESCALATED routing record` line without copying its field list. This
+    read-only reviewer is not a trusted Main Flow producer. Recommend that a human move
     the issue to `Rework`, because Maestro does not start the next turn itself.
   - If any bound artifact/session/repository/workspace/head
     member is missing, malformed, truncated, or mismatched, the tuple is incomplete.
@@ -222,8 +222,8 @@ Implementation:
     precondition failed before comparable blocking findings exist, first check
     whether the failure itself proves an approved Design mechanism cannot
     satisfy its invariant and would repeat without a Design change. If so,
-    recommend Design `request changes` with `ESCALATED disposition:
-    DESIGN_REWORK`; otherwise recommend `ask clarification`, emit no disposition
+    recommend Design `request changes` with the owner-defined
+    `symphony.design-rework/v1` routing record; otherwise recommend `ask clarification`, emit no disposition
     or state change, and ask whether to authorize another Implementation turn.
   - Recommend `no reply yet` only when the artifact itself proves a human-only authentication/permission blocker
     and supplies a complete executable runbook. A missing transcript alone is not that proof. Do not substitute

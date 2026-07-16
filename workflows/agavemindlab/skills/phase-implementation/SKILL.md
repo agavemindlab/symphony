@@ -261,6 +261,15 @@ Markdown sections:
      the attempt's recorded `baseRefOid`, and the PR Head, local HEAD, and fork
      branch Head to equal the recorded Head. Record any later Base movement as
      audit evidence for Deployment's best-effort recheck.
+   - After the final PR feedback sweep for a candidate `CLEAN`, open
+     `.agents/skills/symphony-land/SKILL.md`, extract the bytes between
+     `<!-- symphony.feedback/v1:start -->` and
+     `<!-- symphony.feedback/v1:end -->`, and execute that production block's
+     `symphony_feedback_snapshot` for the PR base repository and number. Do not
+     copy or reimplement the recipe here. Record its schema, count, and digest
+     as separate artifact fields, and make no later PR feedback mutation before
+     publishing the artifact. A nonzero result or malformed tuple forces Draft
+     + `ESCALATED` and ends the turn without another review or code change.
    - On attempts 1–4 only, if the standard review completes with no unresolved blocking finding
      (including validated P0/P1 or its native `CRITICAL` severity), validation and
      checks and the audit above pass, the worktree is clean, and the review's
@@ -402,6 +411,9 @@ comfort.
 - Red/Green 过程: <failing check → fix → passing check；没有则写 N/A + 原因>
 - PR feedback / check metadata: <review comments, review states, request-review
   status>
+- Feedback snapshot schema: `<symphony.feedback/v1>`
+- Feedback snapshot count: `<decimal object count>`
+- Feedback snapshot digest: `<64 lowercase hex SHA-256>`
 - Git hygiene: <base/head refresh, mergeability/conflict state, agent-state
   cleanup not in PR diff>
 - 行号级证据:

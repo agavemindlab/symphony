@@ -34,8 +34,9 @@ description:
 2. Confirm the human approved Merging (the issue is in the `Merging` state)
    and read the approved `## Implementation` artifact before merging. It must
    supply three gate elements:
-   - Full audit-evidence `Base` and `Head` plus the artifact `createdAt`; carry
-     them as `reviewed_base`, `reviewed_head`, and `reviewed_at`.
+   - Full audit-evidence `Base` and `Head` plus the artifact's
+     `symphony.feedback/v1` schema, count, and digest; carry them as
+     `reviewed_base`, `reviewed_head`, and `reviewed_feedback_tuple`.
    - A merge-safety read: the `验收对照` and `风险/注意` sections establish
      whether the PR is safe to merge and whether any remaining issue could
      crash services, corrupt/lose data, break background jobs, or only affect
@@ -86,7 +87,9 @@ description:
 set -e
 
 # Ensure branch and PR context
-repo=$(gh repo view --json nameWithOwner -q .nameWithOwner)
+pr_url=$(gh pr view --json url -q .url)
+repo=${pr_url#https://github.com/}
+repo=${repo%/pull/*}
 pr_number=$(gh pr view --json number -q .number)
 pr_title=$(gh pr view --json title -q .title)
 pr_body=$(gh pr view --json body -q .body)
@@ -94,7 +97,8 @@ pr_body=$(gh pr view --json body -q .body)
 # Bind the artifact-reviewed Head before any mutable operation.
 reviewed_base='<artifact Base>'
 reviewed_head='<artifact Head>'
-reviewed_at='<artifact createdAt>'
+reviewed_feedback_tuple=$(printf '%s\t%s\t%s\n' \
+  '<artifact feedback schema>' '<artifact feedback count>' '<artifact feedback digest>')
 current_base=$(gh pr view --json baseRefOid -q .baseRefOid)
 current_head=$(gh pr view --json headRefOid -q .headRefOid)
 test "$current_head" = "$reviewed_head"
@@ -127,17 +131,129 @@ test "$check_count" -eq 0 || python3 -c \
   'import subprocess, sys; sys.exit(subprocess.run(sys.argv[1:], timeout=1800).returncode)' \
   gh pr checks --watch --fail-fast
 
-# Immediately before merge, re-read PR state plus top-level, inline, and review
-# feedback. Stop unless every substantive item is addressed and the PR remains
-# mergeable without a changes-requested decision.
+# The single production owner for the feedback population and canonical bytes.
+<!-- symphony.feedback/v1:start -->
+symphony_feedback_snapshot() {
+  feedback_repo=$1
+  feedback_pr=$2
+
+  printf '%s\n' "$feedback_repo" | grep -Eq '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$' || return 1
+  printf '%s\n' "$feedback_pr" | grep -Eq '^[1-9][0-9]*$' || return 1
+
+  issue_pages=$(gh api --paginate --slurp "repos/$feedback_repo/issues/$feedback_pr/comments") || return 1
+  review_comment_pages=$(gh api --paginate --slurp "repos/$feedback_repo/pulls/$feedback_pr/comments") || return 1
+  review_pages=$(gh api --paginate --slurp "repos/$feedback_repo/pulls/$feedback_pr/reviews") || return 1
+
+  printf '%s\0%s\0%s' "$issue_pages" "$review_comment_pages" "$review_pages" |
+    python3 /dev/fd/3 3<<'PY'
+import datetime
+import hashlib
+import json
+import re
+import sys
+
+
+def required(source, key):
+    if key not in source:
+        raise ValueError(f"missing {key}")
+    return source[key]
+
+
+def decimal(value):
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError("invalid decimal id")
+    return str(value)
+
+
+def text(value, *, nullable=False):
+    if value is None and nullable:
+        return ""
+    if not isinstance(value, str):
+        raise ValueError("invalid text")
+    return value.replace("\r\n", "\n").replace("\r", "\n")
+
+
+def timestamp(value):
+    if not isinstance(value, str) or re.fullmatch(
+        r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]+)?Z",
+        value,
+    ) is None:
+        raise ValueError("invalid timestamp")
+    parsed = datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None or parsed.utcoffset() != datetime.timedelta(0):
+        raise ValueError("timestamp is not UTC")
+    return parsed.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def actor(source):
+    user = required(source, "user")
+    if not isinstance(user, dict):
+        raise ValueError("missing user")
+    return decimal(required(user, "id")), text(required(user, "login")), text(required(user, "type"))
+
+
+def pages(payload):
+    decoded = json.loads(payload)
+    if not isinstance(decoded, list) or not all(isinstance(page, list) for page in decoded):
+        raise ValueError("invalid paginated response")
+    return [record for page in decoded for record in page]
+
+
+try:
+    payloads = sys.stdin.buffer.read().split(b"\0")
+    if len(payloads) != 3:
+        raise ValueError("missing channel payload")
+
+    objects = []
+    channels = (
+        ("issue_comment", pages(payloads[0]), "created_at", False),
+        ("review_comment", pages(payloads[1]), "created_at", False),
+        ("review", pages(payloads[2]), "submitted_at", True),
+    )
+
+    for channel, records, created_key, is_review in channels:
+        for source in records:
+            if not isinstance(source, dict):
+                raise ValueError("invalid record")
+            actor_id, actor_login, actor_type = actor(source)
+            state = text(required(source, "state")) if is_review else None
+            if is_review and not state:
+                raise ValueError("empty review state")
+            review_id = decimal(required(source, "pull_request_review_id")) if channel == "review_comment" else None
+            reply_value = source.get("in_reply_to_id") if channel == "review_comment" else None
+            reply_to_id = None if reply_value is None else decimal(reply_value)
+            updated_at = None if is_review else timestamp(required(source, "updated_at"))
+            objects.append({
+                "actor_id": actor_id,
+                "actor_login": actor_login,
+                "actor_type": actor_type,
+                "body": text(required(source, "body"), nullable=True),
+                "channel": channel,
+                "created_at": timestamp(required(source, created_key)),
+                "id": decimal(required(source, "id")),
+                "reply_to_id": reply_to_id,
+                "review_id": review_id,
+                "state": state,
+                "updated_at": updated_at,
+            })
+
+    objects.sort(key=lambda item: (item["channel"], item["id"]))
+    canonical = json.dumps(objects, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    digest = hashlib.sha256(canonical).hexdigest()
+    print(f"symphony.feedback/v1\t{len(objects)}\t{digest}")
+except Exception as exc:
+    print(f"feedback snapshot failed: {exc}", file=sys.stderr)
+    sys.exit(1)
+PY
+}
+<!-- symphony.feedback/v1:end -->
+
+# Immediately before merge, re-read PR state and execute the same feedback
+# recipe recorded by Implementation. Stop unless the tuple is unchanged and
+# the PR remains mergeable without a changes-requested decision.
 gh pr view --json statusCheckRollup,headRefOid,mergeable,reviewDecision,reviews,comments
-gh api "repos/$repo/pulls/$pr_number/comments"
-current_user=$(gh api user -q .login)
-inline_feedback=$(gh api "repos/$repo/pulls/$pr_number/comments" | jq --arg since "$reviewed_at" --arg me "$current_user" '[.[] | select(.created_at > $since and .user.login != $me)] | length')
-top_level_feedback=$(gh api "repos/$repo/issues/$pr_number/comments" | jq --arg since "$reviewed_at" --arg me "$current_user" '[.[] | select(.created_at > $since and .user.login != $me)] | length')
-review_feedback=$(gh api "repos/$repo/pulls/$pr_number/reviews" | jq --arg since "$reviewed_at" --arg me "$current_user" '[.[] | select(.submitted_at > $since and .user.login != $me) | select(.state == "CHANGES_REQUESTED" or (.state == "COMMENTED" and ((.body // "") | length) > 0))] | length')
-new_feedback_count=$((inline_feedback + top_level_feedback + review_feedback))
-test "$new_feedback_count" -eq 0
+current_feedback_tuple=$(symphony_feedback_snapshot "$repo" "$pr_number")
+test "$current_feedback_tuple" = "$reviewed_feedback_tuple"
 final_check_count=$(gh pr view --json statusCheckRollup --jq '.statusCheckRollup | length')
 test "$final_check_count" -eq 0 || gh pr checks
 test "$(gh pr view --json headRefOid -q .headRefOid)" = "$reviewed_head"

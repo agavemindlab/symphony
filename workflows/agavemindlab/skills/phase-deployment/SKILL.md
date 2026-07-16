@@ -60,7 +60,8 @@ listed in the `cleanup` field.
 
 Carry the approved Implementation artifact's full `Head` as `reviewed_head`;
 carry `Base` as audit evidence for a best-effort recheck immediately before
-merge. Main Flow checked the Head on entry, and `symphony-land` passes it to the
+merge, and carry its `symphony.feedback/v1` feedback snapshot tuple unchanged
+into `symphony-land`. Main Flow checked the Head on entry, and `symphony-land` passes it to the
 merge call's atomic expected-Head guard. If the current PR Head differs at any
 later check, or landing discovers that conflict resolution, commit organization,
 a CI/review fix, or any other push is needed, end the landing attempt before
