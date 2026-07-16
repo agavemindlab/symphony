@@ -541,6 +541,15 @@ defmodule SymphonyElixir.CoreTest do
       assert land_skill =~ contract
     end
 
+    checks_watch = :binary.match(land_skill, "gh pr checks --watch --fail-fast")
+    final_feedback = :binary.match(land_skill, "Immediately before merge, re-read")
+    merge = :binary.match(land_skill, "gh pr merge --squash --match-head-commit")
+
+    assert checks_watch < final_feedback
+    assert final_feedback < merge
+    assert land_skill =~ "bounded checks-appearance window"
+    assert land_skill =~ "30-minute execution deadline"
+
     refute land_skill =~ "immutable `reviewed_base`/`reviewed_head` pair"
 
     for contract <- [
@@ -811,6 +820,7 @@ defmodule SymphonyElixir.CoreTest do
           "record the branch/Base/Head and Codex session evidence",
           "`REVIEW_ATTEMPT_START N`",
           "`REVIEW_ATTEMPT_END N`",
+          "self-generated UUID in each marker",
           "immediately before the review call",
           "immediately after it returns",
           "source severity (`CRITICAL`, validated P0, or validated P1), stable family, violated invariant, and `new | recurring | resolved` state",
@@ -927,7 +937,7 @@ defmodule SymphonyElixir.CoreTest do
     end
 
     assert workflow =~ "same-phase rework even when the issue is `In Progress`"
-    assert workflow =~ "names every validated blocking family and invalid Design assumption"
+    assert workflow =~ "names the recurring blocking family and invalid Design assumption"
     assert workflow =~ "identifies restored evidence or explicitly accepts the evidence gap"
     assert workflow =~ "Ignore a disposition whose artifact or current PR head does not match"
 
@@ -962,6 +972,8 @@ defmodule SymphonyElixir.CoreTest do
     assert maestro_workflow =~ "Incomplete evidence fails closed"
     assert maestro_workflow =~ "No comparable review trajectory"
     assert maestro_workflow =~ "asking whether to authorize another Implementation turn"
+    assert maestro_workflow =~ "/rework implementation <explicit acceptance of the evidence gap>"
+    assert maestro_workflow =~ "move the issue to `Rework`"
     assert maestro_workflow =~ "human-only authentication/permission"
     assert maestro_workflow =~ "at most one deduplicated"
     assert maestro_workflow =~ "no `ESCALATED disposition`"
@@ -995,7 +1007,7 @@ defmodule SymphonyElixir.CoreTest do
     assert design_skill =~ "Fixing only\nthe latest examples does not satisfy this rework"
     assert design_skill =~ "Re-baseline the entire current\nPR diff"
     assert design_skill =~ "must name an existing\nproducer"
-    assert workflow =~ "names every validated blocking family"
+    assert workflow =~ "names the recurring blocking family"
     assert workflow =~ "existing evidence producers"
     assert launcher =~ "tuple is incomplete"
     assert reviewer =~ "human-only authentication/permission blocker"
@@ -1027,7 +1039,7 @@ defmodule SymphonyElixir.CoreTest do
     refute escalated_contract =~ "MAESTRO_AUTO_REWORK"
   end
 
-  test "Design v21 review and routing contracts cover every transition row" do
+  test "bounded review and routing contracts cover every transition row" do
     repo_root = Path.expand("..", File.cwd!())
     workflow = File.read!(Path.join(repo_root, "workflows/agavemindlab/WORKFLOW.md"))
 
@@ -1048,6 +1060,8 @@ defmodule SymphonyElixir.CoreTest do
           {:shared_config_mutation, "A shared config mutation, a keeper, restore, or shape-based recovery is forbidden and forces Draft + `ESCALATED` with no review"},
           {:start_without_ready, "A START without `CONFIG_READY` has the same outcome."},
           {:actual_turn_boundary, "does not claim transient or concurrent filesystem completeness"},
+          {:concurrent_manifest_delta, "non-attributable concurrent corroboration"},
+          {:default_external_actions, "current PR's required read-only evidence and same-thread feedback replies"},
           {:producer_boundary, "Do not require fields the stock review and managed transcript do not emit"}
         ] do
       assert implementation =~ contract, "missing transaction/audit row #{row}"
@@ -1060,7 +1074,7 @@ defmodule SymphonyElixir.CoreTest do
           {:review_codex, "`$HOME/.codex/` session artifacts whose ids belong to this recursive closure"},
           {:review_adv_tmp, "non-escaping `/tmp/codex-adv-*`"},
           {:review_review_tmp, "`/tmp/codex-review-*` paths"},
-          {:other_gstack_or_external, "Use of another gstack skill, unmatched descendants, another checkout, every external system, and every other or unresolved target are `unclassified`."}
+          {:other_gstack_or_external, "Use of another gstack skill, unmatched descendants, another checkout, every other external system, and every other or unresolved target are `unclassified`."}
         ] do
       assert implementation =~ contract, "missing action/target row #{row}"
     end
@@ -1115,6 +1129,8 @@ defmodule SymphonyElixir.CoreTest do
 
     assert implementation =~ "An unknown severity fails closed for human clarification"
     assert implementation =~ "no unresolved blocking finding"
+    assert workflow =~ "names the recurring blocking family and invalid Design assumption"
+    assert reviewer =~ "<candidate-date-directories>"
   end
 
   test "Implementation artifacts omit stale transcript recovery lineage" do

@@ -117,8 +117,9 @@ Reply locations:
 - For an ESCALATED Implementation convergence decision, the current-turn Codex
   session transcript is primary evidence; the artifact is only a locator. Read
   the current Symphony-authored artifact footer's `Codex session id`. Locate candidates
-  only under `~/.codex/sessions/<YYYY>/<MM>/<DD>/rollout-*.jsonl`, using
-  `rg -l -F -- "$SESSION_ID" ~/.codex/sessions`, but select only the one
+  only under the artifact publication date's UTC and operator-local
+  `~/.codex/sessions/<YYYY>/<MM>/<DD>/rollout-*.jsonl` directories, using
+  `rg -l -F -- "$SESSION_ID" <candidate-date-directories>`, but select only the one
   whose first record's `session_meta.payload.id` exactly equals the footer id
   and whose `cwd`/git metadata matches this issue workspace and repository.
   A later transcript that merely mentions an earlier id is not a match. Parse

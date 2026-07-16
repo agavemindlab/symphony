@@ -200,8 +200,10 @@ Markdown sections:
      that the standard review reported; this is audit metadata, not a custom
      review range.
    - Emit `REVIEW_ATTEMPT_START N` immediately before the review call and
-     `REVIEW_ATTEMPT_END N` immediately after it returns, recording their event
-     ids and timestamps. Within that interval, record each blocking family's
+     `REVIEW_ATTEMPT_END N` immediately after it returns. Put a self-generated
+     UUID in each marker and record that locator plus the transcript timestamp;
+     do not require a nonexistent message event-id field. Within that interval,
+     record each blocking family's
      source severity (`CRITICAL`, validated P0, or validated P1), stable family,
      violated invariant, and `new | recurring | resolved` state. Key the stable
      family by that invariant so different wording or file location cannot
@@ -227,16 +229,22 @@ Markdown sections:
      The only host classes are the review's `$HOME/.gstack/` session,
      analytics, and current-repo project runtime files; `$HOME/.codex/` session
      artifacts whose ids belong to this recursive closure; and non-escaping
-     `/tmp/codex-adv-*` or `/tmp/codex-review-*` paths. Use of another gstack skill,
-     unmatched descendants, another checkout, every external system, and every
-     other or unresolved target are `unclassified`. A write-capable action
+     `/tmp/codex-adv-*` or `/tmp/codex-review-*` paths. The current PR's required
+     read-only evidence and same-thread feedback replies plus the canonical fetch
+     are default workflow actions, not exception grants; record them separately.
+     Use of another gstack skill, unmatched descendants, another checkout, every
+     other external system, and every other or unresolved target are
+     `unclassified`. A write-capable action
      without a resolvable target still emits one `unclassified` sentinel row.
 
      Actual-turn proof is the three-source evidence union: explicit managed
-     transcript actions, bounded before/after manifest deltas for the finite
-     Git metadata and four runtime roots, and review session/temp lifecycle
-     events. Manifests are corroboration only, and this evidence does not claim
-     transient or concurrent filesystem completeness. Do not require fields
+     transcript actions, bounded before/after manifest deltas for the finite Git
+     metadata plus closure-selected session/project and attempt-date paths within
+     the four runtime roots, and review session/temp lifecycle events. Manifests
+     are corroboration only, and this evidence does not claim transient or
+     concurrent filesystem completeness. A root delta without an explicit
+     action or closure lifecycle match is non-attributable concurrent
+     corroboration, not an unmatched descendant or violation. Do not require fields
      the stock review and managed transcript do not emit. Keep raw arguments
      and protected paths in the managed transcript; publish only safe available
      event ids, operation/classes, predicate ids, target hashes, outcomes, and

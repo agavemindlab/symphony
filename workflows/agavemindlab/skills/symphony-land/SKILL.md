@@ -56,11 +56,15 @@ description:
    Head and return to a fresh Implementation review.
 6. Ensure automated and human review feedback is addressed. Feedback requiring
    code changes returns to Implementation; do not edit, commit, or push here.
-7. Watch checks until complete, or until the bounded watcher reports that no PR
-   checks were configured/triggered for this branch.
+7. Use a bounded checks-appearance window, then watch visible checks with a
+   30-minute execution deadline. A deadline or check failure returns to
+   Implementation; only the completed no-check window may establish that no PR
+   checks were configured for this Head.
 8. If checks fail, pull logs and return to Implementation; do not fix the
    reviewed Head during landing.
-9. Recheck PR, local, and fork Heads. When checks and feedback are clear,
+9. Recheck PR, local, and fork Heads, mergeability, review decision, and every
+   feedback channel from step 6 immediately before merge. New substantive
+   feedback or a non-mergeable result returns to Implementation. Otherwise
    squash-merge with `--match-head-commit "$reviewed_head"`.
 10. Immediately capture the merge commit SHA and watch `main` workflow runs for
     that SHA. Follow the project's deployment trigger paths documented in
@@ -108,13 +112,26 @@ fi
 gh pr view --json commits --jq '.commits[] | [.oid, .messageHeadline] | @tsv'
 git log --stat --format='%H %s' "upstream/${SYMPHONY_BASE_BRANCH:-main}..HEAD"
 
-# Wait for the current reviewed Head's checks without activating a separate
-# feedback/check reducer.
-check_count=$(gh pr view --json statusCheckRollup --jq '.statusCheckRollup | length')
-test "$check_count" -eq 0 || gh pr checks --watch --fail-fast
+# Give GitHub a bounded checks-appearance window, then bound the visible-check
+# wait without activating a separate feedback/check reducer.
+checks_appear_deadline=$((SECONDS + 120))
+while :; do
+  check_count=$(gh pr view --json statusCheckRollup --jq '.statusCheckRollup | length')
+  [ "$check_count" -gt 0 ] || [ "$SECONDS" -ge "$checks_appear_deadline" ] && break
+  sleep 5
+done
+test "$check_count" -eq 0 || python3 -c \
+  'import subprocess, sys; sys.exit(subprocess.run(sys.argv[1:], timeout=1800).returncode)' \
+  gh pr checks --watch --fail-fast
 
-# Squash-merge only the Head recorded in the approved artifact.
+# Immediately before merge, re-read PR state plus top-level, inline, and review
+# feedback. Stop unless every substantive item is addressed and the PR remains
+# mergeable without a changes-requested decision.
+gh pr view --json headRefOid,mergeable,reviewDecision,reviews,comments
+gh api "repos/$repo/pulls/$pr_number/comments"
 test "$(gh pr view --json headRefOid -q .headRefOid)" = "$reviewed_head"
+test "$(gh pr view --json mergeable -q .mergeable)" = "MERGEABLE"
+test "$(gh pr view --json reviewDecision -q '.reviewDecision // ""')" != "CHANGES_REQUESTED"
 gh pr merge --squash --match-head-commit "$reviewed_head" \
   --subject "$pr_title" --body "$pr_body"
 

@@ -165,8 +165,11 @@ completion confirmation | no reply yet>` and, when a confidence score exists,
     proves an approved Design mechanism cannot satisfy its invariant and would
     repeat without a Design change; if so, apply **The Design is not
     converging** below. Otherwise post `建议回复方式: ask clarification`
-    asking whether to authorize another Implementation turn. Emit no disposition
-    or state change, keep `Human Review`, remove `symphony:maestro`, and stop.
+    asking whether to authorize another Implementation turn. Tell the human to
+    reply `/rework implementation <explicit acceptance of the evidence gap>` in
+    this artifact thread and move the issue to `Rework` if they authorize it.
+    Emit no disposition or state change, keep `Human Review`, remove
+    `symphony:maestro`, and stop.
   - **Implementation is converging** — require `建议回复方式: continue
     implementation` and `ESCALATED disposition: IMPLEMENTATION_CONTINUE` in the
     reply. This is valid when the current turn transcript shows a strictly
