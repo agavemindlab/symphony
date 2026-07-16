@@ -132,7 +132,7 @@ test "$check_count" -eq 0 || python3 -c \
   gh pr checks --watch --fail-fast
 
 # The single production owner for the feedback population and canonical bytes.
-<!-- symphony.feedback/v1:start -->
+# <!-- symphony.feedback/v1:start -->
 symphony_feedback_snapshot() {
   feedback_repo=$1
   feedback_pr=$2
@@ -246,7 +246,7 @@ except Exception as exc:
     sys.exit(1)
 PY
 }
-<!-- symphony.feedback/v1:end -->
+# <!-- symphony.feedback/v1:end -->
 
 # Immediately before merge, re-read PR state and execute the same feedback
 # recipe recorded by Implementation. Stop unless the tuple is unchanged and

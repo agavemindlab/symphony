@@ -593,9 +593,12 @@ defmodule SymphonyElixir.CoreTest do
     land_skill =
       File.read!(Path.join(repo_root, "workflows/agavemindlab/skills/symphony-land/SKILL.md"))
 
+    assert [_, command_block] = Regex.run(~r/## Commands\n\n```sh\n(.*?)\n```/s, land_skill)
+    assert {"", 0} = System.cmd("bash", ["-n", "-c", command_block], stderr_to_stdout: true)
+
     assert [_, recipe] =
              Regex.run(
-               ~r/<!-- symphony\.feedback\/v1:start -->\n(.*?)<!-- symphony\.feedback\/v1:end -->/s,
+               ~r/# <!-- symphony\.feedback\/v1:start -->\n(.*?)# <!-- symphony\.feedback\/v1:end -->/s,
                land_skill
              )
 
