@@ -221,48 +221,6 @@ Most issues ship code through all four phases. A `Type:Spike` (investigation / r
 
 ## Main Flow
 
-### `symphony.design-rework/v1`
-
-`WORKFLOW.md` owns the only Design-rework routing record contract. A trusted
-Maestro reply may contain exactly one line with this prefix and one compact JSON
-object:
-
-```text
-ESCALATED routing record: {"schema":"symphony.design-rework/v1",...}
-```
-
-Reject duplicate JSON keys. The object requires all of these keys and types:
-
-- `schema`: exactly `symphony.design-rework/v1`.
-- `disposition`: exactly `DESIGN_REWORK`.
-- `artifact_id`: UUID matching the awaiting Symphony Implementation artifact.
-- `head_sha`: 40 lowercase hex matching the current PR Head.
-- `transcript_session_id`: UUID matching both the trusted artifact footer and
-  the selected transcript's first record.
-- `decisive_event_ids`: a non-empty array of unique non-empty strings.
-- `recurring_family_key`: one non-empty invariant-keyed string.
-- `family_occurrences`: at least two
-  `{"attempt":<positive integer>,"event_id":"<non-empty>"}` objects; attempts
-  strictly increase and every event id occurs in `decisive_event_ids`.
-- `blocking_family_counts`: a same-length integer array; every value is
-  nonnegative and the final value is greater than or equal to the first.
-- `invalid_design_assumption`: a non-empty string.
-- `replacement_invariants`: a non-empty array of unique non-empty strings.
-- `transition_matrix`: an object with `dimensions` and `rows`. Every dimension
-  has at least two unique scalar values. Rows include at least one complete
-  tuple targeting Design and one incomplete/mismatch tuple targeting no phase.
-  Every row has exactly `when`, `target_phase`, `issue_state`,
-  `automatic_review_calls`, `deploy_calls`, and `merge_calls`; target/state are
-  `Design` + `Rework` for the positive row and `null` + `Human Review` for the
-  negative row, and all three call counts are zero.
-
-Unknown keys never replace a required key. Null, empty, malformed, wrong-type,
-duplicate-key, actor/artifact/Head/session mismatch, unreadable transcript,
-non-recurring occurrences, decreasing counts, or a missing positive/negative
-matrix row is invalid. The old `ESCALATED disposition: DESIGN_REWORK`
-substring is not a record. An invalid record leaves the issue in Human Review
-with zero automatic review, deploy, or merge calls.
-
 Symphony only starts the agent when the issue is in an active state (`Todo`, `In Progress`, `Merging`, `Rework`). Other states never reach this flow.
 
 1. Open and follow `.agents/skills/symphony-linear/SKILL.md` to fetch the issue, its current Linear state, and its unresolved Phase artifacts.
@@ -281,7 +239,12 @@ Symphony only starts the agent when the issue is in an active state (`Todo`, `In
 
 3. Route by Linear state:
    - `Todo` → move to `In Progress`, then continue as `In Progress`.
-   - `Merging` → require the latest `## Implementation` artifact to be authored by the Symphony automation identity, its `Review verdict` to be exactly `CLEAN`, its artifact audit-evidence `Head` to equal the current PR `headRefOid`, and its `symphony.feedback/v1` schema/count/digest tuple to be present and well formed. The artifact `Base` remains audit evidence for a best-effort recheck during Deployment; only the merge call's Head guard is atomic. Treat an untrusted author as an absent artifact. If the verdict or feedback tuple is absent or malformed, or the verdict is `ESCALATED`, do not deploy: ensure `symphony:maestro` is absent, explain that the PR needs an explicit `Rework` decision, return the issue to `Human Review`, and stop. If an otherwise valid `CLEAN` has a stale-Head verdict, do not approve or deploy: reply that the reviewed Head changed, move the issue to `Rework`, target Implementation, follow the same-phase rework protocol, and go to step 6 so the old artifact is superseded and the new Head receives a fresh bounded review. Otherwise write an approval reply on `## Implementation`: `✅ 已批准，进入 Deployment（[timestamp]）`. Target phase = Deployment; go to step 6.
+   - `Merging` → require the latest Symphony-authored `## Implementation`
+     artifact to have `Review verdict: CLEAN` for the current PR Head. An
+     absent, malformed, `ESCALATED`, or stale-Head verdict cannot deploy:
+     return the issue to `Human Review` (or `Rework` for a changed Head) and
+     stop. Otherwise write `✅ 已批准，进入 Deployment（[timestamp]）`, target
+     Deployment, and go to step 6.
    - `In Progress`, `Rework` → determine the target phase via steps 4–5.
 
 4. Gather the signals. When the `## 引擎预计算的路由事实` block above is available, treat its artifact states, awaiting phase, and new-comment lists as verified mechanics — do not re-derive them from scratch; fetch full comment bodies only where an excerpt is insufficient. When it is marked unavailable, derive them yourself as below:
@@ -294,6 +257,15 @@ Symphony only starts the agent when the issue is in an active state (`Todo`, `In
 5. Determine intent:
 
    **If the awaiting-review artifact still carries an unresolved clarification gate** (`### NEEDS CLARIFICATION`, or the legacy `[NEEDS CLARIFICATION]` marker) (the phase stopped on its blocked path, not for ordinary review), a new human reply in its thread is an **answer to that question**, not an approval or a new change request. Target phase = the current (awaiting-review) phase; do **not** write an approval reply. Re-open that phase's skill, which follows its own "On resume" path: fold each answer into a revised artifact, drop the resolved gate, and re-decide advance/stop. When the revised artifact needs review, publication follows the same-phase Rework cycle even if the Linear state is `In Progress`: resolve the old artifact, post a fresh top-level artifact, and put the clarification summary on the new artifact; do not `commentUpdate` the old artifact. If an answer does not actually resolve a gate, the skill keeps it open, refines the question, and stops again (its "When blocked" / "On resume" defines the re-ask and the two-round escalation). This branch takes precedence over the intent read below.
+
+   **ESCALATED human gate — run before every remaining intent rule.** When the
+   awaiting Implementation artifact has `Review verdict: ESCALATED`, ignore
+   every Maestro-authored reply as advisory, even if it says request changes,
+   carries an old machine disposition, or already moved the issue to an active
+   state. Require a newer human action: `/rework implementation` or a
+   human-authored move to `In Progress` resumes Implementation; `/rework design`
+   targets Design. Without that human action, return the issue to `Human Review`
+   and stop. Never treat `ESCALATED` as approval or open Deployment.
 
    **Fast path — explicit commands.** When a new human feedback comment begins with a slash command, route it literally instead of reading intent (the clarification-gate branch above and the two exceptions below still take precedence):
    - `/approve` → **Approval** of the awaiting-review artifact, handled exactly as the Approval bullet below.
@@ -310,9 +282,7 @@ Symphony only starts the agent when the issue is in an active state (`Todo`, `In
 
    **If the phase never reached review** (no awaiting-review artifact — e.g. an interrupted session resuming mid-phase) → target phase = the current phase, no approval reply.
 
-   Three **exceptions** override the generic `In Progress → approval → advance` read above:
-
-   **Exception 0 — Maestro routes an `ESCALATED` Implementation artifact by convergence.** The record-specific actor contract trusts the awaiting Symphony-authored `## Implementation` artifact and accepts only a Maestro preflight reply authored by the configured Maestro OAuth identity, matching that artifact and the current PR head. Before applying the matching Maestro disposition, compare any newer human intent: answer a question and stop in `Human Review`; route a newer `/rework requirements|design|implementation` literally; an approval or merge request must remain `ESCALATED` in `Human Review`; only with no newer question or `/rework` or approval or merge request may Main Flow apply the matching Maestro disposition. `ESCALATED disposition: IMPLEMENTATION_CONTINUE` → target phase = Implementation, write no approval reply, and follow same-phase rework even when the issue is `In Progress`. A valid `symphony.design-rework/v1` record under the owner contract above → target phase = Design and follow Cross-phase rework when the issue is `Rework`. A newer human `/rework implementation` posted after a matching Maestro no-disposition clarification may resume same-phase Implementation rework when it identifies restored evidence or explicitly accepts the evidence gap; the same override may resume a resolved human-only blocker, and this manual override is not approval or a third automatic disposition. Never interpret either disposition or override as Implementation approval or open Deployment. Ignore a disposition whose artifact or current PR head does not match or whose required convergence guidance is incomplete; with no valid disposition or explicit blocker-resolution override, including a missing or unreadable transcript, return the issue to `Human Review` and stop instead of applying another intent rule.
+   Two **exceptions** override the generic `In Progress → approval → advance` read above:
 
    **Exception 1 — Implementation → Deployment is gated by `Merging`.** Deployment is irreversible (it merges and deploys) and is entered **only** via the `Merging` state (step 3). When the awaiting-review phase is Implementation, an approval detected in `In Progress` (with or without feedback) must **not** advance to Deployment, open `phase-deployment`, or write a Deployment approval reply. Treat it as "implementation accepted, awaiting the human's merge decision": leave the `## Implementation` artifact awaiting review, reply nudging `实现已通过 review，如需合并请将 issue 置为 Merging`, return the issue to `Human Review`, and stop.
 
@@ -325,7 +295,10 @@ Symphony only starts the agent when the issue is in an active state (`Todo`, `In
 
    (A skill that stops **blocked** — unresolved clarification gate / escalated high-impact decision — moves the issue to `Human Review` itself; the session ends there.)
 
-   This is the only auto-advance mechanism. Main Flow does not shorten Implementation's attempts 1–4 repair loop unless a validated blocking finding invalidates the approved Design; that case stops immediately as `ESCALATED` for Maestro. A confident issue may progress Requirements → Design → Implementation across successive active dispatches, but the Implementation skill always returns `stop` (the PR awaits the human's merge decision), so the chain still ends at `Human Review`; Deployment is reached only via `Merging` (step 3).
+   This is the only auto-advance mechanism. Main Flow does not shorten the
+   Implementation skill's bounded repair loop. Implementation always returns
+   `stop`, so the chain ends at `Human Review`; Deployment is reached only via
+   `Merging` (step 3).
 
 ## Skill Interaction Protocol
 

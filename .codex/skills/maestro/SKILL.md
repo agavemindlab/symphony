@@ -55,11 +55,8 @@ to send the reply for them, e.g. "帮我回复", then:
      reworked; for same-phase rework this is the awaiting-review artifact, and
      for cross-phase rework this may be Requirements, Design, or another
      unresolved artifact.
-   - continue implementation: only the configured Maestro preflight actor may
-     post the disposition. When acting for a human after a same-artifact
-     no-disposition clarification, use `/rework implementation <restored
-     evidence>` or `/rework implementation <explicit acceptance of the evidence
-     gap>`; either starts same-phase rework, not approval.
+   - continue implementation: reply with `/rework implementation <reason>`;
+     this is a same-phase continuation, not approval.
    - Implementation merge nudge: do not add a nudge comment unless the
      recommendation includes a human-facing clarification; the state change to
      `Merging` is the signal.
@@ -72,18 +69,9 @@ to send the reply for them, e.g. "帮我回复", then:
    PR comments, merge, deploy, or move to `Done` unless the recommendation says
    `Done` and the user explicitly asked you to act.
 
-Maestro pre-review sessions execute their request-changes verdict by default:
-the pre-review reply ends with a `🤖 auto: 已自动将 issue 置为 Rework` line and
-the issue is moved to `Rework` (reversible; a human can move it back with a
-reason). Setting the operator env `MAESTRO_AUTO_REWORK=false` downgrades the
-session to recommendation-only. With the operator env `MAESTRO_AUTO_APPROVE=true`
-(default off), a pre-review approve verdict on a Requirements or Design artifact
-also moves the issue to `In Progress` the same reversible way, gated on
-confidence reaching `MAESTRO_AUTO_APPROVE_MIN_CONFIDENCE` (default 9).
-`Merging` and `Done` are always the human's call.
-For an `ESCALATED` Implementation artifact, Maestro only recommends the next
-phase. A human explicitly reactivates the next turn by moving the issue to
-`In Progress` or `Rework`; Maestro does not change that state.
+Maestro pre-review sessions are recommendation-only: they leave the issue in
+`Human Review`. A later human reply or state action starts any rework,
+approval, merge, or completion transition.
 
 ## Subagent Task
 
@@ -158,44 +146,8 @@ Task:
    label on a metric named by the issue's purpose is a material proof gap, not
    just transparency.
 12. Cite the decisive evidence and call out missing evidence or uncertainty.
-13. For an Implementation artifact with `Review verdict: ESCALATED`, use its
-   footer session id to read the matching current-turn transcript. Search only
-   the artifact publication date's UTC and operator-local session directories
-   with `rg -l -F -- "$SESSION_ID" <candidate-date-directories>`. Accept only a
-   Symphony-authored artifact. Select the transcript whose first
-   `session_meta.payload.id` exactly equals the footer id and whose metadata
-   matches this issue workspace and repository; a later transcript that merely
-   mentions the id is not a match. Reconstruct review/fix/finding events in
-   order; the artifact is only a locator, not convergence evidence. Return
-   `continue implementation` with status `In Progress` only when the transcript
-   set/count of blocking families (native `CRITICAL`, validated P0, or validated
-   P1) is strictly decreasing, remaining fixes are local, and no family recurs
-   or oscillates. Return
-   `request changes` targeting Design with status `Rework` when findings repeat,
-   do not decrease, fixes expand or contradict Design, or the transcript
-   trajectory plateaus or regresses. A newer PR head remains usable only when
-   the artifact head is its ancestor and the intervening diff is disjoint from
-   every blocking finding family. If any bound tuple member is missing,
-   malformed, truncated, or mismatched, the tuple is incomplete: return `ask
-   clarification`, emit no disposition or state change, and ask for restored
-   evidence or explicit human rework authorization. Missing or agent-retryable
-   evidence never starts another Implementation turn. If the bound transcript
-   is complete but review was unavailable/interrupted or a handoff precondition
-   failed before comparable blocking findings exist, first check whether the
-   failure itself proves an approved Design mechanism cannot satisfy its
-   invariant and would repeat without a Design change; if so, return Design
-   `request changes`. `WORKFLOW.md` owns `symphony.design-rework/v1`; read that
-   owner and draft exactly one compliant `ESCALATED routing record` line.
-   This read-only recommendation surface is not a trusted Main Flow producer.
-   Otherwise
-   return `ask clarification`
-   with no disposition or state change and ask whether to authorize another
-   Implementation turn. Reserve `no reply yet`
-   for a proven human-only authentication/permission blocker whose artifact
-   supplies the complete executable runbook. Otherwise include the exact
-   `ESCALATED disposition` machine line for Implementation continuation or the
-   owner-defined routing record for Design rework, plus decisive transcript
-   events. Do not copy the owner field list into this skill.
+13. For `Review verdict: ESCALATED`, follow the reviewer prompt's Codex-session
+   trend rubric and cite its decisive events.
 Keep the answer concise and do not recommend changing state directly unless the
 human's reply should explicitly instruct that.
 ```

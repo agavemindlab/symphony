@@ -1,17 +1,18 @@
 ---
 name: symphony-land
 description:
-  Land a PR by detecting conflicts, waiting for checks, and running post-merge
-  verification; use when asked to land, merge, or shepherd a PR to completion.
+  Land a PR by monitoring conflicts, resolving them, waiting for checks, and
+  post-merge verification runs; use when asked to land, merge, or shepherd
+  a PR to completion.
 ---
 
 # Land
 
 ## Goals
 
-- Preserve the approved Implementation artifact's exact reviewed Head through
-  GitHub's atomic merge guard; treat Base as best-effort audit evidence.
 - Ensure the PR is conflict-free with `upstream/${SYMPHONY_BASE_BRANCH:-main}`.
+- Ensure the PR commit history is organized before merge, rewriting only when
+  the history is scattered or fixup-heavy.
 - Keep PR CI and post-merge verification runs green.
 - Use the approved `## Implementation` artifact — its `风险/注意` (merge
   safety) and `Merge 后验证` (post-merge verification plan) sections — as the
@@ -33,10 +34,7 @@ description:
 1. Locate the PR for the current branch.
 2. Confirm the human approved Merging (the issue is in the `Merging` state)
    and read the approved `## Implementation` artifact before merging. It must
-   supply three gate elements:
-   - Full audit-evidence `Base` and `Head` plus the artifact's
-     `symphony.feedback/v1` schema, count, and digest; carry them as
-     `reviewed_base`, `reviewed_head`, and `reviewed_feedback_tuple`.
+   supply both gate elements:
    - A merge-safety read: the `验收对照` and `风险/注意` sections establish
      whether the PR is safe to merge and whether any remaining issue could
      crash services, corrupt/lose data, break background jobs, or only affect
@@ -45,221 +43,132 @@ description:
      exact runnable checks to run after merge (required when any acceptance
      criterion is `延迟验收` — see phase-requirements' Verifiability
      classification).
-   If any element is missing, do not merge; note the gap in the
+   If either element is missing, do not merge; note the gap in the
    `## Implementation` thread and return the issue to `Human Review`.
-3. Query the current PR and fork branch Heads; require both and local `HEAD` to
-   equal `reviewed_head`. Record current Base versus `reviewed_base` as a
-   best-effort comparison. A missing or mismatched Head ends the landing attempt.
-4. Confirm the relevant `AGENTS.md` validation is green without changing the
-   worktree. Uncommitted changes end the landing attempt.
-5. Check mergeability and conflicts. If conflict resolution, commit
-   organization, a CI fix, review fix, or any push is needed, stop before changing
-   Head and return to a fresh Implementation review.
-6. Ensure automated and human review feedback is addressed. Feedback requiring
-   code changes returns to Implementation; do not edit, commit, or push here.
-7. Use a bounded checks-appearance window, then watch visible checks with a
-   30-minute execution deadline. A deadline or check failure returns to
-   Implementation; only the completed no-check window may establish that no PR
-   checks were configured for this Head.
-8. If checks fail, pull logs and return to Implementation; do not fix the
-   reviewed Head during landing.
-9. Recheck PR, local, and fork Heads, mergeability, review decision, and every
-   feedback channel from step 6 immediately before merge. New substantive
-   feedback or a non-mergeable result returns to Implementation. Otherwise
-   squash-merge with `--match-head-commit "$reviewed_head"`.
-10. Immediately capture the merge commit SHA and watch `main` workflow runs for
+3. Confirm the relevant `AGENTS.md` validation is green locally before any push.
+4. If the working tree has uncommitted changes, commit with the `symphony-commit` skill
+   and push with the `symphony-pr` skill before proceeding.
+5. Check mergeability and conflicts against
+   `upstream/${SYMPHONY_BASE_BRANCH:-main}`.
+6. If conflicts exist, use the `symphony-pull` skill to fetch/merge the upstream base
+   and resolve conflicts, then use the `symphony-pr` skill to publish the updated branch.
+7. **Commit organization gate:** before watching checks or merging, inspect the
+   PR commit list (`gh pr view --json commits` or the equivalent GitHub API)
+   and decide one of:
+   - `no organization needed`: one clean commit, or multiple clean logical
+     commits with distinct scopes, including a standalone test commit. Record
+     the commit SHAs/messages in the workpad and Deployment evidence and do not
+     rewrite the branch.
+   - `reorganized`: fixup/squash commits, WIP commits, review-iteration
+     commits, late lint/test repairs, repeated "address review" commits, or
+     several small adjustment commits in the same logical scope. Capture the
+     pre-rewrite remote SHA and tree hash; require local `HEAD` to equal that
+     remote SHA before using a non-interactive
+     rebase/autosquash or an equivalent semantic rewrite. The post-rewrite tree
+     hash must match; otherwise stop and return to Implementation review. Abort
+     if the remote moved, then publish with
+     `--force-with-lease=refs/heads/<branch>:<expected-old-sha>` and request
+     review again. Record the before/after commit list and `reorganized`
+     decision.
+   Record the resulting PR head as `gated_head`.
+   Re-run this gate after any later fix, conflict-resolution, CI, or review
+   feedback commit. Merge with `--match-head-commit "$gated_head"` so a later
+   push cannot bypass the recorded decision.
+8. Ensure any automated review comments (if present) are acknowledged and any
+   required fixes are handled before merging.
+9. Watch checks until complete, or until the bounded watcher reports that no PR
+   checks were configured/triggered for this branch.
+10. If checks fail, pull logs, fix the issue, commit with the `symphony-commit` skill,
+   push with the `symphony-pr` skill, and re-run checks.
+11. When all checks are green (or no checks appear after the bounded no-check
+    wait) and review feedback is addressed, squash-merge using the PR
+    title/body for the merge subject/body.
+12. Immediately capture the merge commit SHA and watch `main` workflow runs for
     that SHA. Follow the project's deployment trigger paths documented in
     `AGENTS.md` to determine which workflows may run after a merge to `main`.
-11. Execute the post-merge verification plan from the latest handoff. Record
+13. Execute the post-merge verification plan from the latest handoff. Record
     concrete evidence in the workpad: workflow/deploy run URLs or SHAs, service
     health signals, smoke-test request/response, logs/error dashboard signal,
     worker/job result, or data-safe read-only verification.
-12. If a post-merge run fails, is cancelled, times out, or does not appear when
+14. If a post-merge run fails, is cancelled, times out, or does not appear when
     expected, inspect the run logs and report the deployment risk immediately.
-13. If any planned post-merge verification fails or cannot be run, keep the issue
+15. If any planned post-merge verification fails or cannot be run, keep the issue
     out of `Done`, record the failed signal, and report the risk immediately.
-14. Automatically rollback only when the rollback guardrails below prove it is
-   data-safe; otherwise stop and ask for human direction.
+16. Automatically rollback only when the rollback guardrails below prove it is
+    data-safe; otherwise stop and ask for human direction.
+17. **Context guard:** Before implementing review feedback, confirm it does not
+    conflict with the user's stated intent or task context. If it conflicts,
+    respond inline with a justification and ask the user before changing code.
+18. **Pushback template:** When disagreeing, reply inline with: acknowledge +
+    rationale + offer alternative.
+19. **Ambiguity gate:** When ambiguity blocks progress, use the clarification
+    flow (assign PR to current GH user, mention them, wait for response). Do not
+    implement until ambiguity is resolved.
+    - If you are confident you know better than the reviewer, you may proceed
+      without asking the user, but reply inline with your rationale.
+20. **Per-comment mode:** For each review comment, choose one of: accept,
+    clarify, or push back. Reply inline stating the mode before changing code.
+21. **Reply before change:** Always respond with intended action before pushing
+    code changes (inline for review comments, issue thread for automated reviews).
 
 ## Commands
 
 ```sh
-set -e
-
 # Ensure branch and PR context
-pr_url=$(gh pr view --json url -q .url)
-repo=${pr_url#https://github.com/}
-repo=${repo%/pull/*}
+repo=$(gh repo view --json nameWithOwner -q .nameWithOwner)
 pr_number=$(gh pr view --json number -q .number)
 pr_title=$(gh pr view --json title -q .title)
 pr_body=$(gh pr view --json body -q .body)
 
-# Bind the artifact-reviewed Head before any mutable operation.
-reviewed_base='<artifact Base>'
-reviewed_head='<artifact Head>'
-reviewed_feedback_tuple=$(printf '%s\t%s\t%s\n' \
-  '<artifact feedback schema>' '<artifact feedback count>' '<artifact feedback digest>')
-current_base=$(gh pr view --json baseRefOid -q .baseRefOid)
-current_head=$(gh pr view --json headRefOid -q .headRefOid)
-test "$current_head" = "$reviewed_head"
-test "$(git rev-parse HEAD)" = "$reviewed_head"
-branch=$(git branch --show-current)
-test "$(git ls-remote origin "refs/heads/$branch" | awk '{print $1}')" = "$reviewed_head"
-printf 'Reviewed Base: %s; current Base: %s\n' "$reviewed_base" "$current_base"
-
-# Check mergeability and conflicts without changing Head.
+# Check mergeability and conflicts
 mergeable=$(gh pr view --json mergeable -q .mergeable)
 
 if [ "$mergeable" = "CONFLICTING" ]; then
-  echo "Conflict resolution requires a fresh Implementation review." >&2
-  exit 1
+  # Run the `symphony-pull` skill to handle fetch + merge + conflict resolution.
+  # Then run the `symphony-pr` skill to publish the updated branch.
+  :
 fi
 
-# Inspect commit organization, but return to Implementation if it needs a rewrite.
+# Commit organization gate: inspect PR commits and per-commit patches before
+# checks/merge.
+# Record `no organization needed` for clean logical history. For fixup/squash,
+# WIP, review-iteration, lint/test repair, or repeated adjustment commits, run
+# a non-interactive rebase/autosquash or equivalent semantic rewrite. Preserve
+# the tree hash and use an explicit expected-old-SHA lease.
+branch=$(git branch --show-current)
+expected_old_sha=$(git ls-remote origin "refs/heads/$branch" | awk '{print $1}')
+test "$(git rev-parse HEAD)" = "$expected_old_sha"
+before_tree=$(git rev-parse 'HEAD^{tree}')
 gh pr view --json commits --jq '.commits[] | [.oid, .messageHeadline] | @tsv'
 git log --stat --format='%H %s' "upstream/${SYMPHONY_BASE_BRANCH:-main}..HEAD"
 
-# Give GitHub a bounded checks-appearance window, then bound the visible-check
-# wait without activating a separate feedback/check reducer.
-checks_appear_deadline=$((SECONDS + 120))
-while [ "$SECONDS" -lt "$checks_appear_deadline" ]; do
-  gh pr view --json statusCheckRollup --jq '.statusCheckRollup | length' >/dev/null
-  sleep 5
-done
-check_count=$(gh pr view --json statusCheckRollup --jq '.statusCheckRollup | length')
-test "$check_count" -eq 0 || python3 -c \
-  'import subprocess, sys; sys.exit(subprocess.run(sys.argv[1:], timeout=1800).returncode)' \
-  gh pr checks --watch --fail-fast
+# Set `gate_decision` to one exact decision after inspection. The clean branch
+# deliberately performs no rewrite or push.
+case "$gate_decision" in
+  "no organization needed")
+    ;;
+  reorganized)
+    test "$(git rev-parse 'HEAD^{tree}')" = "$before_tree"
+    test "$(git ls-remote origin "refs/heads/$branch" | awk '{print $1}')" = "$expected_old_sha"
+    git push origin "HEAD:refs/heads/$branch" \
+      --force-with-lease="refs/heads/$branch:$expected_old_sha"
+    ;;
+  *)
+    echo "Record a valid commit organization decision before continuing." >&2
+    exit 1
+    ;;
+esac
 
-# The single production owner for the feedback population and canonical bytes.
-# <!-- symphony.feedback/v1:start -->
-symphony_feedback_snapshot() {
-  feedback_repo=$1
-  feedback_pr=$2
+gated_head=$(gh pr view --json headRefOid -q .headRefOid)
 
-  printf '%s\n' "$feedback_repo" | grep -Eq '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$' || return 1
-  printf '%s\n' "$feedback_pr" | grep -Eq '^[1-9][0-9]*$' || return 1
+# Watch review feedback, PR checks, mergeability, and PR head updates.
+# Implement a polling loop appropriate to the project's CI setup, or
+# use the project's land watcher script if one exists under .agents/skills/symphony-land/.
+python3 .agents/skills/symphony-land/scripts/land_watch.py 2>/dev/null || \
+  echo "No land_watch.py found; poll manually with: gh pr checks && gh pr view --json reviews" >&2
 
-  issue_pages=$(gh api --paginate --slurp "repos/$feedback_repo/issues/$feedback_pr/comments") || return 1
-  review_comment_pages=$(gh api --paginate --slurp "repos/$feedback_repo/pulls/$feedback_pr/comments") || return 1
-  review_pages=$(gh api --paginate --slurp "repos/$feedback_repo/pulls/$feedback_pr/reviews") || return 1
-
-  printf '%s\0%s\0%s' "$issue_pages" "$review_comment_pages" "$review_pages" |
-    python3 /dev/fd/3 3<<'PY'
-import datetime
-import hashlib
-import json
-import re
-import sys
-
-
-def required(source, key):
-    if key not in source:
-        raise ValueError(f"missing {key}")
-    return source[key]
-
-
-def decimal(value):
-    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-        raise ValueError("invalid decimal id")
-    return str(value)
-
-
-def text(value, *, nullable=False):
-    if value is None and nullable:
-        return ""
-    if not isinstance(value, str):
-        raise ValueError("invalid text")
-    return value.replace("\r\n", "\n").replace("\r", "\n")
-
-
-def timestamp(value):
-    if not isinstance(value, str) or re.fullmatch(
-        r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]+)?Z",
-        value,
-    ) is None:
-        raise ValueError("invalid timestamp")
-    parsed = datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
-    if parsed.tzinfo is None or parsed.utcoffset() != datetime.timedelta(0):
-        raise ValueError("timestamp is not UTC")
-    return parsed.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
-def actor(source):
-    user = required(source, "user")
-    if not isinstance(user, dict):
-        raise ValueError("missing user")
-    return decimal(required(user, "id")), text(required(user, "login")), text(required(user, "type"))
-
-
-def pages(payload):
-    decoded = json.loads(payload)
-    if not isinstance(decoded, list) or not all(isinstance(page, list) for page in decoded):
-        raise ValueError("invalid paginated response")
-    return [record for page in decoded for record in page]
-
-
-try:
-    payloads = sys.stdin.buffer.read().split(b"\0")
-    if len(payloads) != 3:
-        raise ValueError("missing channel payload")
-
-    objects = []
-    channels = (
-        ("issue_comment", pages(payloads[0]), "created_at", False),
-        ("review_comment", pages(payloads[1]), "created_at", False),
-        ("review", pages(payloads[2]), "submitted_at", True),
-    )
-
-    for channel, records, created_key, is_review in channels:
-        for source in records:
-            if not isinstance(source, dict):
-                raise ValueError("invalid record")
-            actor_id, actor_login, actor_type = actor(source)
-            state = text(required(source, "state")) if is_review else None
-            if is_review and not state:
-                raise ValueError("empty review state")
-            review_id = decimal(required(source, "pull_request_review_id")) if channel == "review_comment" else None
-            reply_value = source.get("in_reply_to_id") if channel == "review_comment" else None
-            reply_to_id = None if reply_value is None else decimal(reply_value)
-            updated_at = None if is_review else timestamp(required(source, "updated_at"))
-            objects.append({
-                "actor_id": actor_id,
-                "actor_login": actor_login,
-                "actor_type": actor_type,
-                "body": text(required(source, "body"), nullable=True),
-                "channel": channel,
-                "created_at": timestamp(required(source, created_key)),
-                "id": decimal(required(source, "id")),
-                "reply_to_id": reply_to_id,
-                "review_id": review_id,
-                "state": state,
-                "updated_at": updated_at,
-            })
-
-    objects.sort(key=lambda item: (item["channel"], item["id"]))
-    canonical = json.dumps(objects, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode("utf-8")
-    digest = hashlib.sha256(canonical).hexdigest()
-    print(f"symphony.feedback/v1\t{len(objects)}\t{digest}")
-except Exception as exc:
-    print(f"feedback snapshot failed: {exc}", file=sys.stderr)
-    sys.exit(1)
-PY
-}
-# <!-- symphony.feedback/v1:end -->
-
-# Immediately before merge, re-read PR state and execute the same feedback
-# recipe recorded by Implementation. Stop unless the tuple is unchanged and
-# the PR remains mergeable without a changes-requested decision.
-gh pr view --json statusCheckRollup,headRefOid,mergeable,reviewDecision,reviews,comments
-current_feedback_tuple=$(symphony_feedback_snapshot "$repo" "$pr_number")
-test "$current_feedback_tuple" = "$reviewed_feedback_tuple"
-final_check_count=$(gh pr view --json statusCheckRollup --jq '.statusCheckRollup | length')
-test "$final_check_count" -eq 0 || gh pr checks
-test "$(gh pr view --json headRefOid -q .headRefOid)" = "$reviewed_head"
-test "$(gh pr view --json mergeable -q .mergeable)" = "MERGEABLE"
-test "$(gh pr view --json reviewDecision -q '.reviewDecision // ""')" != "CHANGES_REQUESTED"
-gh pr merge --squash --match-head-commit "$reviewed_head" \
+# Squash-merge only the head that passed the gate.
+gh pr merge --squash --match-head-commit "$gated_head" \
   --subject "$pr_title" --body "$pr_body"
 
 # Watch post-merge main workflow runs for the merge commit.
@@ -267,15 +176,35 @@ gh pr merge --squash --match-head-commit "$reviewed_head" \
 # or the project's post-merge watcher script if one exists.
 ```
 
+## Async Watch Helper
+
+If the project provides an asyncio watcher script at
+`.agents/skills/symphony-land/scripts/land_watch.py`, prefer it to monitor review
+comments, CI, and head updates in parallel. Typical exit codes:
+
+- 2: Review comments detected (address feedback)
+- 3: CI checks failed
+- 4: PR head updated (autofix commit detected)
+
+If no watcher script is present, poll manually using:
+- `gh pr checks` for CI status
+- `gh pr view --json reviews` for review state
+- `gh pr view --json mergeable` for mergeability
+
 ## Failure Handling
 
 - If checks fail, pull details with `gh pr checks` and `gh run view --log`, then
-  return to Implementation without changing the reviewed Head.
+  fix locally, commit with the `symphony-commit` skill, push with the `symphony-pr` skill, and
+  re-run the commit organization gate and watch.
 - If no PR checks appear after the bounded wait, continue only after review
   feedback and mergeability are clean; the post-merge watch still decides
   whether a `main` workflow run was expected.
-- If CI or any actor pushes a commit, stop; the new Head needs a fresh
-  Implementation review even when its tree is equivalent.
+- Use judgment to identify flaky failures. If a failure is a flake (e.g., a
+  timeout on only one platform), you may proceed without fixing it.
+- If CI pushes an auto-fix commit (authored by GitHub Actions), it does not
+  trigger a fresh CI run. Detect the updated PR head, pull locally, merge
+  the upstream base if needed, add a real author commit, and force-push to
+  retrigger CI, then restart the checks loop.
 - If mergeability is `UNKNOWN`, wait and re-check.
 - Do not merge while review comments (human or automated) are outstanding.
 
@@ -343,8 +272,12 @@ direction.
     ```
 - `in_reply_to` must be the numeric review comment id, not the GraphQL node id.
 - All GitHub comments generated by this agent must be prefixed with `[codex]`.
-- If feedback requires changes, reply that a fresh Implementation review is
-  required and return without changing the reviewed Head.
+- If feedback requires changes:
+  - Reply with intended fixes `[codex] ...` inline to the original review
+    comment using the review comment endpoint and `in_reply_to`.
+  - Implement fixes, commit, push.
+  - Reply with the fix details and commit SHA in the same place you
+    acknowledged the feedback.
 
 ## Scope + PR Metadata
 
