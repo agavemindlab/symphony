@@ -161,9 +161,15 @@ gated_head=$(gh pr view --json headRefOid -q .headRefOid)
 if [ -f .agents/skills/symphony-land/land_watch.py ]; then
   python3 .agents/skills/symphony-land/land_watch.py || exit $?
 else
-  echo "No land_watch.py found; poll manually with: gh pr checks && gh pr view --json reviews" >&2
+  echo "No land_watch.py found; stop before merge and use the manual polling section" >&2
   exit 1
 fi
+```
+
+When the helper is absent, complete the bounded manual polling gate under
+**Async Watch Helper**, then run the merge command separately:
+
+```sh
 
 # Squash-merge only the head that passed the gate.
 gh pr merge --squash --match-head-commit "$gated_head" \

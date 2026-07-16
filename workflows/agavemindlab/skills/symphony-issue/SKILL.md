@@ -64,21 +64,22 @@ work was discovered:
      `symphony` label. The issue lands outside `active_states`, so Symphony
      never auto-works it; a human promotes it when ready.
    - *Tier B (fulfilled on consent)*: create it in intake without `symphony`
-     and persist `待履行 · link`. In one serial GraphQL mutation, create every
-     required blocking relation, then use `issueUpdate` to add `symphony` and
-     move it to `Todo`. Reconcile the response before marking it schedulable.
+     and persist `待履行 · link`. Create and confirm every required blocking
+     relation before a separate `issueUpdate` adds `symphony` and moves it to
+     `Todo`. Never schedule after a failed relation response.
 2. **`assignee` = the current issue's `creator`.** Never assign a spawned
    issue to Symphony's own account.
 3. **`team` = current issue's team; `project` = the routed target project.**
    Resolve the target project's `projectId` and pass it to
    `issueCreate`; omit `projectId` only when the current issue has no project
    and the registry also says there is no project route.
-4. **Idempotency.** Never recreate an `已创建` item. Resume a `待履行` item from
-   its recorded issue id and next incomplete operation.
-5. **Persist-before-proceed.** After `issueCreate`, immediately record the new
-   id and next operation as `待履行` and upload fresh agent state. Mark it
-   `已创建` only after the combined relation/scheduling mutation is reconciled.
-   Do not stage the workpad.
+4. **Tier B idempotency.** Never recreate an `已创建` item. Resume a `待履行`
+   item from its recorded issue id and next incomplete operation.
+5. **Tier B persist-before-proceed.** After `issueCreate`, immediately record
+   the new id and next operation as `待履行` and upload fresh agent state. Mark
+   it `已创建` only after the relation and scheduling responses are reconciled.
+   Tier A keeps its `已创建` record in step 4 below. Do not stage the
+   workpad.
 
 ## Tier A — autonomous create
 
@@ -109,9 +110,10 @@ work was discovered:
 5. **Surface**: return the new issue's identifier to the calling phase, which lists it in its
    artifact (Design 未覆盖范围 / Implementation 风险 / Deployment 后续事项).
 
-**Failure handling:** On a partial Fulfill mutation, query the child state and
-relations. If the relation exists but scheduling did not complete, delete that
-new relation before stopping so an intake child cannot deadlock the parent.
+**Failure handling:** On a partial Fulfill sequence, query the child state and
+relations. If the relation exists but the separate scheduling update did not
+complete, delete that new relation before stopping so an intake child cannot
+deadlock the parent.
 Keep `待履行` and the proposal unresolved; move the parent to `Human Review`
 without resolving its phase artifact, citing the failed and compensating operations. A later run
 resumes the recorded id. If compensation also fails, include the relation id
@@ -165,8 +167,8 @@ Main Flow scans unresolved `## 建议新建 issue` comments for a new reply, the
 interprets the reply's **intent** (not a fixed keyword list):
 
 - **Consent** (e.g. `同意 / 建吧 / 可以 / 👍`) → create the item in intake as
-  `待履行 · link` (or reconcile its recorded id), then run the serial relation
-  + scheduling mutation from invariant 1. The final `issueUpdate` sets state =
+  `待履行 · link` (or reconcile its recorded id), confirm the relation from
+  invariant 1, then run the separate scheduling `issueUpdate`. It sets state =
   `Todo`, labels = `Type:Xxx` + `symphony`, assignee = creator.
   - *blocking* → new issue `blocks` the current issue; after creating it,
     Main Flow re-parks the current issue after fulfillment.

@@ -532,6 +532,14 @@ query IssueRelationTypeValues {
 }
 ```
 
+Compensate a newly created relation by its returned id:
+
+```graphql
+mutation DeleteIssueRelation($id: String!) {
+  issueRelationDelete(id: $id) { success }
+}
+```
+
 ### Introspection patterns used during schema discovery
 
 Use these when the exact field or mutation shape is unclear:
