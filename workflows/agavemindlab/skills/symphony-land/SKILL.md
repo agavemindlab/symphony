@@ -108,10 +108,10 @@ fi
 gh pr view --json commits --jq '.commits[] | [.oid, .messageHeadline] | @tsv'
 git log --stat --format='%H %s' "upstream/${SYMPHONY_BASE_BRANCH:-main}..HEAD"
 
-# Watch review feedback, PR checks, mergeability, and PR head updates.
-# Implement a polling loop appropriate to the project's CI setup, or
-# use the project's land watcher script if one exists under .agents/skills/symphony-land/.
-python3 .agents/skills/symphony-land/land_watch.py || exit $?
+# Wait for the current reviewed Head's checks without activating a separate
+# feedback/check reducer.
+check_count=$(gh pr view --json statusCheckRollup --jq '.statusCheckRollup | length')
+test "$check_count" -eq 0 || gh pr checks --watch --fail-fast
 
 # Squash-merge only the Head recorded in the approved artifact.
 test "$(gh pr view --json headRefOid -q .headRefOid)" = "$reviewed_head"
@@ -122,21 +122,6 @@ gh pr merge --squash --match-head-commit "$reviewed_head" \
 # Use gh run list --branch main --commit <sha> --event push
 # or the project's post-merge watcher script if one exists.
 ```
-
-## Async Watch Helper
-
-If the project provides an asyncio watcher script at
-`.agents/skills/symphony-land/land_watch.py`, prefer it to monitor review
-comments, CI, and head updates in parallel. Typical exit codes:
-
-- 2: Review comments detected (address feedback)
-- 3: CI checks failed
-- 4: PR head updated (autofix commit detected)
-
-If no watcher script is present, poll manually using:
-- `gh pr checks` for CI status
-- `gh pr view --json reviews` for review state
-- `gh pr view --json mergeable` for mergeability
 
 ## Failure Handling
 

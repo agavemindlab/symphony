@@ -196,7 +196,8 @@ Implementation:
     approved Design, and fixed families do not recur or oscillate. The
     draft must cite the decisive transcript events, include
     `ESCALATED disposition: IMPLEMENTATION_CONTINUE`, and recommend
-    `In Progress`, never `Merging`.
+    that a human move the issue to `In Progress`, never `Merging`; Maestro does
+    not start the next turn itself.
   - Recommend Design `request changes` when a blocking family survives a fix,
     findings oscillate or fail to decrease, repairs move the same defect across
     layers, implementation must expand/contradict the approved Design, or the
@@ -204,7 +205,8 @@ Implementation:
     the decisive transcript events, include `ESCALATED disposition: DESIGN_REWORK`,
     and require Design to replace the invalid assumption with finite invariants
     and a transition-matrix test boundary for the recurring finding family,
-    rather than patching only the latest examples; recommend `Rework`.
+    rather than patching only the latest examples; recommend that a human move
+    the issue to `Rework`, because Maestro does not start the next turn itself.
   - If any bound artifact/session/repository/workspace/head
     member is missing, malformed, truncated, or mismatched, the tuple is incomplete.
     A newer PR head remains usable only when the artifact head is its ancestor

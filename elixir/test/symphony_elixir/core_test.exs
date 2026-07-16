@@ -322,7 +322,7 @@ defmodule SymphonyElixir.CoreTest do
     assert implementation_skill =~ "cannot be repaired without expanding or"
     assert implementation_skill =~ "do not use the remaining attempts"
     assert implementation_skill =~ "Maestro can decide whether Design must be reworked"
-    assert implementation_skill =~ "process-local Git runtime configuration"
+    assert implementation_skill =~ "credential-free Git include"
     refute implementation_skill =~ "dedicated keeper process outside the review process tree"
     assert design_skill =~ "Descendants must not inherit a guard"
     assert maestro_workflow =~ "failure itself"
@@ -536,7 +536,6 @@ defmodule SymphonyElixir.CoreTest do
           "review fix",
           "missing or mismatched Head ends the landing attempt",
           "do not edit, commit, or push here",
-          ".agents/skills/symphony-land/land_watch.py",
           "--match-head-commit \"$reviewed_head\""
         ] do
       assert land_skill =~ contract
@@ -560,23 +559,9 @@ defmodule SymphonyElixir.CoreTest do
     refute land_skill =~ "CI pushes an auto-fix commit"
     refute land_skill =~ "--pre-merge-head"
     refute land_skill =~ "[codex] review <id> acknowledged"
+    refute land_skill =~ "land_watch.py"
     refute land_skill =~ "scripts/land_watch.py"
     refute land_skill =~ "|| \\\n+  echo \"No land_watch.py found"
-
-    for status <- [0, 2, 3, 4, 7] do
-      command = "python3 -c 'raise SystemExit(#{status})' || exit $?; printf MERGE"
-      {output, actual_status} = System.cmd("sh", ["-c", command])
-
-      if status == 0 do
-        assert {output, actual_status} == {"MERGE", 0}
-      else
-        assert output == ""
-        assert actual_status == status
-      end
-    end
-
-    assert {"", 1} =
-             System.cmd("sh", ["-c", "test -f definitely-missing-land-watch.py || exit 1; printf MERGE"])
 
     refute File.exists?(
              Path.join(
@@ -774,12 +759,10 @@ defmodule SymphonyElixir.CoreTest do
           "session, analytics, and current-repo project runtime files",
           "session artifacts whose ids belong to this recursive closure",
           "non-escaping `/tmp/codex-adv-*` or `/tmp/codex-review-*` paths",
-          "authoritative population",
+          "three-source evidence union",
           "corroboration only",
-          "cannot attribute a concurrent writer",
-          "owned population to cover every observed review mutation",
-          "canonical-target SHA-256",
-          "never copy raw arguments or protected paths to Linear"
+          "does not claim transient or concurrent filesystem completeness",
+          "other gstack skill/checkout/path/external calls to equal zero"
         ] do
       assert normalized_implementation =~ contract
     end
@@ -833,11 +816,8 @@ defmodule SymphonyElixir.CoreTest do
           "source severity (`CRITICAL`, validated P0, or validated P1), stable family, violated invariant, and `new | recurring | resolved` state",
           "different wording or file location cannot create a new family",
           "recursive child rollout closure",
-          "`(event_id, target_ordinal)`",
-          "still emits one `unclassified` sentinel row",
-          "explicit-action source ids to equal distinct row event ids",
           "`unclassified = 0`",
-          "authoritative population",
+          "three-source evidence union",
           "corroboration only",
           "review session/temp lifecycle events",
           "artifact's `审计证据`",
@@ -890,6 +870,9 @@ defmodule SymphonyElixir.CoreTest do
     refute skill =~ "Do not run review's Fix-First mutation steps"
     refute skill =~ "resolve the persisted receipt"
     refute skill =~ "in-scope blocking repair"
+    refute skill =~ "target_ordinal"
+    refute skill =~ "canonical-target SHA-256"
+    refute skill =~ "denied_attempt"
   end
 
   test "Implementation stock review uses canonical PR Base without changing its engine" do
@@ -899,14 +882,11 @@ defmodule SymphonyElixir.CoreTest do
     normalized = String.replace(skill, ~r/\s+/, " ")
 
     for contract <- [
-          "process-local Git runtime configuration",
-          "empty `remote.origin.url` and `remote.origin.pushurl` values",
-          "singleton credential-free PR base fetch and PR head push URLs",
+          "credential-free Git include scoped to the assigned checkout's exact gitdir",
+          "assigned checkout resolves to the PR base/head repositories",
+          "installed gstack checkout keeps its own remote",
           "`CONFIG_READY`",
           "repo-local config hash",
-          "raw URL stays inside that non-tracing process",
-          "correct first push URL plus an unauthorized second URL",
-          "raw URL that rewrites to the wrong host or repository",
           "standard review's own `git fetch origin <base>`",
           "normalized `owner/repo` exactly equals the PR's queried `baseRepository.nameWithOwner`",
           "require the fetched `refs/remotes/origin/<base>` to equal the attempt's recorded `baseRefOid`",
@@ -923,36 +903,8 @@ defmodule SymphonyElixir.CoreTest do
       refute normalized =~ removed
     end
 
-    repo_root = Path.expand("..", File.cwd!())
-    before = File.read!(Path.join(repo_root, ".git/config"))
-
-    runtime = [
-      "GIT_CONFIG_COUNT=6",
-      "GIT_CONFIG_KEY_0=remote.origin.url",
-      "GIT_CONFIG_VALUE_0=",
-      "GIT_CONFIG_KEY_1=remote.origin.url",
-      "GIT_CONFIG_VALUE_1=https://github.com/agavemindlab/symphony.git",
-      "GIT_CONFIG_KEY_2=remote.origin.pushurl",
-      "GIT_CONFIG_VALUE_2=",
-      "GIT_CONFIG_KEY_3=remote.origin.pushurl",
-      "GIT_CONFIG_VALUE_3=https://github.com/hongqn/symphony.git",
-      "GIT_CONFIG_KEY_4=remote.origin.tagOpt",
-      "GIT_CONFIG_VALUE_4=--no-tags",
-      "GIT_CONFIG_KEY_5=maintenance.auto",
-      "GIT_CONFIG_VALUE_5=false"
-    ]
-
-    assert {"https://github.com/agavemindlab/symphony.git\n", 0} =
-             System.cmd("env", runtime ++ ["git", "remote", "get-url", "--all", "origin"], cd: repo_root)
-
-    assert {"https://github.com/hongqn/symphony.git\n", 0} =
-             System.cmd(
-               "env",
-               runtime ++ ["git", "remote", "get-url", "--push", "--all", "origin"],
-               cd: repo_root
-             )
-
-    assert File.read!(Path.join(repo_root, ".git/config")) == before
+    refute normalized =~ "empty `remote.origin.url` and `remote.origin.pushurl` values"
+    refute normalized =~ "process-local Git runtime configuration"
   end
 
   test "Maestro routes ESCALATED Implementation by convergence" do
@@ -993,15 +945,10 @@ defmodule SymphonyElixir.CoreTest do
     assert maestro_workflow =~ "matches the same artifact/head"
     assert maestro_workflow =~ "with no newer"
     assert maestro_workflow =~ "human feedback or human-authored state action"
-    assert normalized_maestro_workflow =~ "reconcile any missing state transition"
 
     assert normalized_maestro_workflow =~
              "remove `symphony:maestro` and stop"
 
-    assert normalized_maestro_workflow =~
-             "If reconciliation fails, keep the issue in `Human Review`, remove the label, record the exact blocker, and stop"
-
-    assert normalized_maestro_workflow =~ "do not create an unbounded retry loop"
     assert normalized_maestro_workflow =~ "superseded by newer human intent does not qualify"
     assert maestro_workflow =~ "pre-review snapshot"
     assert maestro_workflow =~ "Immediately after reaching a recommendation"
@@ -1020,8 +967,8 @@ defmodule SymphonyElixir.CoreTest do
     assert maestro_workflow =~ "no `ESCALATED disposition`"
     assert maestro_workflow =~ "complete executable runbook"
     assert maestro_workflow =~ "The artifact only locates the transcript"
-    assert maestro_workflow =~ "move the issue to `In Progress`"
-    assert maestro_workflow =~ "move the issue to `Rework`"
+    assert maestro_workflow =~ "human explicitly reactivates the next turn"
+    assert normalized_maestro_workflow =~ "do not move the issue to `In Progress` or `Rework`"
     assert maestro_workflow =~ "transition-matrix test boundary"
     assert maestro_workflow =~ "disjoint from every blocking finding"
     assert maestro_workflow =~ "`turn_aborted` after the"
@@ -1068,6 +1015,16 @@ defmodule SymphonyElixir.CoreTest do
 
     refute Enum.join([maestro_workflow, launcher, reviewer], "\n") =~
              "all earlier Implementation artifacts"
+
+    escalated_contract =
+      maestro_workflow
+      |> String.split("- If the current Implementation artifact has `Review verdict: ESCALATED`", parts: 2)
+      |> List.last()
+      |> String.split("- If the review says `request changes` / `rework`", parts: 2)
+      |> hd()
+
+    refute escalated_contract =~ "已自动将 issue 置为"
+    refute escalated_contract =~ "MAESTRO_AUTO_REWORK"
   end
 
   test "Design v21 review and routing contracts cover every transition row" do
@@ -1086,13 +1043,12 @@ defmodule SymphonyElixir.CoreTest do
     workflow = normalized.(workflow)
 
     for {row, contract} <- [
-          {:runtime_ready, "Emit `CONFIG_READY` only after that exact inherited environment reports the singleton identities and the repo-local config hash is unchanged"},
-          {:shared_config_mutation, "shared config mutation, a keeper, restore, or shape-based recovery is forbidden and forces Draft + `ESCALATED` with no review"},
+          {:runtime_ready,
+           "Emit `CONFIG_READY` only after the assigned checkout and installed gstack checkout report their required repository identities and the repo-local config hash is unchanged"},
+          {:shared_config_mutation, "A shared config mutation, a keeper, restore, or shape-based recovery is forbidden and forces Draft + `ESCALATED` with no review"},
           {:start_without_ready, "A START without `CONFIG_READY` has the same outcome."},
-          {:transient_owned_action, "A closure-owned transient action remains in the population when the manifest is unchanged"},
-          {:concurrent_manifest_delta, "a shared delta without a closure-owned event is not attributed"},
-          {:denied_outside_attempt, "An outside-root attempt proven failed without mutation is a `denied_attempt`"},
-          {:unknown_outside_attempt, "success, unknown outcome, or an unresolved target is `unclassified`"}
+          {:actual_turn_boundary, "does not claim transient or concurrent filesystem completeness"},
+          {:producer_boundary, "Do not require fields the stock review and managed transcript do not emit"}
         ] do
       assert implementation =~ contract, "missing transaction/audit row #{row}"
     end

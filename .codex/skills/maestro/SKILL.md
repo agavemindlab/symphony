@@ -81,9 +81,9 @@ session to recommendation-only. With the operator env `MAESTRO_AUTO_APPROVE=true
 also moves the issue to `In Progress` the same reversible way, gated on
 confidence reaching `MAESTRO_AUTO_APPROVE_MIN_CONFIDENCE` (default 9).
 `Merging` and `Done` are always the human's call.
-For an `ESCALATED` Implementation artifact, the same auto-rework switch also
-controls `continue implementation`: enabled moves a converging artifact to
-`In Progress`; disabled leaves it in `Human Review` as a recommendation only.
+For an `ESCALATED` Implementation artifact, Maestro only recommends the next
+phase. A human explicitly reactivates the next turn by moving the issue to
+`In Progress` or `Rework`; Maestro does not change that state.
 
 ## Subagent Task
 

@@ -106,16 +106,11 @@ Maestro OAuth app identity.
    activity as the pre-review snapshot. A prior reply qualifies for
    deduplication only when it is
    a Maestro preflight reply, matches the same artifact/head, and carries a valid
-   recommendation plus its required exact disposition/auto line, with no newer
+   recommendation plus its required exact disposition line, with no newer
    human feedback or human-authored state action. For a qualifying reply, write
-   no second review: reconcile any missing state transition named by its auto
-   line and verify the issue readback. When the target state matches, or the
-   reply is explicitly recommendation-only/no-action, remove
-   `symphony:maestro` and stop. If reconciliation fails, keep the issue in
-   `Human Review`, remove the label, record the exact blocker, and stop; do not
-   create an unbounded retry loop. A reply from any other author, with an
-   incomplete machine contract, or superseded by newer human intent does not
-   qualify.
+   no second review: keep `Human Review`, remove `symphony:maestro` and stop.
+   A reply from any other author, with an incomplete machine contract, or
+   superseded by newer human intent does not qualify.
 4. Read `.agents/skills/maestro/agents/maestro-reviewer.md` and apply it directly
    in this fresh preflight session, collecting Linear / GitHub / repository
    evidence plus Codex session transcripts referenced by phase artifact
@@ -177,10 +172,10 @@ completion confirmation | no reply yet>` and, when a confidence score exists,
     reply. This is valid when the current turn transcript shows a strictly
     decreasing set/count of blocking families (native `CRITICAL`, validated P0,
     or validated P1), no recurring/oscillating family, and local fixes that
-    preserve the Design. Cite the decisive transcript events. Unless
-    `MAESTRO_AUTO_REWORK` is `false`/`0`, end with
-    `🤖 auto: 已自动将 issue 置为 In Progress` and move the issue to `In Progress`;
-    otherwise keep `Human Review`. Then remove `symphony:maestro`.
+    preserve the Design. Cite the decisive transcript events and say that a
+    human explicitly reactivates the next turn by moving the issue to
+    `In Progress`. Keep `Human Review`; do not move the issue to `In Progress`
+    or `Rework`. Then remove `symphony:maestro`.
   - **The Design is not converging** — require `建议回复方式: request changes`
     and `ESCALATED disposition: DESIGN_REWORK` in the reply. Choose this for a
     repeated or oscillating blocking family, non-decreasing blocking-family set/count,
@@ -189,9 +184,9 @@ completion confirmation | no reply yet>` and, when a confidence score exists,
     session ids/events and require Design to replace the invalid assumption
     with finite invariants and a transition-matrix test boundary for the
     recurring finding family, rather than patching only the latest examples.
-    Unless `MAESTRO_AUTO_REWORK` is `false`/`0`, end with
-    `🤖 auto: 已自动将 issue 置为 Rework` and move the issue to `Rework`;
-    otherwise keep `Human Review`. Then remove `symphony:maestro`.
+    Say that a human explicitly reactivates the next turn by moving the issue
+    to `Rework`. Keep `Human Review`; do not move the issue to `In Progress` or
+    `Rework`. Then remove `symphony:maestro`.
   In both cases reply in the current ESCALATED Implementation artifact thread,
   include its artifact id, Design source, and current head, and stop after the
   label cleanup. Never turn `ESCALATED` into a merge nudge.

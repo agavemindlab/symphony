@@ -172,26 +172,23 @@ Markdown sections:
      Base and Head as this attempt's audit evidence, then increment the counter.
      The counter is turn-local and the attempt is consumed even if review is
      interrupted or unavailable.
-   - Run review with process-local Git runtime configuration; never mutate,
-     snapshot, remap, or restore repo-local config. In one non-tracing process,
-     admit every effective fetch/push destination only when its normalized
-     `owner/repo` exactly equals the PR's queried `baseRepository.nameWithOwner`
-     or `headRepository.nameWithOwner` for that direction, while
-     the raw URL stays inside that non-tracing process and output contains only
-     counts, ordered hashes, `pushurl` presence, and normalized identities.
-     Reject a correct first push URL plus an unauthorized second URL, a raw URL
-     that rewrites to the wrong host or repository, or any unresolved identity.
-     For the review process tree, use `GIT_CONFIG_COUNT/KEY_N/VALUE_N` with
-     empty `remote.origin.url` and `remote.origin.pushurl` values followed by
-     singleton credential-free PR base fetch and PR head push URLs. Apply
-     `remote.origin.tagOpt`, `maintenance.auto`, and `gc.auto` in the same
-     runtime environment. Emit `CONFIG_READY` only after that exact inherited
-     environment reports the singleton identities and the repo-local config
-     hash is unchanged; only then emit `REVIEW_ATTEMPT_START`. Process exit
-     removes the override, so shared config mutation, a keeper, restore, or
-     shape-based recovery is forbidden and forces Draft + `ESCALATED` with no
-     review. A START without `CONFIG_READY` has the same outcome. Require a
-     non-shallow checkout. The standard review's own
+   - Give review a credential-free Git include scoped to the assigned
+     checkout's exact gitdir; never mutate, snapshot, remap, or restore
+     repo-local or shared Git config. The assigned checkout resolves to the PR
+     base/head repositories: the include makes only it resolve `origin` fetch
+     to the PR base repository and push to the
+     PR head repository; the installed gstack checkout keeps its own remote.
+     Admit each credential-free URL only when its normalized `owner/repo`
+     exactly equals the PR's queried `baseRepository.nameWithOwner` or
+     `headRepository.nameWithOwner` for that direction. Apply no-tag and
+     automatic-maintenance controls inside the same scoped include. Emit
+     `CONFIG_READY` only after the assigned checkout and installed gstack
+     checkout report their required repository identities and the repo-local
+     config hash is unchanged; only then emit `REVIEW_ATTEMPT_START`. A shared
+     config mutation, a keeper, restore, or shape-based recovery is forbidden
+     and forces Draft + `ESCALATED` with no review. A START without
+     `CONFIG_READY` has the same outcome. Require a non-shallow checkout. The
+     standard review's own
      `git fetch origin <base>` remains canonical, and this does not authorize
      any push to upstream or any review engine change.
    - Invoke the installed review skill through its normal skill entry
@@ -235,25 +232,19 @@ Markdown sections:
      other or unresolved target are `unclassified`. A write-capable action
      without a resolvable target still emits one `unclassified` sentinel row.
 
-     The authoritative population is every managed action in the parent
-     attempt interval and recursive child closure plus review session/temp
-     lifecycle events. Before/after manifests for the finite Git metadata and
-     four runtime roots are corroboration only: they cannot attribute a
-     concurrent writer or replace a closure-owned event. Process-internal
-     lifecycle writes still need lifecycle evidence. A closure-owned transient
-     action remains in the population when the manifest is unchanged; a shared
-     delta without a closure-owned event is not attributed. An outside-root
-     attempt proven failed without mutation is a `denied_attempt`; success,
-     unknown outcome, or an unresolved target is `unclassified`. Publish only safe
-     explicit-action rows keyed by `(event_id, target_ordinal)` with
-     operation, class, predicate id, canonical-target SHA-256, outcome, and
-     violation reason; never copy raw arguments or protected paths to Linear.
-     Require explicit-action source ids to equal distinct row event ids,
-     complete target ordinals, the owned population to cover every observed
-     review mutation, `unclassified = 0`, every child terminal, and exception grants
-     or uses outside this phase-required `review` equal 0. Put the closure tuple
-     and evidence-source counts in the artifact's `审计证据`, and link the managed
-     rollout closure. Any audit violation
+     Actual-turn proof is the three-source evidence union: explicit managed
+     transcript actions, bounded before/after manifest deltas for the finite
+     Git metadata and four runtime roots, and review session/temp lifecycle
+     events. Manifests are corroboration only, and this evidence does not claim
+     transient or concurrent filesystem completeness. Do not require fields
+     the stock review and managed transcript do not emit. Keep raw arguments
+     and protected paths in the managed transcript; publish only safe available
+     event ids, operation/classes, predicate ids, target hashes, outcomes, and
+     counts. Require `unclassified = 0`, every observed child terminal, other
+     gstack skill/checkout/path/external calls to equal zero, and exception
+     grants or uses outside this phase-required `review` equal 0. Put the
+     closure tuple and evidence-source counts in the artifact's `审计证据`, and
+     link the managed rollout closure. Any audit violation
      fails closed as Draft + `ESCALATED`; do not add a parser, tracer, sandbox,
      wrapper, or second review engine.
    - Use the standard review's result as-is. Do not parse its receipt,
