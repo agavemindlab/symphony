@@ -63,21 +63,24 @@ work was discovered:
      `type: "backlog"` (see symphony-linear "Spawn a Linear issue"). No
      `symphony` label. The issue lands outside `active_states`, so Symphony
      never auto-works it; a human promotes it when ready.
-   - *Tier B (fulfilled on consent)*: create it in intake without `symphony`
-     and persist `待履行 · link`. Create and confirm every required blocking
-     relation before a separate `issueUpdate` adds `symphony` and moves it to
-     `Todo`. Never schedule after a failed relation response.
+   - *Tier B (fulfilled on consent)*: after Main Flow durably preserves feedback
+     and resolves the parent artifact, create the child in intake and persist
+     `待履行 · schedule`. Schedule it with `issueUpdate`, then create its blocking
+     relation. Until the relation succeeds, the pending record preempts parent
+     phase work; child scheduling is already authorized by human consent.
 2. **`assignee` = the current issue's `creator`.** Never assign a spawned
    issue to Symphony's own account.
 3. **`team` = current issue's team; `project` = the routed target project.**
    Resolve the target project's `projectId` and pass it to
    `issueCreate`; omit `projectId` only when the current issue has no project
    and the registry also says there is no project route.
-4. **Tier B idempotency.** Never recreate an `已创建` item. Resume a `待履行`
-   item from its recorded issue id and next incomplete operation.
+4. **Tier B idempotency.** Never recreate an `已创建` item. Reconcile the
+   recorded child's current state and relations, then resume a `待履行` item at
+   its next incomplete operation.
 5. **Tier B persist-before-proceed.** After `issueCreate`, immediately record
-   the new id and next operation as `待履行` and upload fresh agent state. Mark
-   it `已创建` only after the relation and scheduling responses are reconciled.
+   the new id and next operation as `待履行` and upload fresh agent state.
+   Update that operation after each successful step; stale state is reconciled
+   per invariant 4. Mark it `已创建` only after scheduling and relation succeed.
    Tier A keeps its `已创建` record in step 4 below. Do not stage the
    workpad.
 
@@ -106,19 +109,18 @@ work was discovered:
 3. **Link** (`issueRelationCreate`): `related` for follow-up/related;
    current `blocks` new for downstream blocked.
 4. **Record + persist**: write the new issue's identifier into workpad `## Spawned Issues`
-   (status `已创建`), then upload a fresh state attachment (invariant 5).
+   as `已创建`, then upload a fresh state attachment.
 5. **Surface**: return the new issue's identifier to the calling phase, which lists it in its
    artifact (Design 未覆盖范围 / Implementation 风险 / Deployment 后续事项).
 
-**Failure handling:** On a partial Fulfill sequence, query the child state and
-relations. If the relation exists but the separate scheduling update did not
-complete, delete that new relation before stopping so an intake child cannot
-deadlock the parent.
-Keep `待履行` and the proposal unresolved; move the parent to `Human Review`
-without resolving its phase artifact, citing the failed and compensating operations. A later run
-resumes the recorded id. If compensation also fails, include the relation id
-and manual removal runbook in the blocker. Other relation failures are noted as
-`关系未设成，请人工补`; non-blocking create failure becomes a `建议新建` entry.
+**Failure handling:** Query the child state and relations, keep `待履行` at the
+next incomplete operation, and leave the proposal unresolved. Return the error
+to the current phase, which publishes a replacement artifact with the blocker
+before moving the parent to `Human Review`. A later run resumes the recorded
+id before phase intent. If the child became terminal before its pending link,
+record completion and resume the parent without creating an obsolete relation.
+Other relation failures are noted as `关系未设成，请人工补`; non-blocking create
+failure becomes a `建议新建` entry.
 
 ## Tier B — propose, then create on consent
 
@@ -167,9 +169,9 @@ Main Flow scans unresolved `## 建议新建 issue` comments for a new reply, the
 interprets the reply's **intent** (not a fixed keyword list):
 
 - **Consent** (e.g. `同意 / 建吧 / 可以 / 👍`) → create the item in intake as
-  `待履行 · link` (or reconcile its recorded id), confirm the relation from
-  invariant 1, then run the separate scheduling `issueUpdate`. It sets state =
-  `Todo`, labels = `Type:Xxx` + `symphony`, assignee = creator.
+  `待履行 · schedule` (or reconcile its recorded id), run `issueUpdate` with
+  state = `Todo`, labels = `Type:Xxx` + `symphony`, assignee = creator, then
+  create and confirm the relation from invariant 1.
   - *blocking* → new issue `blocks` the current issue; after creating it,
     Main Flow re-parks the current issue after fulfillment.
   - *sub-issue* → `parentId` = current issue **and** each child `blocks` the

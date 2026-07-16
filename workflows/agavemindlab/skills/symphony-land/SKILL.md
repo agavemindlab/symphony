@@ -102,8 +102,10 @@ description:
 18. **Pushback template:** When disagreeing, reply inline with: acknowledge +
     rationale + offer alternative.
 19. **Ambiguity gate:** Before merge, put the visible clarification in the
-    current `## Implementation` thread and return to `Human Review`; resume
-    only after the human replies and moves the issue to `Merging` again.
+    current `## Implementation` thread and return to `Human Review`. The human
+    answers by moving the issue to `In Progress`, so Main Flow routes any code
+    change through Implementation; only a subsequently confirmed CLEAN artifact
+    may return to `Merging`.
 
 ## Commands
 
@@ -166,8 +168,8 @@ else
 fi
 ```
 
-When the helper is absent, complete the bounded manual polling gate under
-**Async Watch Helper**, then run the merge command separately:
+After either the watcher or bounded manual polling gate succeeds, run the merge
+command separately:
 
 ```sh
 
