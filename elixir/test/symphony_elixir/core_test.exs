@@ -975,7 +975,7 @@ defmodule SymphonyElixir.CoreTest do
     end
 
     assert workflow =~ "same-phase rework even when the issue is `In Progress`"
-    assert workflow =~ "names the recurring finding family and invalid Design assumption"
+    assert workflow =~ "names every validated blocking family and invalid Design assumption"
     assert workflow =~ "identifies restored evidence or explicitly accepts the evidence gap"
     assert workflow =~ "Ignore a disposition whose artifact or current PR head does not match"
 
@@ -1046,6 +1046,10 @@ defmodule SymphonyElixir.CoreTest do
     assert implementation_skill =~ "source severity (`CRITICAL`, validated P0, or validated P1)"
     assert implementation_skill =~ "`new | recurring | resolved` state"
     assert design_skill =~ "Fixing only\nthe latest examples does not satisfy this rework"
+    assert design_skill =~ "Re-baseline the entire current\nPR diff"
+    assert design_skill =~ "must name an existing\nproducer"
+    assert workflow =~ "names every validated blocking family"
+    assert workflow =~ "existing evidence producers"
     assert launcher =~ "tuple is incomplete"
     assert reviewer =~ "human-only authentication/permission blocker"
     assert launcher =~ "human-only authentication/permission blocker"
