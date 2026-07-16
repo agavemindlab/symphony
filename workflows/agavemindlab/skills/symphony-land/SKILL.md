@@ -19,8 +19,8 @@ description:
   Merging gate.
 - Squash-merge the PR once checks pass, then watch the `main` workflows for
   the merge commit.
-- Continue until the PR is merged and post-merge runs finish, or until the
-  workflow reaches an explicit failure or clarification exit.
+- Continue until the PR is merged and post-merge runs finish, or until an
+  explicit failure, clarification, or bounded post-merge timeout exit.
 - No need to delete remote branches after merge if the repo auto-deletes head
   branches; check `AGENTS.md` for the project's branch deletion policy.
 
@@ -101,8 +101,9 @@ description:
     respond inline with a justification and ask the user before changing code.
 18. **Pushback template:** When disagreeing, reply inline with: acknowledge +
     rationale + offer alternative.
-19. **Ambiguity gate:** When ambiguity blocks progress, use the phase's visible
-    clarification gate and stop; do not modify or merge the PR.
+19. **Ambiguity gate:** Before merge, put the visible clarification in the
+    current `## Implementation` thread and return to `Human Review`; resume
+    only after the human replies and moves the issue to `Merging` again.
 
 ## Commands
 
@@ -214,6 +215,8 @@ are documented in `AGENTS.md` — follow them to determine what to watch.
   paths, record that no deploy was triggered.
 - If deploy-triggered files changed and no run appears after a short wait,
   report that as a deployment signal failure.
+- If a run has no terminal progress for 30 minutes, report its current URL and
+  status as a bounded-timeout deployment risk instead of polling again.
 - If any post-merge run fails, is cancelled, times out, or requires action,
   inspect logs with `gh run view <run-id> --log-failed` and report
   immediately: failed workflow/job, run URL, suspected cause, user impact,
