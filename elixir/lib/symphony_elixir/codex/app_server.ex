@@ -221,6 +221,7 @@ defmodule SymphonyElixir.Codex.AppServer do
     [
       "set -e",
       project_env_source_prefix(issue),
+      "unset LINEAR_API_KEY LINEAR_CLIENT_ID LINEAR_CLIENT_SECRET",
       "exec #{Config.settings!().codex.command}"
     ]
     |> Enum.reject(&(&1 == ""))

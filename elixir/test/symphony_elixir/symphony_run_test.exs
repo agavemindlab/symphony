@@ -124,6 +124,37 @@ defmodule SymphonyElixir.SymphonyRunTest do
     refute capture["ARGS"] =~ "--port"
   end
 
+  test "main and Maestro launch with their selected client credentials" do
+    main =
+      run_launcher!("symphony",
+        profile_env: "LINEAR_CLIENT_ID=main-id\nLINEAR_CLIENT_SECRET=main-secret\n"
+      )
+
+    maestro =
+      run_launcher!("symphony",
+        launcher_args: ["--maestro"],
+        profile: "maestro",
+        caller_profile: nil,
+        workflow_file: "MAESTRO_WORKFLOW.md",
+        caller_workflow_file: nil,
+        grandline_profile_env: "LINEAR_CLIENT_ID=main-id\nLINEAR_CLIENT_SECRET=main-secret\n",
+        profile_env: "LINEAR_CLIENT_ID=maestro-id\nLINEAR_CLIENT_SECRET=maestro-secret\n"
+      )
+
+    assert main["LINEAR_CLIENT_ID"] == "main-id"
+    assert maestro["LINEAR_CLIENT_ID"] == "maestro-id"
+  end
+
+  test "rejects an incomplete client credential pair without printing its value" do
+    probe = "client-id-secret-probe"
+
+    assert {output, 1} =
+             run_launcher("symphony", profile_env: "LINEAR_CLIENT_ID=#{probe}\n")
+
+    assert output =~ "LINEAR_CLIENT_SECRET is not set"
+    refute output =~ probe
+  end
+
   test "Agavemindlab Linear project slugs use Linear slugId values" do
     expected_slugs = %{
       "gl-infra" => "02773795419d",
@@ -146,6 +177,14 @@ defmodule SymphonyElixir.SymphonyRunTest do
   end
 
   defp run_launcher!(project, opts \\ []) do
+    assert {output, 0, capture} = do_run_launcher(project, opts)
+    assert output =~ "symphony-run: starting project=#{project} profile=#{Keyword.get(opts, :profile, "grandline")}"
+    capture
+  end
+
+  defp run_launcher(project, opts), do: do_run_launcher(project, opts) |> then(fn {output, status, _} -> {output, status} end)
+
+  defp do_run_launcher(project, opts) do
     run_id = System.unique_integer([:positive])
     tmp_root = Path.join(System.tmp_dir!(), "symphony-run-test-#{run_id}")
     home = Path.join(tmp_root, "home")
@@ -184,10 +223,11 @@ defmodule SymphonyElixir.SymphonyRunTest do
     launcher_args = Keyword.get(opts, :launcher_args, [])
     profile = Keyword.get(opts, :profile, "grandline")
     profile_env = Keyword.get(opts, :profile_env, "LINEAR_API_KEY=\"test-token\"\n")
+    grandline_profile_env = Keyword.get(opts, :grandline_profile_env, profile_env)
 
     File.write!(
       Path.join(home, ".config/symphony/grandline.env"),
-      profile_env
+      grandline_profile_env
     )
 
     File.write!(Path.join(home, ".config/symphony/#{profile}.env"), profile_env)
@@ -225,16 +265,17 @@ defmodule SymphonyElixir.SymphonyRunTest do
     ]
 
     try do
-      assert {output, 0} =
-               System.cmd(@launcher, [project | launcher_args], env: env, stderr_to_stdout: true)
-
-      assert output =~ "symphony-run: starting project=#{project} profile=#{profile}"
-
-      capture_path
-      |> File.read!()
-      |> parse_capture()
+      {output, status} = System.cmd(@launcher, [project | launcher_args], env: env, stderr_to_stdout: true)
+      {output, status, read_capture(capture_path)}
     after
       File.rm_rf(tmp_root)
+    end
+  end
+
+  defp read_capture(path) do
+    case File.read(path) do
+      {:ok, contents} -> parse_capture(contents)
+      {:error, :enoent} -> %{}
     end
   end
 
@@ -295,6 +336,7 @@ defmodule SymphonyElixir.SymphonyRunTest do
 
     {
       printf 'AUTOMATED_REVIEWER=%s\\n' "${AUTOMATED_REVIEWER-}"
+      printf 'LINEAR_CLIENT_ID=%s\\n' "${LINEAR_CLIENT_ID-}"
       printf 'SYMPHONY_PROFILE=%s\\n' "${SYMPHONY_PROFILE-}"
       printf 'SYMPHONY_PROJECT_SLUGS=%s\\n' "${SYMPHONY_PROJECT_SLUGS-}"
       printf 'SYMPHONY_PROJECT_NAMES=%s\\n' "${SYMPHONY_PROJECT_NAMES-}"

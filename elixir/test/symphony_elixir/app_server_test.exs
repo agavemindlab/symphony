@@ -204,6 +204,9 @@ defmodule SymphonyElixir.AppServerTest do
       previous_repo = System.get_env("SYMPHONY_REPO")
       previous_base_branch = System.get_env("SYMPHONY_BASE_BRANCH")
       previous_project_dir = System.get_env("SYMPHONY_PROJECT_DIR")
+      previous_linear_api_key = System.get_env("LINEAR_API_KEY")
+      previous_linear_client_id = System.get_env("LINEAR_CLIENT_ID")
+      previous_linear_client_secret = System.get_env("LINEAR_CLIENT_SECRET")
 
       on_exit(fn ->
         if is_binary(previous_trace) do
@@ -215,6 +218,9 @@ defmodule SymphonyElixir.AppServerTest do
         restore_env("SYMPHONY_REPO", previous_repo)
         restore_env("SYMPHONY_BASE_BRANCH", previous_base_branch)
         restore_env("SYMPHONY_PROJECT_DIR", previous_project_dir)
+        restore_env("LINEAR_API_KEY", previous_linear_api_key)
+        restore_env("LINEAR_CLIENT_ID", previous_linear_client_id)
+        restore_env("LINEAR_CLIENT_SECRET", previous_linear_client_secret)
       end)
 
       File.mkdir_p!(workflow_dir)
@@ -227,6 +233,9 @@ defmodule SymphonyElixir.AppServerTest do
       SYMPHONY_PROJECT_SLUG="grotto-slug"
       SYMPHONY_REPO="grotto"
       SYMPHONY_BASE_BRANCH="main"
+      LINEAR_API_KEY="child-api-key-probe"
+      LINEAR_CLIENT_ID="child-client-id-probe"
+      LINEAR_CLIENT_SECRET="child-client-secret-probe"
       """)
 
       File.write!(Path.join(workflow_dir, "project-for-linear-project.sh"), """
@@ -249,6 +258,9 @@ defmodule SymphonyElixir.AppServerTest do
         printf 'SYMPHONY_BASE_BRANCH=%s\\n' "${SYMPHONY_BASE_BRANCH:-}"
         printf 'SYMPHONY_PROJECT_DIR=%s\\n' "${SYMPHONY_PROJECT_DIR:-}"
         printf 'SYMPHONY_LINEAR_PROJECT_SLUG=%s\\n' "${SYMPHONY_LINEAR_PROJECT_SLUG:-}"
+        printf 'LINEAR_API_KEY=%s\\n' "${LINEAR_API_KEY-unset}"
+        printf 'LINEAR_CLIENT_ID=%s\\n' "${LINEAR_CLIENT_ID-unset}"
+        printf 'LINEAR_CLIENT_SECRET=%s\\n' "${LINEAR_CLIENT_SECRET-unset}"
       } > "$trace_file"
 
       count=0
@@ -269,6 +281,9 @@ defmodule SymphonyElixir.AppServerTest do
       System.put_env("SYMPHONY_REPO", "wrong-repo")
       System.put_env("SYMPHONY_BASE_BRANCH", "wrong-branch")
       System.delete_env("SYMPHONY_PROJECT_DIR")
+      System.put_env("LINEAR_API_KEY", "parent-api-key-probe")
+      System.put_env("LINEAR_CLIENT_ID", "parent-client-id-probe")
+      System.put_env("LINEAR_CLIENT_SECRET", "parent-client-secret-probe")
       Workflow.set_workflow_file_path(workflow_file)
 
       write_workflow_file!(Workflow.workflow_file_path(),
@@ -292,6 +307,9 @@ defmodule SymphonyElixir.AppServerTest do
                SYMPHONY_BASE_BRANCH=main
                SYMPHONY_PROJECT_DIR=#{project_dir}
                SYMPHONY_LINEAR_PROJECT_SLUG=grotto-slug
+               LINEAR_API_KEY=unset
+               LINEAR_CLIENT_ID=unset
+               LINEAR_CLIENT_SECRET=unset
                """
     after
       Workflow.set_workflow_file_path(original_workflow_path)

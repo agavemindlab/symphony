@@ -136,4 +136,32 @@ defmodule SymphonyElixir.CLITest do
 
     assert :ok = CLI.evaluate([@ack_flag, "WORKFLOW.md"], deps)
   end
+
+  test "returns a sanitized startup error when OAuth prewarm fails" do
+    deps = %{
+      file_regular?: fn _path -> true end,
+      set_workflow_file_path: fn _path -> :ok end,
+      set_logs_root: fn _path -> :ok end,
+      set_server_port_override: fn _port -> :ok end,
+      ensure_all_started: fn -> {:ok, [:symphony_elixir]} end,
+      prewarm_linear_auth: fn -> {:error, {:linear_oauth_token_status, 503}} end
+    }
+
+    assert {:error, message} = CLI.evaluate([@ack_flag, "WORKFLOW.md"], deps)
+    assert message == "Failed to authenticate with Linear OAuth (HTTP 503)"
+  end
+
+  test "does not prewarm Linear auth for a memory tracker workflow" do
+    deps = %{
+      file_regular?: fn _path -> true end,
+      set_workflow_file_path: fn _path -> :ok end,
+      set_logs_root: fn _path -> :ok end,
+      set_server_port_override: fn _port -> :ok end,
+      ensure_all_started: fn -> {:ok, [:symphony_elixir]} end,
+      tracker_kind: fn -> "memory" end,
+      prewarm_linear_auth: fn -> flunk("memory workflows must not prewarm Linear auth") end
+    }
+
+    assert :ok = CLI.evaluate([@ack_flag, "WORKFLOW.md"], deps)
+  end
 end

@@ -97,6 +97,7 @@ selected_profile="$SYMPHONY_PROFILE"
 profile_env="$HOME/.config/symphony/$SYMPHONY_PROFILE.env"
 [ -f "$profile_env" ] || die "profile env file not found: $profile_env"
 
+unset LINEAR_API_KEY LINEAR_CLIENT_ID LINEAR_CLIENT_SECRET
 set -a
 source "$profile_env"
 source "$project_env"
@@ -105,7 +106,15 @@ set +a
 
 SYMPHONY_PROFILE="$selected_profile"
 
-[ -n "${LINEAR_API_KEY:-}" ] || die "LINEAR_API_KEY is not set by $profile_env"
+if [ -z "${LINEAR_API_KEY:-}" ]; then
+  if [ -n "${LINEAR_CLIENT_ID:-}" ] && [ -z "${LINEAR_CLIENT_SECRET:-}" ]; then
+    die "LINEAR_CLIENT_SECRET is not set by $profile_env"
+  elif [ -z "${LINEAR_CLIENT_ID:-}" ] && [ -n "${LINEAR_CLIENT_SECRET:-}" ]; then
+    die "LINEAR_CLIENT_ID is not set by $profile_env"
+  elif [ -z "${LINEAR_CLIENT_ID:-}" ]; then
+    die "LINEAR_API_KEY or LINEAR_CLIENT_ID and LINEAR_CLIENT_SECRET must be set by $profile_env"
+  fi
+fi
 
 export GH_PROMPT_DISABLED="${GH_PROMPT_DISABLED:-true}"
 export SYMPHONY_WORKSPACE_ROOT="${SYMPHONY_WORKSPACE_ROOT:-$HOME/symphony-workspaces}"
