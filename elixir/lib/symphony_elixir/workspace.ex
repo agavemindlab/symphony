@@ -767,11 +767,46 @@ defmodule SymphonyElixir.Workspace do
   defp infer_workspace_repo(workspace) when is_binary(workspace) do
     ["upstream", "origin"]
     |> Enum.find_value({:error, :unknown_remote}, fn remote ->
-      case System.cmd("git", ["-C", workspace, "remote", "get-url", remote], stderr_to_stdout: true) do
-        {url, 0} -> normalize_repo_from_remote(String.trim(url))
-        {_output, _status} -> nil
+      case run_local_command("git", ["-C", workspace, "remote", "get-url", remote]) do
+        {:ok, {url, 0}} -> normalize_repo_from_remote(String.trim(url))
+        _ -> nil
       end
     end)
+  end
+
+  defp run_local_command(command, args) when is_binary(command) and is_list(args) do
+    case System.find_executable(command) do
+      nil ->
+        {:error, :executable_not_found}
+
+      executable ->
+        port =
+          Port.open({:spawn_executable, executable}, [
+            :binary,
+            :exit_status,
+            :stderr_to_stdout,
+            args: args
+          ])
+
+        timeout_ms = Config.settings!().hooks.timeout_ms
+        receive_local_command(port, [], System.monotonic_time(:millisecond) + timeout_ms)
+    end
+  end
+
+  defp receive_local_command(port, output, deadline_ms) do
+    timeout_ms = max(deadline_ms - System.monotonic_time(:millisecond), 0)
+
+    receive do
+      {^port, {:data, data}} ->
+        receive_local_command(port, [data | output], deadline_ms)
+
+      {^port, {:exit_status, status}} ->
+        {:ok, {output |> Enum.reverse() |> IO.iodata_to_binary(), status}}
+    after
+      timeout_ms ->
+        if Port.info(port), do: Port.close(port)
+        {:error, :timeout}
+    end
   end
 
   defp normalize_repo_from_remote(remote_url) when is_binary(remote_url) and remote_url != "" do

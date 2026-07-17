@@ -470,6 +470,53 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     end)
   end
 
+  test "legacy git remote inference times out and quarantines" do
+    test_root =
+      Path.join(System.tmp_dir!(), "symphony-elixir-workspace-legacy-timeout-#{System.unique_integer([:positive])}")
+
+    workspace_root = Path.join(test_root, "workspaces")
+    fake_bin = Path.join(test_root, "bin")
+    previous_path = System.get_env("PATH")
+
+    with_project_env("symphony-slug", "symphony", fn ->
+      try do
+        workspace = Path.join(workspace_root, "MT-LEGACY-TIMEOUT")
+        File.mkdir_p!(workspace)
+        File.mkdir_p!(fake_bin)
+        File.write!(Path.join(workspace, "repo.txt"), "old\n")
+        File.write!(Path.join(fake_bin, "git"), "#!/bin/sh\nexec sleep 2\n")
+        File.chmod!(Path.join(fake_bin, "git"), 0o755)
+        System.put_env("PATH", fake_bin <> ":" <> previous_path)
+
+        write_workflow_file!(Workflow.workflow_file_path(),
+          workspace_root: workspace_root,
+          hook_timeout_ms: 200,
+          hook_after_create: "echo new > repo.txt"
+        )
+
+        issue = %Issue{
+          id: "issue-legacy-timeout",
+          identifier: "MT-LEGACY-TIMEOUT",
+          title: "Legacy remote timeout",
+          state: "In Progress",
+          project: %{id: "project-id", slug_id: "symphony-slug", name: "Symphony"}
+        }
+
+        started_at = System.monotonic_time(:millisecond)
+        assert {:ok, canonical_workspace} = SymphonyElixir.PathSafety.canonicalize(workspace)
+        assert {:ok, ^canonical_workspace} = Workspace.create_for_issue(issue)
+        assert System.monotonic_time(:millisecond) - started_at < 1_000
+
+        [quarantine] = Path.wildcard(Path.join(workspace_root, "MT-LEGACY-TIMEOUT.quarantine.*"))
+        assert File.read!(Path.join(quarantine, "repo.txt")) == "old\n"
+        assert File.read!(Path.join(workspace, "repo.txt")) == "new\n"
+      after
+        restore_env("PATH", previous_path)
+        File.rm_rf(test_root)
+      end
+    end)
+  end
+
   test "aggregate project resolver chooses effective repo before workspace reuse" do
     test_root =
       Path.join(

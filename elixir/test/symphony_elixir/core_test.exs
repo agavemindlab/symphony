@@ -2915,6 +2915,48 @@ defmodule SymphonyElixir.CoreTest do
     end
   end
 
+  test "agent runner revalidates identity after before_run" do
+    test_root =
+      Path.join(System.tmp_dir!(), "symphony-elixir-agent-runner-post-hook-identity-#{System.unique_integer([:positive])}")
+
+    original_workflow_path = Workflow.workflow_file_path()
+
+    try do
+      workflow_file = Path.join(test_root, "WORKFLOW.md")
+      selector = Path.join(test_root, "project-for-linear-project.sh")
+      workspace_root = Path.join(test_root, "workspaces")
+      Workflow.set_workflow_file_path(workflow_file)
+      File.mkdir_p!(test_root)
+
+      File.write!(selector, "SYMPHONY_PROJECT_SLUG=project-slug\nSYMPHONY_REPO=symphony\n")
+
+      write_workflow_file!(workflow_file,
+        workspace_root: workspace_root,
+        hook_after_create: "echo created > created.txt",
+        hook_before_run: "printf '{bad' > .symphony/workspace-identity.json",
+        hook_after_run: "echo after > after-run.txt"
+      )
+
+      issue = %Issue{
+        id: "issue-agent-post-hook-identity",
+        identifier: "MT-AGENT-POST-HOOK-IDENTITY",
+        title: "Identity changes in before_run",
+        state: "In Progress",
+        project: %{id: "project-id", slug_id: "project-slug", name: "Project"}
+      }
+
+      assert_raise RuntimeError, ~r/workspace_identity_changed/, fn -> AgentRunner.run(issue) end
+
+      assert {:ok, canonical_root} = SymphonyElixir.PathSafety.canonicalize(workspace_root)
+      workspace = Path.join(canonical_root, issue.identifier)
+      assert File.read!(Path.join(workspace, ".symphony/workspace-identity.json")) == "{bad"
+      refute File.exists?(Path.join(workspace, "after-run.txt"))
+    after
+      Workflow.set_workflow_file_path(original_workflow_path)
+      File.rm_rf(test_root)
+    end
+  end
+
   test "agent runner forwards timestamped codex updates to recipient" do
     test_root =
       Path.join(
