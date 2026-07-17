@@ -172,10 +172,12 @@ Design:
 - For Design, when the approach touches existing behavior, require the
   verification plan to identify the affected existing user or system function
   and include a named test, command, log, or near-black-box/manual exercise
-  with its pass criterion; request changes when the verification plan lacks this
-  regression gate. For a wholly new cross-component runtime path (entrypoint
-  plus durable state, background worker, external process, or metric/alert
-  semantics), require a named black-box or near-black-box exercise.
+  with its pass criterion for every changed, failure-sensitive handoff. The
+  plan must state where planned mocks/stubs replace a real boundary; request
+  changes when the verification plan lacks this regression gate. Layered tests
+  may cover separate handoffs. For a wholly new cross-component runtime path
+  (entrypoint plus durable state, background worker, external process, or
+  metric/alert semantics), require a named black-box or near-black-box exercise.
 
 Implementation:
 
@@ -246,12 +248,19 @@ Implementation:
 - For Implementation, acceptance evidence must cover both the
   requested change and regression risk: when the PR touches existing behavior,
   require artifact-cited evidence that the affected existing user or system
-  function still works. Proving only the new fix, metric, or code path is not
-  enough; request changes when related touched behavior lacks named test,
-  command, log, or near-black-box/manual evidence. For wholly new behavior
-  whose core value crosses a runtime boundary no named test touches, require a
-  black-box or near-black-box exercise, or explicit impossibility plus named
-  tests mapped to each boundary.
+  function still works. Inspect the cited tests, commands, logs, or manual
+  exercises and their mocks/stubs; report which handoffs they actually executed
+  and which mocks/stubs replaced, and credit no downstream boundary past a
+  replacement. Layered evidence may combine coverage, but every changed,
+  failure-sensitive handoff needs evidence that actually crosses it. A missing
+  handoff that is agent-testable locally or in CI requires request changes.
+  Only a deploy-only gap may carry forward as a Deployment smoke gate, with an
+  owner, executable action, pass predicate, and rollback trigger. Proving only
+  the new fix, metric, or code path is not enough; request changes when related
+  touched behavior lacks named test, command, log, or near-black-box/manual
+  evidence. For wholly new behavior whose core value crosses a runtime boundary
+  no named test touches, require a black-box or near-black-box exercise, or
+  explicit impossibility plus named tests mapped to each boundary.
 - An Implementation rework artifact need not restate already-evidenced
   acceptance items from an earlier unresolved artifact; judge whether it
   closes the actual rework request.
@@ -259,14 +268,19 @@ Implementation:
 Deployment:
 
 - Derive the close test from the approved `## Requirements` acceptance
-  criteria plus later human-approved scope or verification changes. Do not
-  accept `✅` statuses on their own, and do not approve a bundled `S1-S6` /
-  main-readback summary when any item needs separate evidence. If the
-  artifact weakens or substitutes required verification, request changes
-  unless only the human can accept the risk — then ask clarification.
+  criteria, every handoff that Implementation explicitly left unverified, and
+  later human-approved scope or verification changes. Execute each carried
+  deploy-only behavior smoke using its owner, action, pass predicate, and
+  rollback trigger. Do not accept `✅` statuses on their own, and do not approve
+  a bundled `S1-S6` / main-readback summary when any item needs separate
+  evidence. If the artifact weakens or substitutes required verification,
+  request changes unless only the human can accept the risk — then ask
+  clarification.
 - Regression evidence: do not call merged-file readback, PR state, or
   Linear relation checks regression verification/evidence; use `regression`
   only for a command, log, test, or manual exercise of the affected behavior.
+  Health metrics and readback may support a carried smoke gate but cannot
+  replace that behavior exercise.
   For required regression validation — a `回归例`, regression example, or
   historical issue anchor — a missing exercise is a close-test gap: request
   changes, not completion confirmation. Readback cannot satisfy it as the

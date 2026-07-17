@@ -788,9 +788,20 @@ defmodule SymphonyElixir.CoreTest do
           "wholly new behavior",
           "runtime boundary no named test touches",
           "explicit impossibility plus named",
-          "tests mapped to each boundary"
+          "tests mapped to each boundary",
+          "changed, failure-sensitive handoff",
+          "cited tests, commands, logs, or manual exercises and their mocks/stubs",
+          "actually executed and which mocks/stubs replaced",
+          "Layered evidence may combine coverage",
+          "agent-testable locally or in CI",
+          "request changes",
+          "deploy-only",
+          "owner, executable action, pass predicate, and rollback trigger",
+          "Implementation explicitly left unverified",
+          "Health metrics and readback may support",
+          "cannot replace that behavior exercise"
         ] do
-      assert reviewer =~ contract
+      assert normalized_reviewer =~ contract
     end
   end
 
