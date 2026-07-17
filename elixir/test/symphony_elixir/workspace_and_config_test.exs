@@ -54,6 +54,8 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
 
     assert first_workspace == second_workspace
     assert Path.basename(first_workspace) == "MT_Det"
+    assert {:ok, reserved_workspace} = Workspace.create_for_issue("..")
+    assert Path.basename(reserved_workspace) == "issue"
   end
 
   test "workspace reuses existing issue directory without deleting local changes" do
@@ -476,6 +478,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
 
     workspace_root = Path.join(test_root, "workspaces")
     fake_bin = Path.join(test_root, "bin")
+    pid_file = Path.join(test_root, "git.pids")
     previous_path = System.get_env("PATH")
 
     with_project_env("symphony-slug", "symphony", fn ->
@@ -484,7 +487,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
         File.mkdir_p!(workspace)
         File.mkdir_p!(fake_bin)
         File.write!(Path.join(workspace, "repo.txt"), "old\n")
-        File.write!(Path.join(fake_bin, "git"), "#!/bin/sh\nexec sleep 2\n")
+        File.write!(Path.join(fake_bin, "git"), "#!/bin/sh\nprintf '%s\\n' \"$$\" >> '#{pid_file}'\nexec sleep 2\n")
         File.chmod!(Path.join(fake_bin, "git"), 0o755)
         System.put_env("PATH", fake_bin <> ":" <> previous_path)
 
@@ -510,6 +513,59 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
         [quarantine] = Path.wildcard(Path.join(workspace_root, "MT-LEGACY-TIMEOUT.quarantine.*"))
         assert File.read!(Path.join(quarantine, "repo.txt")) == "old\n"
         assert File.read!(Path.join(workspace, "repo.txt")) == "new\n"
+        assert_processes_stopped(pid_file)
+      after
+        restore_env("PATH", previous_path)
+        File.rm_rf(test_root)
+      end
+    end)
+  end
+
+  test "legacy git remote inference caps noisy command output" do
+    test_root =
+      Path.join(System.tmp_dir!(), "symphony-elixir-workspace-legacy-noisy-#{System.unique_integer([:positive])}")
+
+    workspace_root = Path.join(test_root, "workspaces")
+    fake_bin = Path.join(test_root, "bin")
+    pid_file = Path.join(test_root, "git.pids")
+    previous_path = System.get_env("PATH")
+
+    with_project_env("symphony-slug", "symphony", fn ->
+      try do
+        workspace = Path.join(workspace_root, "MT-LEGACY-NOISY")
+        File.mkdir_p!(workspace)
+        File.mkdir_p!(fake_bin)
+        File.write!(Path.join(workspace, "repo.txt"), "old\n")
+
+        File.write!(
+          Path.join(fake_bin, "git"),
+          "#!/bin/sh\nprintf '%s\\n' \"$$\" >> '#{pid_file}'\nwhile :; do printf '0123456789abcdef'; done\n"
+        )
+
+        File.chmod!(Path.join(fake_bin, "git"), 0o755)
+        System.put_env("PATH", fake_bin <> ":" <> previous_path)
+
+        write_workflow_file!(Workflow.workflow_file_path(),
+          workspace_root: workspace_root,
+          hook_timeout_ms: 1_000,
+          hook_after_create: "echo new > repo.txt"
+        )
+
+        issue = %Issue{
+          id: "issue-legacy-noisy",
+          identifier: "MT-LEGACY-NOISY",
+          title: "Legacy noisy remote",
+          state: "In Progress",
+          project: %{id: "project-id", slug_id: "symphony-slug", name: "Symphony"}
+        }
+
+        started_at = System.monotonic_time(:millisecond)
+        assert {:ok, canonical_workspace} = SymphonyElixir.PathSafety.canonicalize(workspace)
+        assert {:ok, ^canonical_workspace} = Workspace.create_for_issue(issue)
+        assert System.monotonic_time(:millisecond) - started_at < 1_000
+
+        assert [_quarantine] = Path.wildcard(Path.join(workspace_root, "MT-LEGACY-NOISY.quarantine.*"))
+        assert_processes_stopped(pid_file)
       after
         restore_env("PATH", previous_path)
         File.rm_rf(test_root)
@@ -3569,6 +3625,16 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       restore_env("SYMPHONY_PROJECT_SLUG", previous_project_slug)
       restore_env("SYMPHONY_REPO", previous_repo)
     end
+  end
+
+  defp assert_processes_stopped(pid_file) do
+    pid_file
+    |> File.read!()
+    |> String.split("\n", trim: true)
+    |> Enum.each(fn pid ->
+      assert {_output, status} = System.cmd("kill", ["-0", pid], stderr_to_stdout: true)
+      assert status != 0
+    end)
   end
 
   defp workspace_identity_marker(workspace) do

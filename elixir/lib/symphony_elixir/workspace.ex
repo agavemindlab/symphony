@@ -15,6 +15,7 @@ defmodule SymphonyElixir.Workspace do
   @workspace_identity_marker ".symphony/workspace-identity.json"
   @workspace_identity_version 1
   @workspace_identity_max_bytes 65_536
+  @local_command_max_bytes 4_096
 
   @type worker_host :: String.t() | nil
 
@@ -420,7 +421,8 @@ defmodule SymphonyElixir.Workspace do
   end
 
   defp safe_identifier(identifier) do
-    String.replace(identifier || "issue", ~r/[^a-zA-Z0-9._-]/, "_")
+    sanitized = String.replace(identifier || "issue", ~r/[^a-zA-Z0-9._-]/, "_")
+    if sanitized in ["", ".", ".."], do: "issue", else: sanitized
   end
 
   defp initialize_workspace(_workspace, _issue_context, _expected_identity, false, _worker_host, _project_env), do: :ok
@@ -789,24 +791,46 @@ defmodule SymphonyElixir.Workspace do
           ])
 
         timeout_ms = Config.settings!().hooks.timeout_ms
-        receive_local_command(port, [], System.monotonic_time(:millisecond) + timeout_ms)
+        receive_local_command(port, [], 0, System.monotonic_time(:millisecond) + timeout_ms)
     end
   end
 
-  defp receive_local_command(port, output, deadline_ms) do
-    timeout_ms = max(deadline_ms - System.monotonic_time(:millisecond), 0)
+  defp receive_local_command(port, output, output_bytes, deadline_ms) do
+    timeout_ms = deadline_ms - System.monotonic_time(:millisecond)
 
-    receive do
-      {^port, {:data, data}} ->
-        receive_local_command(port, [data | output], deadline_ms)
+    if timeout_ms <= 0 do
+      stop_local_command(port, :timeout)
+    else
+      receive do
+        {^port, {:data, data}} when output_bytes + byte_size(data) > @local_command_max_bytes ->
+          stop_local_command(port, :output_too_large)
 
-      {^port, {:exit_status, status}} ->
-        {:ok, {output |> Enum.reverse() |> IO.iodata_to_binary(), status}}
-    after
-      timeout_ms ->
-        if Port.info(port), do: Port.close(port)
-        {:error, :timeout}
+        {^port, {:data, data}} ->
+          receive_local_command(port, [data | output], output_bytes + byte_size(data), deadline_ms)
+
+        {^port, {:exit_status, status}} ->
+          {:ok, {output |> Enum.reverse() |> IO.iodata_to_binary(), status}}
+      after
+        timeout_ms -> stop_local_command(port, :timeout)
+      end
     end
+  end
+
+  defp stop_local_command(port, reason) do
+    case Port.info(port, :os_pid) do
+      {:os_pid, os_pid} -> System.cmd("kill", ["-KILL", Integer.to_string(os_pid)], stderr_to_stdout: true)
+      nil -> :ok
+    end
+
+    if Port.info(port) do
+      try do
+        Port.close(port)
+      rescue
+        ArgumentError -> :ok
+      end
+    end
+
+    {:error, reason}
   end
 
   defp normalize_repo_from_remote(remote_url) when is_binary(remote_url) and remote_url != "" do
