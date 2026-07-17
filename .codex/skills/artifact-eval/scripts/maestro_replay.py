@@ -63,6 +63,24 @@ ROUTING_EXCERPT_END = "## Skill Interaction Protocol"
 TARGET_PHASE_LINE_RE = re.compile(CONTRACT_PREFIX + r"target[ _]?phase" + CONTRACT_FIELD_END, re.IGNORECASE)
 CONSUMED_DECISION_LINE_RE = re.compile(CONTRACT_PREFIX + r"consumed[ _]?decision" + CONTRACT_FIELD_END, re.IGNORECASE)
 CONSUMED_CONTEXT_LINE_RE = re.compile(r"consumed[ _]?context\s*[:：]\s*(.+)", re.IGNORECASE)
+CONTRACT_FIELD_LABELS = {
+    "收敛判断",
+    "建议 target phase",
+    "建议 issue status",
+    "执行状态",
+    "Reviewed Implementation artifact id",
+    "PR Head",
+    "判断理由",
+    "下一轮建议方向",
+    "失效的 Design assumption",
+    "建议修改的机制或边界",
+    "下一轮 proof / acceptance criteria",
+    "不受影响的既有约束",
+    "待人工回答的问题",
+    "回答判定标准",
+    "RECOMMENDATION",
+    "CONSUMED_CONTEXT",
+}
 
 
 class ReplayError(RuntimeError):
@@ -285,20 +303,53 @@ def _as_text(value: object) -> str:
 def output_marker_present(marker: str, output: str) -> bool:
     """Require prose contract markers to be field labels, not mentions."""
     if re.fullmatch(r"[a-z0-9][a-z0-9_-]*", marker, re.IGNORECASE):
-        return re.search(rf"(?<![a-z0-9_-]){re.escape(marker)}(?![a-z0-9_-])", output, re.IGNORECASE) is not None
+        label = next(
+            (
+                field
+                for prefix, field in (
+                    ("assumption-", "失效的 Design assumption"),
+                    ("boundary-", "建议修改的机制或边界"),
+                    ("proof-", "下一轮 proof / acceptance criteria"),
+                    ("constraint-", "不受影响的既有约束"),
+                )
+                if marker.lower().startswith(prefix)
+            ),
+            None,
+        )
+        content = contract_field_content(label, output) if label else output
+        return re.search(rf"(?<![a-z0-9_-]){re.escape(marker)}(?![a-z0-9_-])", content, re.IGNORECASE) is not None
 
     expected = re.sub(r"\s*:\s*", ":", marker.replace("：", ":").strip())
-    for line in output.splitlines():
+    if ":" in expected:
+        label, value = expected.split(":", 1)
+        return value != "" and contract_field_content(label, output).startswith(value)
+    return contract_field_content(expected, output) != ""
+
+
+def contract_field_content(expected: str | None, output: str) -> str:
+    if not expected:
+        return ""
+    lines = output.splitlines()
+    for index, line in enumerate(lines):
         normalized = re.sub(r"^\s*(?:(?:[-*+]|#+|>)\s+)*", "", line).replace("**", "").replace("：", ":").strip().strip("`_ ")
-        normalized = re.sub(r"\s*:\s*", ":", normalized)
-        if ":" in expected:
-            if normalized.startswith(expected):
-                return True
-        else:
-            label = normalized.split(":", 1)[0].strip().strip("`*_ ")
-            if label == expected or label.endswith(" " + expected):
-                return True
-    return False
+        label, separator, value = normalized.partition(":")
+        if label.strip() not in {expected, "Reviewed " + expected}:
+            continue
+        content = [value.strip()] if separator else []
+        for following in lines[index + 1 :]:
+            candidate = following.strip()
+            candidate_label = (
+                re.sub(r"^\s*(?:(?:[-*+]|#+|>)\s+)*", "", candidate)
+                .replace("**", "")
+                .replace("：", ":")
+                .partition(":")[0]
+                .strip()
+            )
+            if candidate_label in CONTRACT_FIELD_LABELS:
+                break
+            content.append(candidate)
+        return "\n".join(content).strip()
+    return ""
 
 
 _REPLAY_WORKDIR: list[str] = []

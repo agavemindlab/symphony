@@ -78,11 +78,31 @@ class ParseRecommendationTest(unittest.TestCase):
         output = "卡片缺少待人工回答的问题和回答判定标准。"
         self.assertFalse(maestro_replay.output_marker_present("待人工回答的问题", output))
         self.assertFalse(maestro_replay.output_marker_present("回答判定标准", output))
+        self.assertFalse(maestro_replay.output_marker_present("待人工回答的问题", "缺少 待人工回答的问题: 未提供"))
+        self.assertFalse(maestro_replay.output_marker_present("收敛判断", "收敛判断:"))
         self.assertTrue(maestro_replay.output_marker_present("待人工回答的问题", "### 待人工回答的问题: 请选择"))
         self.assertTrue(
             maestro_replay.output_marker_present(
                 "执行状态: awaiting human action",
                 "- **执行状态**：awaiting human action",
+            ),
+        )
+
+        empty_rework = """
+        收敛判断: rework design
+        失效的 Design assumption:
+        建议修改的机制或边界:
+        下一轮 proof / acceptance criteria:
+        不受影响的既有约束:
+        CONSUMED_CONTEXT: assumption-empty,boundary-empty,proof-empty,constraint-empty
+        """
+        for marker in ("assumption-empty", "boundary-empty", "proof-empty", "constraint-empty"):
+            self.assertFalse(maestro_replay.output_marker_present(marker, empty_rework))
+
+        self.assertTrue(
+            maestro_replay.output_marker_present(
+                "proof-present",
+                "下一轮 proof / acceptance criteria:\n- add proof-present coverage\n不受影响的既有约束: constraint-present",
             ),
         )
 
