@@ -2,7 +2,7 @@
 set -euo pipefail
 
 usage() {
-  printf 'Usage: %s <project>\n' "${0##*/}" >&2
+  printf 'Usage: %s <project> [--maestro]\n' "${0##*/}" >&2
 }
 
 die() {
@@ -10,12 +10,35 @@ die() {
   exit 1
 }
 
-if [ "$#" -ne 1 ]; then
+maestro_mode=0
+positional=()
+for arg in "$@"; do
+  case "$arg" in
+    --maestro) maestro_mode=1 ;;
+    -*)
+      usage
+      exit 64
+      ;;
+    *) positional+=("$arg") ;;
+  esac
+done
+
+if [ "${#positional[@]}" -ne 1 ]; then
   usage
   exit 64
 fi
 
-project="$1"
+project="${positional[0]}"
+
+# --maestro is shorthand for the Maestro reviewer instance: same project dir,
+# the MAESTRO_WORKFLOW.md file, and the namespace's reviewer profile. Explicit
+# caller env still wins over the shorthand defaults. The profile itself is
+# resolved after the env layers load, so a namespace can name its own reviewer
+# identity via SYMPHONY_MAESTRO_PROFILE.
+if [ "$maestro_mode" -eq 1 ]; then
+  SYMPHONY_WORKFLOW_FILE="${SYMPHONY_WORKFLOW_FILE:-MAESTRO_WORKFLOW.md}"
+fi
+
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
 if [ -n "${SYMPHONY_REPO_ROOT:-}" ]; then
@@ -25,13 +48,19 @@ else
 fi
 
 workflow_dir="$repo_root/workflows/$project"
-workflow_file="$workflow_dir/WORKFLOW.md"
-if [ -L "$workflow_file" ]; then
-  link_target="$(readlink "$workflow_file")"
+workflow_name="${SYMPHONY_WORKFLOW_FILE:-WORKFLOW.md}"
+case "$workflow_name" in
+  ""|*/*) die "SYMPHONY_WORKFLOW_FILE must be a file name, got: $workflow_name" ;;
+esac
+
+default_workflow_file="$workflow_dir/WORKFLOW.md"
+if [ -L "$default_workflow_file" ]; then
+  link_target="$(readlink "$default_workflow_file")"
   namespace="$(basename "$(dirname "$link_target")")"
 else
   namespace="$project"
 fi
+workflow_file="$workflow_dir/$workflow_name"
 defaults_env="$repo_root/workflows/$namespace/project.env.defaults"
 project_env="$workflow_dir/project.env"
 local_env="$workflow_dir/project.env.local"
@@ -48,6 +77,8 @@ set +a
 
 if [ -n "$caller_profile" ]; then
   SYMPHONY_PROFILE="$caller_profile"
+elif [ "$maestro_mode" -eq 1 ]; then
+  SYMPHONY_PROFILE="${SYMPHONY_MAESTRO_PROFILE:-maestro}"
 else
   SYMPHONY_PROFILE="${SYMPHONY_PROFILE:-grandline}"
 fi
@@ -78,7 +109,15 @@ SYMPHONY_PROFILE="$selected_profile"
 
 export GH_PROMPT_DISABLED="${GH_PROMPT_DISABLED:-true}"
 export SYMPHONY_WORKSPACE_ROOT="${SYMPHONY_WORKSPACE_ROOT:-$HOME/symphony-workspaces}"
+export SYMPHONY_MAESTRO_WORKSPACE_ROOT="${SYMPHONY_MAESTRO_WORKSPACE_ROOT:-$SYMPHONY_WORKSPACE_ROOT-maestro}"
 export SYMPHONY_PROFILE
+
+# The maestro instance must not fight the main instance for its dashboard
+# port (project.env's SYMPHONY_PORT belongs to the main instance); it gets
+# a dashboard only when the profile sets SYMPHONY_MAESTRO_PORT.
+if [ "$maestro_mode" -eq 1 ]; then
+  SYMPHONY_PORT="${SYMPHONY_MAESTRO_PORT:-}"
+fi
 
 printf 'symphony-run: starting project=%s profile=%s workflow=%s logs=%s\n' \
   "$project" \

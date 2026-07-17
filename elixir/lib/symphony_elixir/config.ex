@@ -91,6 +91,71 @@ defmodule SymphonyElixir.Config do
     end
   end
 
+  @doc """
+  Base URLs of the OTHER Symphony instances whose dashboards this instance
+  should surface. The configuration semantic is "the other instances" — no
+  self-exclusion logic is applied.
+  """
+  @spec peer_dashboards() :: [String.t()]
+  def peer_dashboards do
+    case Application.get_env(:symphony_elixir, :peer_dashboards) do
+      urls when is_list(urls) ->
+        urls
+
+      _unset ->
+        "SYMPHONY_PEER_DASHBOARDS"
+        |> System.get_env("")
+        |> String.split(",")
+        |> Enum.map(&String.trim/1)
+        |> Enum.reject(&(&1 == ""))
+    end
+  end
+
+  @doc """
+  GitHub repositories (`OWNER/NAME`) whose merged PRs feed the analytics
+  store via `mix symphony.events.github`. Resolution order: the
+  `:github_repos` app env list override, then the comma-separated
+  `SYMPHONY_GITHUB_REPOS` environment variable, then `[]`.
+  """
+  @spec github_repos() :: [String.t()]
+  def github_repos do
+    case Application.get_env(:symphony_elixir, :github_repos) do
+      repos when is_list(repos) ->
+        repos
+
+      _unset ->
+        "SYMPHONY_GITHUB_REPOS"
+        |> System.get_env("")
+        |> String.split(",")
+        |> Enum.map(&String.trim/1)
+        |> Enum.reject(&(&1 == ""))
+    end
+  end
+
+  @doc """
+  Optional floor date for the analytics event store. Events whose time axis
+  (`occurred_at || recorded_at`) falls before this UTC date are dropped at
+  write time, so backfill/scanner sweeps over old comment history cannot
+  reintroduce pre-era events. Resolution order: the `:analytics_epoch` app
+  env `Date` override, then the `SYMPHONY_ANALYTICS_EPOCH` environment
+  variable (`YYYY-MM-DD`), then nil (no floor).
+  """
+  @spec analytics_epoch() :: Date.t() | nil
+  def analytics_epoch do
+    case Application.get_env(:symphony_elixir, :analytics_epoch) do
+      %Date{} = date ->
+        date
+
+      _unset ->
+        with value when is_binary(value) <- System.get_env("SYMPHONY_ANALYTICS_EPOCH"),
+             {:ok, date} <- Date.from_iso8601(String.trim(value)) do
+          date
+        else
+          _absent_or_invalid -> nil
+        end
+    end
+  end
+
   @spec validate!() :: :ok | {:error, term()}
   def validate! do
     with {:ok, settings} <- settings() do

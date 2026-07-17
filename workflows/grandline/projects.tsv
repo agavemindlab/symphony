@@ -1,0 +1,11 @@
+# Linear project slug -> workflows/ dir. One row per project this aggregate watches.
+# Adding a project: add its row here, add the Linear project name to
+# SYMPHONY_PROJECT_NAMES in project.env, and add its row to the canonical
+# project routing registry in workflows/agavemindlab/WORKFLOW.md.
+bb8f9b7a6364	grotto
+02773795419d	gl-infra
+1ecc8649e9da	gl-skills
+977d7a7b6c0e	symphony
+25c113bb4717	voxvault
+8d3ce7cdbdea	tuneframe
+4e652e59659d	pastok-website

@@ -175,7 +175,13 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
            "method" => "thread/tokenUsage/updated",
            "params" => %{
              "tokenUsage" => %{
-               "total" => %{"inputTokens" => 12, "outputTokens" => 4, "totalTokens" => 16}
+               "total" => %{
+                 "inputTokens" => 12,
+                 "outputTokens" => 4,
+                 "totalTokens" => 16,
+                 "cachedInputTokens" => 9,
+                 "reasoningOutputTokens" => 2
+               }
              }
            }
          },
@@ -199,6 +205,8 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
     assert completed_state.codex_totals.input_tokens == 12
     assert completed_state.codex_totals.output_tokens == 4
     assert completed_state.codex_totals.total_tokens == 16
+    assert completed_state.codex_totals.cached_input_tokens == 9
+    assert completed_state.codex_totals.reasoning_output_tokens == 2
     assert is_integer(completed_state.codex_totals.seconds_running)
   end
 
@@ -276,7 +284,13 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
            "method" => "thread/tokenUsage/updated",
            "params" => %{
              "tokenUsage" => %{
-               "total" => %{"inputTokens" => 12, "outputTokens" => 4, "totalTokens" => 16}
+               "total" => %{
+                 "inputTokens" => 12,
+                 "outputTokens" => 4,
+                 "totalTokens" => 16,
+                 "cachedInputTokens" => 9,
+                 "reasoningOutputTokens" => 2
+               }
              }
            }
          },
@@ -304,7 +318,18 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
     assert Enum.any?(events, fn event ->
              event["event_type"] == "cost_snapshot" and
                event["issue_identifier"] == "MT-ANALYTICS" and
-               get_in(event, ["tokens", "total_tokens"]) == 16
+               get_in(event, ["tokens", "total_tokens"]) == 16 and
+               get_in(event, ["tokens", "cached_input_tokens"]) == 9 and
+               get_in(event, ["tokens", "reasoning_output_tokens"]) == 2 and
+               get_in(event, ["token_delta", "cached_input_tokens"]) == 9 and
+               get_in(event, ["token_delta", "reasoning_output_tokens"]) == 2
+           end)
+
+    assert Enum.any?(events, fn event ->
+             event["event_type"] == "run_completed" and
+               event["issue_identifier"] == "MT-ANALYTICS" and
+               get_in(event, ["tokens", "cached_input_tokens"]) == 9 and
+               get_in(event, ["tokens", "reasoning_output_tokens"]) == 2
            end)
   end
 
@@ -498,7 +523,13 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
          event: :turn_completed,
          payload: %{
            method: "turn/completed",
-           usage: %{"input_tokens" => "12", "output_tokens" => 4, "total_tokens" => 16}
+           usage: %{
+             "input_tokens" => "12",
+             "output_tokens" => 4,
+             "total_tokens" => 16,
+             "input_tokens_details" => %{"cached_tokens" => 3},
+             "output_tokens_details" => %{"reasoning_tokens" => 1}
+           }
          },
          timestamp: DateTime.utc_now()
        }}
@@ -515,6 +546,8 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
     assert completed_state.codex_totals.input_tokens == 12
     assert completed_state.codex_totals.output_tokens == 4
     assert completed_state.codex_totals.total_tokens == 16
+    assert completed_state.codex_totals.cached_input_tokens == 3
+    assert completed_state.codex_totals.reasoning_output_tokens == 1
   end
 
   test "orchestrator snapshot tracks codex token-count cumulative usage payloads" do
@@ -582,7 +615,9 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
                  "total_token_usage" => %{
                    "input_tokens" => "2",
                    "output_tokens" => 2,
-                   "total_tokens" => 4
+                   "total_tokens" => 4,
+                   "cached_input_tokens" => 1,
+                   "reasoning_output_tokens" => 1
                  }
                }
              }
@@ -606,7 +641,9 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
                  "total_token_usage" => %{
                    "prompt_tokens" => 10,
                    "completion_tokens" => 5,
-                   "total_tokens" => 15
+                   "total_tokens" => 15,
+                   "cached_input_tokens" => 7,
+                   "reasoning_output_tokens" => 3
                  }
                }
              }
@@ -628,6 +665,8 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
     assert completed_state.codex_totals.input_tokens == 10
     assert completed_state.codex_totals.output_tokens == 5
     assert completed_state.codex_totals.total_tokens == 15
+    assert completed_state.codex_totals.cached_input_tokens == 7
+    assert completed_state.codex_totals.reasoning_output_tokens == 3
   end
 
   test "orchestrator snapshot tracks codex rate-limit payloads" do

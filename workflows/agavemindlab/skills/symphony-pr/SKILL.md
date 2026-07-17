@@ -18,6 +18,11 @@ description: |
 - Push current branch changes to `origin` safely.
 - Create a PR against `upstream` if none exists for the branch, otherwise update
   the existing PR.
+- When an `upstream` remote exists, the PR target repo is `upstream_repo`, and
+  the PR head is `<origin_owner>:<branch>`.
+- Shared workflow agents must not create PRs with `--repo "$origin_repo"` or
+  concrete origin/fork repositories such as `--repo hongqn/symphony`.
+  Personal or origin-only workflows need their own explicit override.
 - Refuse to publish a PR branch diff that contains agent-only cleanup files
   such as `.symphony/workpad.md`; those files are persisted through Linear
   issue attachments instead.
@@ -67,8 +72,9 @@ the automated review request and proceed directly to human handoff.
      rewriting remotes or switching protocols as a workaround.
 
 6. Ensure a PR exists for the branch:
-   - Create and update PRs in the `upstream` repository, with the branch pushed
-     to the fork (`origin`) as the PR head.
+   - Create and update PRs in the `upstream` repository (`--repo
+     "$upstream_repo"`), with the branch pushed to the fork (`origin`) as the
+     PR head (`--head "$pr_head"` / `<origin_owner>:<branch>`).
    - If no PR exists, create one.
    - If a PR exists and is open, update it.
    - If branch is tied to a closed/merged PR, create a new branch + PR.

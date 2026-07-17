@@ -7,6 +7,7 @@ defmodule SymphonyElixir.Linear.Client do
   alias SymphonyElixir.{Config, Linear.Issue}
 
   @issue_page_size 50
+  @comment_page_size 100
   @max_error_body_log_bytes 1_000
 
   @query_by_project_slug """
@@ -155,6 +156,37 @@ defmodule SymphonyElixir.Linear.Client do
   }
   """
 
+  @issue_comments_query """
+  query SymphonyIssueComments($issueId: String!, $first: Int!, $after: String) {
+    issue(id: $issueId) {
+      comments(first: $first, after: $after) {
+        nodes {
+          id
+          body
+          createdAt
+          resolvedAt
+          user {
+            id
+            name
+            displayName
+          }
+          botActor {
+            id
+            name
+          }
+          parent {
+            id
+          }
+        }
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
+      }
+    }
+  }
+  """
+
   @viewer_query """
   query SymphonyLinearViewer {
     viewer {
@@ -200,6 +232,11 @@ defmodule SymphonyElixir.Linear.Client do
           do_fetch_issue_states(ids, assignee_filter)
         end
     end
+  end
+
+  @spec fetch_issue_comments(String.t()) :: {:ok, [map()]} | {:error, term()}
+  def fetch_issue_comments(issue_id) when is_binary(issue_id) do
+    do_fetch_issue_comments(issue_id, &graphql/2)
   end
 
   @spec graphql(String.t(), map(), keyword()) :: {:ok, map()} | {:error, term()}
@@ -251,6 +288,12 @@ defmodule SymphonyElixir.Linear.Client do
   end
 
   @doc false
+  @spec normalize_comment_for_test(map()) :: map()
+  def normalize_comment_for_test(comment) when is_map(comment) do
+    normalize_comment(comment)
+  end
+
+  @doc false
   @spec next_page_cursor_for_test(map()) :: {:ok, String.t()} | :done | {:error, term()}
   def next_page_cursor_for_test(page_info) when is_map(page_info), do: next_page_cursor(page_info)
 
@@ -298,6 +341,14 @@ defmodule SymphonyElixir.Linear.Client do
       ids ->
         do_fetch_issue_states(ids, nil, graphql_fun)
     end
+  end
+
+  @doc false
+  @spec fetch_issue_comments_for_test(String.t(), (String.t(), map() -> {:ok, map()} | {:error, term()})) ::
+          {:ok, [map()]} | {:error, term()}
+  def fetch_issue_comments_for_test(issue_id, graphql_fun)
+      when is_binary(issue_id) and is_function(graphql_fun, 2) do
+    do_fetch_issue_comments(issue_id, graphql_fun)
   end
 
   defp fetch_issues_by_normalized_states(_state_names, %{api_key: nil}) do
@@ -458,6 +509,37 @@ defmodule SymphonyElixir.Linear.Client do
     end
   end
 
+  defp do_fetch_issue_comments(issue_id, graphql_fun) do
+    do_fetch_issue_comments_page(issue_id, nil, [], graphql_fun)
+  end
+
+  defp do_fetch_issue_comments_page(issue_id, after_cursor, acc_comments, graphql_fun) do
+    variables = %{issueId: issue_id, first: @comment_page_size, after: after_cursor}
+
+    with {:ok, body} <- graphql_fun.(@issue_comments_query, variables),
+         {:ok, comments, page_info} <- decode_comment_page_response(body) do
+      updated_acc = prepend_page_issues(comments, acc_comments)
+
+      case next_page_cursor(page_info) do
+        {:ok, next_cursor} ->
+          do_fetch_issue_comments_page(issue_id, next_cursor, updated_acc, graphql_fun)
+
+        :done ->
+          {:ok, updated_acc |> finalize_paginated_issues() |> sort_comments_by_created_at()}
+
+        {:error, reason} ->
+          {:error, reason}
+      end
+    end
+  end
+
+  defp sort_comments_by_created_at(comments) when is_list(comments) do
+    Enum.sort_by(comments, &comment_sort_key/1)
+  end
+
+  defp comment_sort_key(%{created_at: %DateTime{} = created_at}), do: DateTime.to_unix(created_at, :microsecond)
+  defp comment_sort_key(_comment), do: 0
+
   defp issue_order_index(ids) when is_list(ids) do
     ids
     |> Enum.with_index()
@@ -591,6 +673,31 @@ defmodule SymphonyElixir.Linear.Client do
 
   defp decode_linear_page_response(response, assignee_filter), do: decode_linear_response(response, assignee_filter)
 
+  defp decode_comment_page_response(%{
+         "data" => %{
+           "issue" => %{
+             "comments" => %{
+               "nodes" => nodes,
+               "pageInfo" => %{"hasNextPage" => has_next_page, "endCursor" => end_cursor}
+             }
+           }
+         }
+       })
+       when is_list(nodes) do
+    comments =
+      nodes
+      |> Enum.filter(&is_map/1)
+      |> Enum.map(&normalize_comment/1)
+
+    {:ok, comments, %{has_next_page: has_next_page == true, end_cursor: end_cursor}}
+  end
+
+  defp decode_comment_page_response(%{"errors" => errors}) do
+    {:error, {:linear_graphql_errors, errors}}
+  end
+
+  defp decode_comment_page_response(_unknown), do: {:error, :linear_unknown_payload}
+
   defp next_page_cursor(%{has_next_page: true, end_cursor: end_cursor})
        when is_binary(end_cursor) and byte_size(end_cursor) > 0 do
     {:ok, end_cursor}
@@ -622,6 +729,41 @@ defmodule SymphonyElixir.Linear.Client do
   end
 
   defp normalize_issue(_issue, _assignee_filter), do: nil
+
+  defp normalize_comment(comment) when is_map(comment) do
+    %{
+      id: comment["id"],
+      body: comment["body"],
+      created_at: parse_datetime(comment["createdAt"]),
+      resolved_at: parse_datetime(comment["resolvedAt"]),
+      parent_id: comment_field(comment["parent"], "id"),
+      author_name: comment_author_name(comment),
+      author_is_bot: comment_author_is_bot?(comment)
+    }
+  end
+
+  defp comment_author_name(comment) do
+    user = comment["user"]
+    bot_actor = comment["botActor"]
+
+    Enum.find(
+      [
+        comment_field(user, "displayName"),
+        comment_field(user, "name"),
+        comment_field(bot_actor, "name")
+      ],
+      &present_author_name?/1
+    )
+  end
+
+  defp comment_author_is_bot?(comment) do
+    is_map(comment["botActor"]) and not is_map(comment["user"])
+  end
+
+  defp comment_field(%{} = author, field) when is_binary(field), do: author[field]
+  defp comment_field(_author, _field), do: nil
+
+  defp present_author_name?(value), do: is_binary(value) and String.trim(value) != ""
 
   defp assignee_field(%{} = assignee, field) when is_binary(field), do: assignee[field]
   defp assignee_field(_assignee, _field), do: nil

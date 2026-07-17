@@ -3,26 +3,37 @@ defmodule SymphonyElixir.PromptBuilder do
   Builds agent prompts from Linear issue data.
   """
 
-  alias SymphonyElixir.{Config, Workflow}
+  alias SymphonyElixir.{Config, RoutingBrief, Workflow}
 
   @render_opts [strict_variables: true, strict_filters: true]
 
   @spec build_prompt(SymphonyElixir.Linear.Issue.t(), keyword()) :: String.t()
   def build_prompt(issue, opts \\ []) do
-    template =
+    prompt =
       Workflow.current()
       |> prompt_template!()
-      |> parse_template!()
 
-    template
+    prompt
+    |> parse_template!()
     |> Solid.render!(
       %{
         "attempt" => Keyword.get(opts, :attempt),
-        "issue" => issue |> Map.from_struct() |> to_solid_map()
+        "issue" => issue |> Map.from_struct() |> to_solid_map(),
+        "routing_brief" => routing_brief(prompt, issue)
       },
       @render_opts
     )
     |> IO.iodata_to_binary()
+  end
+
+  # The brief costs a tracker read, so compute it only when the template can
+  # reference it; strict rendering ignores provided-but-unused variables.
+  defp routing_brief(prompt, issue) do
+    if String.contains?(prompt, "routing_brief") do
+      RoutingBrief.build(issue).markdown
+    else
+      ""
+    end
   end
 
   defp prompt_template!({:ok, %{prompt_template: prompt}}), do: default_prompt(prompt)
