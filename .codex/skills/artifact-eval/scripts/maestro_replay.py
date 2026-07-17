@@ -261,10 +261,17 @@ def parse_consumed_context(output: str) -> list[str]:
 
 
 def parse_reviewer_prediction(output: str) -> dict:
-    return {
+    prediction = {
         "prediction": parse_recommendation(output),
         "consumed_context": parse_consumed_context(output),
     }
+    if "收敛判断" in output:
+        decision = contract_field_content("收敛判断", output).lower().replace("_", " ").replace("-", " ")
+        prediction["card_decision"] = decision.replace(" ", "_") if decision in ("continue implementation", "rework design", "ask clarification") else "unparsed"
+        prediction["card_target_phase"] = contract_field_content("建议 target phase", output)
+        prediction["card_target_status"] = contract_field_content("建议 issue status", output)
+        prediction["card_execution_state"] = contract_field_content("执行状态", output).lower().replace(" ", "_")
+    return prediction
 
 
 def parse_routing_prediction(output: str) -> dict:
@@ -591,6 +598,23 @@ def required_markers_agreed(case: dict, prediction: dict) -> bool:
     return (
         all(marker in output for marker in case.get("required_output_markers") or [])
         and all(marker in consumed for marker in case.get("required_context_markers") or [])
+        and card_contract_agreed(case, prediction)
+    )
+
+
+def card_contract_agreed(case: dict, prediction: dict) -> bool:
+    if case.get("label") != "escalated":
+        return True
+    expected = {
+        "continue_implementation": ("Implementation", "In Progress"),
+        "rework_design": ("Design", "Rework"),
+        "ask_clarification": ("Implementation", "unchanged"),
+    }.get(case.get("expected_decision"))
+    return expected is not None and (
+        prediction.get("card_decision") == case.get("expected_decision")
+        and prediction.get("card_target_phase") == expected[0]
+        and prediction.get("card_target_status") == expected[1]
+        and prediction.get("card_execution_state") == "awaiting_human_action"
     )
 
 

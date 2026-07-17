@@ -381,6 +381,28 @@ class ReplayCommandTest(unittest.TestCase):
             shlex.split(maestro_replay.HERMETIC_CODEX_CMD),
         )
 
+    def test_frozen_reviewer_rejects_a_card_that_contradicts_its_audit_recommendation(self) -> None:
+        frozen = {
+            **case("FIXTURE-REWORK", "decision-rework", phase="Implementation", label="escalated"),
+            "expected_decision": "rework_design",
+            "required_output_markers": ["收敛判断", "执行状态: awaiting human action"],
+        }
+        output = """
+        收敛判断: ask clarification
+        建议 target phase: Implementation
+        建议 issue status: unchanged
+        执行状态: awaiting human action
+        RECOMMENDATION: rework design
+        """
+        parsed = maestro_replay.parse_reviewer_prediction(output)
+        parsed["observed_output_markers"] = [
+            marker for marker in frozen["required_output_markers"] if maestro_replay.output_marker_present(marker, output)
+        ]
+
+        result = maestro_replay.score_predictions([frozen], [{**frozen, **parsed}])
+
+        self.assertEqual(result["overall"]["disagreed"], 1)
+
     def test_rerun_resumes_by_skipping_already_predicted_cases(self) -> None:
         codex_cmd = self.fake_codex(
             "import sys, pathlib\n"
