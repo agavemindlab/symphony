@@ -298,6 +298,9 @@ defmodule SymphonyElixir.LinearAuthTest do
   test "redacts cached and message tokens from unexpected GenServer crash reports" do
     probe = "crash-report-access-token-probe"
 
+    assert Auth.format_status(%{message: {:authorization, [request_fun: probe]}}) ==
+             %{message: {:authorization, :redacted}}
+
     assert {:ok, %{token: ^probe, version: version}} =
              Auth.authorization(request_fun: fn _, _ -> {:ok, %{status: 200, body: %{"access_token" => probe}}} end)
 
