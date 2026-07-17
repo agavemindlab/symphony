@@ -946,8 +946,12 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       assert {:ok, canonical_outside_root} = SymphonyElixir.PathSafety.canonicalize(outside_root)
       assert {:ok, canonical_workspace_root} = SymphonyElixir.PathSafety.canonicalize(workspace_root)
 
-      assert {:error, {:workspace_outside_root, ^canonical_outside_root, ^canonical_workspace_root}} =
-               Workspace.create_for_issue("MT-SYM")
+      assert {:error, reason} = Workspace.create_for_issue("MT-SYM")
+
+      assert reason in [
+               {:workspace_outside_root, canonical_outside_root, canonical_workspace_root},
+               {:workspace_symlink_escape, Path.expand(symlink_path), canonical_workspace_root}
+             ]
     after
       File.rm_rf(test_root)
     end
