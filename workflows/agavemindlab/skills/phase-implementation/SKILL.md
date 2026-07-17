@@ -177,17 +177,22 @@ Markdown sections:
    - On attempts 1–4, `clean` freezes the reviewed Head: make the PR Ready for
      Review, publish `CLEAN`, and stop without any later tracked edit, commit,
      push, rebase, squash, PR-body mutation, or review invocation.
-   - On attempts 1–4, batch-fix every blocking finding that is local to the
-     approved Design, validate, commit, push, and invoke the next attempt. A new
-     or differently worded finding is Implementation feedback, not by itself a
-     Design failure.
+   - On attempts 1–4, simplify before adding: if fixing a blocking finding found
+     only in newly added verification scaffolding that is not itself an approved
+     deliverable would widen product/runtime code, remove the scaffolding,
+     validate, commit, and push the narrowed Head. Invoke the next attempt if an
+     approved scoped evidence path remains; otherwise publish `ESCALATED`.
+     Batch-fix every other blocking finding that is local to the approved Design.
+     A new or differently worded finding is Implementation feedback, not by
+     itself a Design failure.
    - On attempts 1–4, an unavailable or interrupted review is an infrastructure
      outcome, not a code finding. Repair only its invocation precondition when
      safe, then consume the next attempt; never turn missing optional child
      output or transcript bookkeeping into P0/P1.
-   - Stop early as `ESCALATED` only when a validated blocking finding directly
-     contradicts an explicit approved Design assumption and cannot be repaired
-     locally. Keep the PR Draft so Maestro can recommend Design rework.
+   - Stop early as `ESCALATED` only under the preceding missing-evidence rule or
+     when a validated blocking finding directly contradicts an explicit
+     approved Design assumption and cannot be repaired locally. Keep the PR
+     Draft so Maestro can recommend Design rework.
    - Attempt 5 is final. After it returns, do not change Head or invoke review
      again. Publish `CLEAN` and make the PR Ready only for a clean exact Head;
      otherwise keep the PR Draft and publish `ESCALATED`. Never invoke attempt
