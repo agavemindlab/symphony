@@ -37,6 +37,8 @@ class ParseRecommendationTest(unittest.TestCase):
         self.assertEqual(maestro_replay.parse_recommendation("RECOMMENDATION：no reply yet"), "no reply yet")
         self.assertEqual(maestro_replay.parse_recommendation("recommendation: completion-confirmation"), "completion confirmation")
         self.assertEqual(maestro_replay.parse_recommendation("RECOMMENDATION: ask clarification"), "ask clarification")
+        self.assertEqual(maestro_replay.parse_recommendation("RECOMMENDATION: continue_implementation"), "continue implementation")
+        self.assertEqual(maestro_replay.parse_recommendation("RECOMMENDATION: rework-design"), "rework design")
 
     def test_last_recommendation_line_wins(self) -> None:
         output = "RECOMMENDATION: approve\nsome analysis\nRECOMMENDATION: request changes\ntrailing note"
@@ -46,6 +48,18 @@ class ParseRecommendationTest(unittest.TestCase):
         self.assertEqual(maestro_replay.parse_recommendation("no verdict here"), "unparsed")
         self.assertEqual(maestro_replay.parse_recommendation("RECOMMENDATION: 略"), "unparsed")
         self.assertEqual(maestro_replay.parse_recommendation(""), "unparsed")
+
+    def test_parses_frozen_reviewer_context(self) -> None:
+        self.assertEqual(
+            maestro_replay.parse_reviewer_prediction(
+                "RECOMMENDATION: rework design\n"
+                "CONSUMED_CONTEXT: trend_marker: family-session-persisted, assumption-invalid",
+            ),
+            {
+                "prediction": "rework design",
+                "consumed_context": ["family-session-persisted", "assumption-invalid"],
+            },
+        )
 
 
 class SelectCasesTest(unittest.TestCase):
@@ -71,6 +85,41 @@ class SelectCasesTest(unittest.TestCase):
 
         auto_only = maestro_replay.select_cases(self.CASES, labels={"auto_advanced"})
         self.assertEqual([c["artifact_comment_id"] for c in auto_only], ["bbb"])
+
+
+class FrozenDecisionFixtureTest(unittest.TestCase):
+    BASE_MARKERS = {
+        "收敛判断",
+        "建议 target phase",
+        "建议 issue status",
+        "执行状态: awaiting human action",
+        "判断理由",
+        "下一轮建议方向",
+        "Implementation artifact id",
+        "PR Head",
+    }
+
+    def test_covers_three_decisions_and_rework_explanation(self) -> None:
+        path = Path(__file__).resolve().parent.parent / "fixtures" / "escalated-decision-cases.jsonl"
+        cases = maestro_replay.read_jsonl(path)
+
+        self.assertEqual({case["expected_decision"] for case in cases}, {"continue_implementation", "rework_design", "ask_clarification"})
+        self.assertTrue(all(self.BASE_MARKERS <= set(case["required_output_markers"]) for case in cases))
+        self.assertTrue(all(case["case_context"] and case["required_context_markers"] for case in cases))
+        rework = next(case for case in cases if case["expected_decision"] == "rework_design")
+        self.assertTrue(
+            {
+                "失效的 Design assumption",
+                "建议修改的机制或边界",
+                "下一轮 proof / acceptance criteria",
+                "不受影响的既有约束",
+                "assumption-session-identity-invalid",
+                "boundary-session-ownership",
+                "proof-multi-session",
+                "constraint-human-gate",
+            }
+            <= set(rework["required_output_markers"]),
+        )
 
 
 class ScoreTest(unittest.TestCase):
@@ -123,6 +172,31 @@ class ScoreTest(unittest.TestCase):
         self.assertIn("| all cases | 0 | 0 | 0 | n/a |", report)
         self.assertIn("No scored predictions.", report)
         self.assertIn("None.", report)
+
+    def test_frozen_reviewer_scores_decision_output_and_context_markers(self) -> None:
+        frozen = {
+            **case("FIXTURE-REWORK", "decision-rework", phase="Implementation", label="escalated"),
+            "expected_decision": "rework_design",
+            "required_output_markers": ["收敛判断", "失效的 Design assumption", "不受影响的既有约束"],
+            "required_context_markers": ["family-session-persisted", "assumption-invalid"],
+            "case_context": {},
+        }
+        predictions = [
+            {
+                **frozen,
+                "prediction": "rework design",
+                "observed_output_markers": ["收敛判断", "失效的 Design assumption"],
+                "consumed_context": ["family-session-persisted", "assumption-invalid"],
+            },
+        ]
+
+        result = maestro_replay.score_predictions(
+            [frozen],
+            predictions,
+            expected_fn=maestro_replay.review_expected,
+        )
+
+        self.assertEqual(result["overall"], {"total": 1, "agreed": 0, "disagreed": 1, "agreement_rate": 0.0})
 
 
 class ReplayCommandTest(unittest.TestCase):
@@ -205,7 +279,45 @@ class ReplayCommandTest(unittest.TestCase):
         self.assertIn("回放评审 DEV-1 的 artifact a1（发布于 2026-06-15T10:00:00Z）", prompts)
         self.assertIn("时间旅行纪律：只考虑 createdAt <= 2026-06-15T10:00:00Z 的 Linear 评论", prompts)
         self.assertIn("不得写入任何东西", prompts)
-        self.assertIn("`RECOMMENDATION: <approve|request changes|ask clarification|merge nudge|completion confirmation|no reply yet>`", prompts)
+        self.assertIn(
+            "`RECOMMENDATION: <approve|request changes|continue implementation|rework design|ask clarification|merge nudge|completion confirmation|no reply yet>`",
+            prompts,
+        )
+
+    def test_frozen_reviewer_context_is_offline_and_records_contract_markers(self) -> None:
+        frozen = {
+            **case("FIXTURE-CONTINUE", "decision-continue", phase="Implementation", label="escalated"),
+            "expected_decision": "continue_implementation",
+            "required_output_markers": ["收敛判断", "执行状态: awaiting human action"],
+            "required_context_markers": ["family-auth-decreasing"],
+            "case_context": {"review_verdict": "ESCALATED", "trend_marker": "family-auth-decreasing"},
+        }
+        self.cases_path.write_text(json.dumps(frozen) + "\n")
+        codex_cmd = self.fake_codex(
+            "import sys, pathlib\n"
+            f"log = pathlib.Path({str(self.calls_log)!r})\n"
+            "log.write_text(sys.stdin.read())\n"
+            "print('RECOMMENDATION: continue implementation')\n"
+            "print('收敛判断: continue implementation')\n"
+            "print('执行状态: awaiting human action')\n"
+            "print('CONSUMED_CONTEXT: family-auth-decreasing')\n",
+        )
+
+        self.assertEqual(self.run_replay(codex_cmd), 0)
+
+        result = self.read_predictions()[0]
+        self.assertEqual(result["prediction"], "continue implementation")
+        self.assertEqual(result["observed_output_markers"], frozen["required_output_markers"])
+        self.assertEqual(result["consumed_context"], frozen["required_context_markers"])
+        prompt = self.calls_log.read_text()
+        self.assertIn(json.dumps(frozen["case_context"], ensure_ascii=False, indent=2, sort_keys=True), prompt)
+        self.assertIn("不得读取当前 Linear 或 GitHub", prompt)
+        self.assertNotIn("OUTPUT_MARKERS", prompt)
+        self.assertNotIn("只允许 linear / gh", prompt)
+        self.assertEqual(
+            maestro_replay.codex_argv_for_case(maestro_replay.DEFAULT_CODEX_CMD, frozen),
+            shlex.split(maestro_replay.HERMETIC_CODEX_CMD),
+        )
 
     def test_rerun_resumes_by_skipping_already_predicted_cases(self) -> None:
         codex_cmd = self.fake_codex(
@@ -257,6 +369,31 @@ class ReplayCommandTest(unittest.TestCase):
         report = (self.tmp / "report.md").read_text()
         self.assertIn("| all cases | 2 | 1 | 1 | 50.0% |", report)
         self.assertIn("- DEV-2 — Design: label request_changes, predicted approve (artifact a2)", report)
+
+    def test_score_command_requires_frozen_reviewer_markers(self) -> None:
+        frozen = {
+            **case("FIXTURE-REWORK", "decision-rework", phase="Implementation", label="escalated"),
+            "expected_decision": "rework_design",
+            "required_output_markers": ["收敛判断", "不受影响的既有约束"],
+            "required_context_markers": ["family-session-persisted"],
+            "case_context": {},
+        }
+        self.cases_path.write_text(json.dumps(frozen) + "\n")
+        predictions_path = self.tmp / "predictions.jsonl"
+        predictions_path.write_text(
+            json.dumps(
+                {
+                    **frozen,
+                    "prediction": "rework design",
+                    "observed_output_markers": ["收敛判断"],
+                    "consumed_context": ["family-session-persisted"],
+                },
+            )
+            + "\n",
+        )
+
+        self.assertEqual(maestro_replay.main(["score", "--cases", str(self.cases_path), "--predictions", str(predictions_path)]), 0)
+        self.assertIn("| all cases | 1 | 0 | 1 | 0.0% |", (self.tmp / "report.md").read_text())
 
     def test_missing_cases_file_fails_cleanly(self) -> None:
         exit_code = maestro_replay.main(
@@ -328,6 +465,7 @@ class ParseTargetPhaseTest(unittest.TestCase):
         self.assertEqual(maestro_replay.parse_target_phase("> `target_phase: implementation`"), "Implementation")
         self.assertEqual(maestro_replay.parse_target_phase("TARGET PHASE：Requirements（步骤 5）"), "Requirements")
         self.assertEqual(maestro_replay.parse_target_phase("- TARGET_PHASE: `Deployment`"), "Deployment")
+        self.assertEqual(maestro_replay.parse_target_phase("TARGET_PHASE: Human Review"), "Human Review")
 
     def test_last_target_phase_line_wins(self) -> None:
         output = "TARGET_PHASE: Design\nsome analysis\nTARGET_PHASE: Deployment\ntrailing note"
@@ -337,6 +475,14 @@ class ParseTargetPhaseTest(unittest.TestCase):
         self.assertEqual(maestro_replay.parse_target_phase("no verdict here"), "unparsed")
         self.assertEqual(maestro_replay.parse_target_phase("TARGET_PHASE: 略"), "unparsed")
         self.assertEqual(maestro_replay.parse_target_phase(""), "unparsed")
+
+    def test_parses_the_frozen_routing_contract(self) -> None:
+        self.assertEqual(
+            maestro_replay.parse_routing_prediction(
+                "TARGET_PHASE: Human Review\nCONSUMED_DECISION: none\nCONSUMED_CONTEXT: none",
+            ),
+            {"prediction": "Human Review", "consumed_decision": "none", "consumed_context": []},
+        )
 
 
 class RoutingExcerptTest(unittest.TestCase):
@@ -368,6 +514,27 @@ class RoutingSelectCasesTest(unittest.TestCase):
 
         implementation = maestro_replay.select_cases(self.CASES, phase="Implementation", phase_field="expected_phase")
         self.assertEqual([c["published_event_id"] for c in implementation], ["phase_published:c2"])
+
+
+class FrozenRoutingFixtureTest(unittest.TestCase):
+    def test_covers_human_status_routes_and_automation_negatives(self) -> None:
+        path = Path(__file__).resolve().parent.parent / "fixtures" / "escalated-routing-cases.jsonl"
+        cases = maestro_replay.read_jsonl(path)
+
+        self.assertEqual(len({maestro_replay.case_id(case) for case in cases}), len(cases))
+        self.assertEqual(
+            {(case["state"], case["expected_decision"], case["expected_phase"]) for case in cases},
+            {
+                ("In Progress", "continue_implementation", "Implementation"),
+                ("Rework", "rework_design", "Design"),
+                ("In Progress", "none", "Human Review"),
+                ("Rework", "none", "Human Review"),
+            },
+        )
+        self.assertTrue(all(set(case["case_context"]) == {"artifact", "maestro_card", "state_history", "human_feedback"} for case in cases))
+        rejected = [case for case in cases if case["expected_phase"] == "Human Review"]
+        self.assertTrue(any(case["case_context"]["state_history"][0]["actor"]["app"] for case in rejected))
+        self.assertTrue(any(case["case_context"]["state_history"][0]["botActor"] for case in rejected))
 
 
 class RoutingScoreTest(unittest.TestCase):
@@ -403,6 +570,44 @@ class RoutingScoreTest(unittest.TestCase):
             [(item["issue_identifier"], item["label"], item["prediction"]) for item in result["disagreements"]],
             [("DEV-3", "Rework", "Design")],
         )
+
+    def test_frozen_routing_scores_phase_decision_and_required_context(self) -> None:
+        cases = [
+            {
+                **routing_case("FIXTURE-CONTINUE", "continue", expected="Implementation"),
+                "expected_decision": "continue_implementation",
+                "required_context_markers": ["finding-family-auth", "retry actor query"],
+            },
+            {
+                **routing_case("FIXTURE-BOT", "bot", expected="Human Review"),
+                "expected_decision": "continue_implementation",
+                "required_context_markers": [],
+            },
+        ]
+        predictions = [
+            {
+                **routing_prediction("FIXTURE-CONTINUE", "continue", "Implementation", expected_phase="Implementation"),
+                "consumed_decision": "continue_implementation",
+                "consumed_context": ["finding-family-auth"],
+            },
+            {
+                **routing_prediction("FIXTURE-BOT", "bot", "Human Review", expected_phase="Human Review"),
+                "consumed_decision": "continue_implementation",
+                "consumed_context": [],
+            },
+        ]
+
+        result = maestro_replay.score_predictions(
+            cases,
+            predictions,
+            expected_fn=lambda case: case.get("expected_phase"),
+            label_fn=lambda case: case.get("state") or "unknown",
+            phase_fn=lambda case: case.get("expected_phase") or "unknown",
+            agreement_fn=maestro_replay.routing_agreed,
+        )
+
+        self.assertEqual(result["overall"], {"total": 2, "agreed": 1, "disagreed": 1, "agreement_rate": 0.5})
+        self.assertEqual(result["by_phase"]["Human Review"]["agreed"], 1)
 
 
 class RoutingReplayCommandTest(unittest.TestCase):
@@ -487,6 +692,46 @@ class RoutingReplayCommandTest(unittest.TestCase):
         self.assertIn("只做步骤 3-5 的路由判断，不执行任何阶段工作、不写入任何东西", prompts)
         self.assertIn("最后一行输出且仅输出 `TARGET_PHASE: <Requirements|Design|Implementation|Deployment>`", prompts)
 
+    def test_frozen_context_is_injected_and_parsed_without_network(self) -> None:
+        frozen = {
+            **routing_case("FIXTURE-ESC-1", "frozen", expected="Implementation"),
+            "expected_decision": "continue_implementation",
+            "required_context_markers": ["finding-family-auth", "retry actor query"],
+            "case_context": {
+                "artifact": {"review_verdict": "ESCALATED"},
+                "maestro_card": {"decision": "continue implementation"},
+                "state_history": [{"toState": "In Progress", "actor": {"app": False}}],
+                "human_feedback": [],
+            },
+        }
+        self.cases_path.write_text(json.dumps(frozen) + "\n")
+        codex_cmd = self.fake_codex(
+            "import sys, pathlib\n"
+            f"log = pathlib.Path({str(self.calls_log)!r})\n"
+            "log.write_text(sys.stdin.read())\n"
+            "print('TARGET_PHASE: Implementation')\n"
+            "print('CONSUMED_DECISION: continue implementation')\n"
+            "print('CONSUMED_CONTEXT: finding-family-auth, retry actor query')\n",
+        )
+
+        self.assertEqual(self.run_routing_replay(codex_cmd), 0)
+
+        result = self.read_predictions()[0]
+        self.assertEqual(result["prediction"], "Implementation")
+        self.assertEqual(result["consumed_decision"], "continue_implementation")
+        self.assertEqual(result["consumed_context"], ["finding-family-auth", "retry actor query"])
+        prompt = self.calls_log.read_text()
+        self.assertIn(json.dumps(frozen["case_context"], ensure_ascii=False, indent=2, sort_keys=True), prompt)
+        self.assertIn("不得读取当前 Linear 或 GitHub", prompt)
+        self.assertIn("CONSUMED_DECISION", prompt)
+        self.assertIn("CONSUMED_CONTEXT", prompt)
+        self.assertNotIn("只允许 linear / gh", prompt)
+
+        self.assertEqual(
+            maestro_replay.codex_argv_for_case(maestro_replay.DEFAULT_CODEX_CMD, frozen),
+            shlex.split(maestro_replay.HERMETIC_CODEX_CMD),
+        )
+
     def test_rerun_resumes_by_published_event_id(self) -> None:
         codex_cmd = self.fake_codex(
             "import sys, pathlib\n"
@@ -523,6 +768,34 @@ class RoutingReplayCommandTest(unittest.TestCase):
         self.assertIn("| all cases | 2 | 1 | 1 | 50.0% |", report)
         self.assertIn("| Merging | 1 | 0 | 1 | 0.0% |", report)
         self.assertIn("- DEV-2 — Deployment: label Merging, predicted Implementation (artifact phase_published:c2)", report)
+
+    def test_score_field_expected_phase_requires_frozen_context_markers(self) -> None:
+        frozen = {
+            **routing_case("FIXTURE-ESC-1", "frozen", expected="Implementation"),
+            "expected_decision": "continue_implementation",
+            "required_context_markers": ["finding-family-auth", "retry actor query"],
+        }
+        self.cases_path.write_text(json.dumps(frozen) + "\n")
+        predictions_path = self.tmp / "predictions.jsonl"
+        predictions_path.write_text(
+            json.dumps(
+                {
+                    **frozen,
+                    "prediction": "Implementation",
+                    "consumed_decision": "continue_implementation",
+                    "consumed_context": ["finding-family-auth"],
+                },
+            )
+            + "\n",
+        )
+
+        self.assertEqual(
+            maestro_replay.main(
+                ["score", "--field", "expected_phase", "--cases", str(self.cases_path), "--predictions", str(predictions_path)],
+            ),
+            0,
+        )
+        self.assertIn("| all cases | 1 | 0 | 1 | 0.0% |", (self.tmp / "report.md").read_text())
 
     def test_missing_workflow_file_fails_cleanly(self) -> None:
         exit_code = maestro_replay.main(

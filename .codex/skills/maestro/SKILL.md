@@ -1,6 +1,6 @@
 ---
 name: maestro
-description: Use when the user invokes `$maestro ISSUE-1234` such as `$maestro DEV-1234` to get an isolated subagent recommendation for how to reply to a Symphony issue currently in Human Review. The parent agent launches a fresh reviewer subagent with only the issue key; the subagent performs read-only Linear, GitHub, and referenced Codex-session evidence collection and returns the reply method and draft response without changing state.
+description: Use when the user invokes `$maestro ISSUE-1234` such as `$maestro DEV-1234` to get an isolated subagent recommendation for a Symphony issue currently in Human Review. The parent agent launches a fresh reviewer subagent with only the issue key; the subagent performs read-only Linear, GitHub, and referenced Codex-session evidence collection and returns an ordinary reply draft or an ESCALATED judgment card without changing state.
 ---
 
 # Maestro
@@ -25,8 +25,8 @@ the reviewer subagent must collect evidence itself from the issue key.
    reviewer prompt as a skill/file reference.
 4. Wait for the subagent result. If required output fields are missing, ask the
    same subagent once to fix only the format; do not supply issue facts.
-5. Return the subagent's concise Chinese recommendation with:
-   - `建议回复方式`: approve / request changes / continue implementation / ask
+5. For ordinary reviews, return the subagent's concise Chinese recommendation with:
+   - `建议回复方式`: approve / request changes / ask
      clarification / merge nudge / completion confirmation / no reply yet.
    - `回复对象`: next Symphony agent / human.
    - `回复位置`: concrete Linear comment/thread to reply to, including phase
@@ -34,12 +34,17 @@ the reviewer subagent must collect evidence itself from the issue key.
    - `建议 issue status`: In Progress / Merging / Rework / Done / unchanged.
    - `建议回复`: a ready-to-send Chinese draft. For approve, request changes,
      merge nudge, and completion confirmation, set `回复对象` to next Symphony
-     agent and write it as the human's review note for the next run. The same
-     applies to continue implementation. For ask clarification and no reply
-     yet, set `回复对象` to human and write it for the human, explaining what
-     Maestro cannot decide.
+     agent and write it as the human's review note for the next run. For ask
+     clarification and no reply yet, set `回复对象` to human and write it for the
+     human, explaining what Maestro cannot decide.
    - `依据`: 2-5 evidence bullets.
    - `注意`: only if there is uncertainty or missing evidence.
+   For `Review verdict: ESCALATED`, relay the reviewer's advisory card instead:
+   `收敛判断` (`continue implementation`, `rework design`, or
+   `ask clarification`), `建议 target phase`, `建议 issue status`,
+   `执行状态: awaiting human action`, `判断理由`, and `下一轮建议方向`. A `rework design`
+   card also includes `失效的 Design assumption`, `建议修改的机制或边界`,
+   `下一轮 proof / acceptance criteria`, and `不受影响的既有约束`.
 
 ## Acting for the Human
 
@@ -55,13 +60,13 @@ to send the reply for them, e.g. "帮我回复", then:
      reworked; for same-phase rework this is the awaiting-review artifact, and
      for cross-phase rework this may be Requirements, Design, or another
      unresolved artifact.
-   - continue implementation: reply with `/rework implementation <reason>`;
-     this is a same-phase continuation, not approval.
    - Implementation merge nudge: do not add a nudge comment unless the
      recommendation includes a human-facing clarification; the state change to
      `Merging` is the signal.
    - no reply yet: do not create a Linear comment.
-2. Update the issue to `建议 issue status` when it is not `unchanged`. Override
+2. Update the issue to `建议 issue status` when it is not `unchanged`, except for
+   an ESCALATED judgment card: its `执行状态` remains `awaiting human action`, and
+   an agent must not perform the status action. Override
    `unchanged` only for clarification-answer resume: set the issue to
    `In Progress` after posting the human's answer so Symphony can re-enter the
    current phase.
@@ -91,14 +96,13 @@ Task:
 1. Fetch and inspect the issue, active unresolved Phase artifacts with no
    phase-closing reply, human feedback, related issues, and PR evidence needed
    by the reviewer prompt.
-2. Decide the best reply method: approve, request changes, continue
-   implementation, ask clarification, merge nudge, completion confirmation,
-   or no reply yet.
+2. Decide the best ordinary reply method, or emit the ESCALATED judgment card
+   defined by the reviewer prompt.
 3. State the reply audience: next Symphony agent or human.
 4. State the concrete reply location, not an abstract label.
 5. State the recommended Linear issue status after the reply.
-6. Draft the exact Chinese reply the human could post. For approve, request
-   changes, continue implementation, merge nudge, and completion confirmation,
+6. For ordinary review, draft the exact Chinese reply the human could post. For
+   approve, request changes, merge nudge, and completion confirmation,
    address the next Symphony agent run. For ask clarification and no reply yet,
    address the human.
 7. For every phase, compare the artifact's evidence with the acceptance source

@@ -251,6 +251,52 @@ defmodule SymphonyElixir.PhaseEventsTest do
     end
   end
 
+  test "parses ESCALATED convergence cards and their human-action routing fields" do
+    event =
+      derive_maestro_event("""
+      🤖 Maestro 预审核
+
+      - **收敛判断**: continue implementation
+      - **建议 target phase**: Implementation
+      - **建议 issue status**: In Progress
+      - **执行状态**: awaiting human action
+      """)
+
+    assert %{
+             recommendation: "continue_implementation",
+             target_phase: "Implementation",
+             target_status: "In Progress",
+             execution_state: "awaiting_human_action",
+             auto: false
+           } = event
+
+    assert %{recommendation: "rework_design", target_phase: "Design", target_status: "Rework"} =
+             derive_maestro_event("""
+             🤖 Maestro 预审核
+             收敛判断: rework design
+             建议 target phase: Design
+             建议 issue status: Rework
+             执行状态: awaiting human action
+             """)
+
+    assert %{recommendation: "ask_clarification", target_phase: "Implementation", target_status: "unchanged"} =
+             derive_maestro_event("""
+             🤖 Maestro 预审核
+             收敛判断: ask clarification
+             建议 target phase: Implementation
+             建议 issue status: unchanged
+             执行状态: awaiting human action
+             """)
+
+    assert %{target_phase: nil, target_status: nil} =
+             derive_maestro_event("""
+             🤖 Maestro 预审核
+             收敛判断: continue implementation
+             建议 target phase: unknown
+             建议 issue status: unknown
+             """)
+  end
+
   test "maestro reviews without a recognizable recommendation are unknown" do
     assert %{recommendation: "unknown"} = derive_maestro_event("🤖 Maestro 预审核:\n建议回复方式: hold off for now")
     assert %{recommendation: "unknown", confidence: nil} = derive_maestro_event("🤖 Maestro 预审核: 只留了一句话，没有建议行。")

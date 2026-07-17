@@ -52,10 +52,11 @@ Apply the relevant lens before approving:
 
 ## Task
 
-Recommend how the human should reply to the current phase artifact. Return:
+For ordinary reviews, recommend how the human should reply to the current phase
+artifact. Return:
 
-- `建议回复方式`: approve / request changes / continue implementation / ask
-  clarification / merge nudge / completion confirmation / no reply yet.
+- `建议回复方式`: approve / request changes / ask clarification / merge nudge /
+  completion confirmation / no reply yet.
 - `回复对象`: next Symphony agent / human.
 - `回复位置`: the concrete Linear comment/thread to reply to, including phase
   heading, comment id or timestamp, or `none`.
@@ -65,11 +66,29 @@ Recommend how the human should reply to the current phase artifact. Return:
 - `依据`: 2-5 evidence bullets.
 - `注意`: only if evidence is missing, ambiguous, or risky.
 
-For approve, request changes, continue implementation, merge nudge, and
-completion confirmation, set `回复对象` to `next Symphony agent` and write the
-draft as the human's review note for the next run. For ask clarification and
-no reply yet, set `回复对象` to `human`, explaining what Maestro cannot decide
-from the evidence.
+For approve, request changes, merge nudge, and completion confirmation, set
+`回复对象` to `next Symphony agent` and write the draft as the human's review
+note for the next run. For ask clarification and no reply yet, set `回复对象` to
+`human`, explaining what Maestro cannot decide from the evidence.
+
+For `Review verdict: ESCALATED`, return an advisory judgment card instead:
+
+- `收敛判断`: exactly `continue implementation`, `rework design`, or
+  `ask clarification`.
+- `建议 target phase` and `建议 issue status`.
+- `执行状态: awaiting human action`.
+- `判断理由`: finding families, trend, attempted-fix effects, and remaining
+  Design assumptions, citing the decisive transcript events.
+- `下一轮建议方向`.
+- Reviewed Implementation artifact id and PR Head.
+
+Map `continue implementation` to Implementation / `In Progress`, `rework design`
+to Design / `Rework`, and `ask clarification` to Implementation / `unchanged`.
+For `rework design`, also state `失效的 Design assumption`,
+`建议修改的机制或边界`, `下一轮 proof / acceptance criteria`, and
+`不受影响的既有约束`. The card is reviewable advice, not a ready-to-send
+artifact reply: do not include `/rework ...`, `建议回复方式: request changes`,
+or an auto-Rework marker.
 Approve or merge nudge drafts must not include caveats such as "do not
 enable", "do not deploy", or "do not run acceptance until another issue
 finishes"; those caveats mean the issue is blocked and needs request changes.
@@ -101,8 +120,6 @@ Reply locations:
 - request changes: the concrete artifact thread for the phase that must be
   reworked — the awaiting-review artifact for same-phase rework, the relevant
   Requirements / Design / other unresolved artifact for cross-phase rework.
-- continue implementation: the current ESCALATED Implementation artifact
-  thread.
 - Implementation merge nudge and no reply yet: none; for a merge nudge,
   setting `Merging` is the workflow signal unless the human needs a note.
 
@@ -181,12 +198,12 @@ Design:
 
 Implementation:
 
-- For `Review verdict: ESCALATED`, inspect that session and recommend exactly
-  one human action:
-  - `continue implementation` with a `/rework implementation ...` draft when
+- For `Review verdict: ESCALATED`, inspect that session and emit exactly one
+  `收敛判断`:
+  - `continue implementation` when
     findings are decreasing/local, only new locally repairable families remain,
     or review failed before producing comparable findings.
-  - Design `request changes` with a `/rework design ...` draft only when the
+  - `rework design` only when the
     same family survives a fix without improvement, non-declining family churn
     expands the approach, or a finding contradicts an explicit approved Design
     assumption.
@@ -359,8 +376,8 @@ Spawned and related issues:
   acceptance-critical risk (for example concurrency, multi-process writes,
   persistence completeness, data loss, or deployment topology). If the risk
   invalidates an earlier phase, ask for rework of that phase.
-- Continue implementation only for the bounded ESCALATED case above. It is a
-  human-requested same-phase continuation, never approval.
+- Continue implementation only for the bounded ESCALATED case above. It awaits
+  a human state action and is never approval.
 - Ask clarification when the next action requires human judgment, product
   scope, or risk acceptance rather than agent work and that answer is absent;
   once the answer exists, recommend `In Progress` (clarification-answer

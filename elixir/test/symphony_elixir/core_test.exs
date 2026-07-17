@@ -252,9 +252,9 @@ defmodule SymphonyElixir.CoreTest do
     assert prompt =~ "evidence"
     assert prompt =~ "Maestro OAuth app"
     assert prompt =~ "remove `symphony:maestro`"
-    assert prompt =~ "reviewer recommendation"
-    assert prompt =~ "/rework implementation"
-    assert prompt =~ "/rework design"
+    assert prompt =~ "judgment card"
+    assert prompt =~ "收敛判断"
+    assert prompt =~ "执行状态: awaiting human action"
     assert prompt =~ "Auto-rework ordinary request changes"
     assert prompt =~ "MAESTRO_AUTO_REWORK"
     assert prompt =~ "🤖 auto: 已自动将 issue 置为 Rework"
@@ -327,7 +327,7 @@ defmodule SymphonyElixir.CoreTest do
     refute implementation_skill =~ "target_ordinal"
 
     assert workflow =~ "ESCALATED human gate"
-    assert workflow =~ "every Maestro-authored reply as advisory"
+    assert workflow =~ "Maestro card is advisory and cannot cross the gate"
     assert workflow =~ "Maestro auto-rework"
     assert workflow =~ "🤖 auto: 已自动将 issue 置为 Rework"
 
@@ -340,6 +340,67 @@ defmodule SymphonyElixir.CoreTest do
     assert maestro_workflow =~ "except an `ESCALATED` Implementation review"
     assert maestro_reviewer =~ "current-turn Codex session"
     assert maestro_reviewer =~ "Missing optional reviewer output is an"
+  end
+
+  test "ESCALATED Maestro emits an advisory judgment and routes only an attributable human state action" do
+    workflow = shared_workflow_prompt()
+
+    maestro_workflow =
+      File.read!(Path.expand("../workflows/agavemindlab/MAESTRO_WORKFLOW.md", File.cwd!()))
+
+    maestro_reviewer =
+      File.read!(Path.expand("../.codex/skills/maestro/agents/maestro-reviewer.md", File.cwd!()))
+
+    maestro_skill =
+      File.read!(Path.expand("../.codex/skills/maestro/SKILL.md", File.cwd!()))
+
+    normalized_workflow = String.replace(workflow, ~r/\s+/, " ")
+    normalized_maestro_workflow = String.replace(maestro_workflow, ~r/\s+/, " ")
+
+    for prompt <- [maestro_reviewer, maestro_skill, maestro_workflow] do
+      assert prompt =~ "收敛判断"
+      assert prompt =~ "continue implementation"
+      assert prompt =~ "rework design"
+      assert prompt =~ "ask clarification"
+      assert prompt =~ "建议 target phase"
+      assert prompt =~ "建议 issue status"
+      assert prompt =~ "awaiting human action"
+      assert prompt =~ "判断理由"
+      assert prompt =~ "下一轮建议方向"
+    end
+
+    assert maestro_reviewer =~ "`continue implementation` to Implementation / `In Progress`"
+    assert maestro_reviewer =~ "to Design / `Rework`"
+    assert maestro_reviewer =~ "`ask clarification` to Implementation / `unchanged`"
+
+    for prompt <- [maestro_reviewer, maestro_skill, maestro_workflow] do
+      assert prompt =~ "失效的 Design assumption"
+      assert prompt =~ "建议修改的机制或边界"
+      assert prompt =~ "下一轮 proof / acceptance criteria"
+      assert prompt =~ "不受影响的既有约束"
+    end
+
+    assert maestro_workflow =~ "contains no `/rework"
+    assert normalized_maestro_workflow =~ "Never change the issue state"
+    assert maestro_workflow =~ "ordinary request changes"
+    refute maestro_workflow =~ "/rework implementation"
+    refute maestro_workflow =~ "/rework design"
+    refute maestro_reviewer =~ "/rework implementation"
+    refute maestro_reviewer =~ "/rework design"
+
+    assert workflow =~ "Issue.history"
+    assert workflow =~ "actor.app == false"
+    assert workflow =~ "newest row that produced the current state"
+    assert workflow =~ "has no `botActor`"
+    assert normalized_workflow =~ "matching the current Implementation artifact id and PR Head"
+    assert workflow =~ "human `In Progress` + `continue implementation`"
+    assert workflow =~ "human `Rework` + `rework design`"
+    assert workflow =~ "copy the card's `判断理由` and `下一轮建议方向`"
+    assert normalized_workflow =~ "existing Cross-phase rework protocol"
+    assert workflow =~ "Missing or ambiguous provenance fails closed"
+
+    assert normalized_workflow =~
+             "Never treat a Maestro or integration state write as human approval"
   end
 
   test "cross-phase rollback supersedes stale target-through-awaiting artifacts" do

@@ -35,6 +35,7 @@ defmodule SymphonyElixir.MaestroEval do
           verdict_state: String.t() | nil,
           verdict_at: String.t() | nil,
           verdict_source: String.t() | nil,
+          verdict_phase: String.t() | nil,
           signal_event_id: String.t() | nil,
           agreement: agreement()
         }
@@ -65,7 +66,7 @@ defmodule SymphonyElixir.MaestroEval do
   @spec pairs([map()]) :: [pair()]
   def pairs(events) when is_list(events) do
     events = dedup_events(events)
-    run_starts = run_started_entries(events)
+    run_starts = Analytics.run_started_entries(events)
     signals = signal_candidates(events)
 
     events
@@ -164,22 +165,6 @@ defmodule SymphonyElixir.MaestroEval do
     end
   end
 
-  defp run_started_entries(events) do
-    events
-    |> Enum.filter(&(Map.get(&1, "event_type") == "run_started"))
-    |> Enum.flat_map(&run_started_entry/1)
-  end
-
-  defp run_started_entry(event) do
-    case parse_datetime(Map.get(event, "recorded_at")) do
-      nil ->
-        []
-
-      recorded_at ->
-        [%{issue_id: Map.get(event, "issue_id"), recorded_at: recorded_at, state: Map.get(event, "state")}]
-    end
-  end
-
   defp build_pair(review, run_starts, signals) do
     reviewed_at = parse_datetime(Map.get(review, "occurred_at") || Map.get(review, "recorded_at"))
     verdict = next_run_start(review, reviewed_at, run_starts)
@@ -197,12 +182,13 @@ defmodule SymphonyElixir.MaestroEval do
       verdict_state: verdict_state,
       verdict_at: verdict && DateTime.to_iso8601(verdict.recorded_at),
       verdict_source: verdict_source,
+      verdict_phase: signal && signal.target_phase,
       signal_event_id: signal_event_id,
       agreement: agreement
     }
   end
 
-  @signal_event_types ["phase_approved", "phase_reworked", "phase_rollback"]
+  @signal_event_types ["phase_published", "phase_approved", "phase_reworked", "phase_rollback"]
 
   defp signal_candidates(events) do
     events
@@ -224,17 +210,33 @@ defmodule SymphonyElixir.MaestroEval do
     end)
     |> Enum.min_by(& &1.at, DateTime, fn -> nil end)
     |> case do
-      nil -> nil
-      %{event: event} -> %{verdict: signal_verdict(event), event_id: Map.get(event, "event_id")}
+      nil ->
+        nil
+
+      %{event: event} ->
+        %{verdict: signal_verdict(event), target_phase: signal_phase(event), event_id: Map.get(event, "event_id")}
     end
   end
 
   defp signal_matches?(event, review) do
     case Map.get(event, "event_type") do
-      "phase_approved" -> same_artifact?(event, review)
-      "phase_reworked" -> same_artifact?(event, review) or same_issue_phase?(event, "phase", review)
-      "phase_rollback" -> same_issue_phase?(event, "from_phase", review)
+      "phase_published" ->
+        Map.get(review, "recommendation") in ["continue_implementation", "rework_design"] and same_issue?(event, review)
+
+      "phase_approved" ->
+        same_artifact?(event, review)
+
+      "phase_reworked" ->
+        same_artifact?(event, review) or same_issue_phase?(event, "phase", review)
+
+      "phase_rollback" ->
+        same_issue_phase?(event, "from_phase", review)
     end
+  end
+
+  defp same_issue?(event, review) do
+    issue_id = Map.get(review, "issue_id")
+    not is_nil(issue_id) and Map.get(event, "issue_id") == issue_id
   end
 
   defp same_artifact?(event, review) do
@@ -252,23 +254,38 @@ defmodule SymphonyElixir.MaestroEval do
       Map.get(event, "issue_id") == issue_id and Map.get(event, phase_key) == phase
   end
 
+  defp signal_verdict(%{"event_type" => "phase_published"}), do: :phase_outcome
   defp signal_verdict(%{"event_type" => "phase_approved"}), do: :approved_signal
   defp signal_verdict(_event), do: :rework_signal
 
+  defp signal_phase(%{"event_type" => "phase_rollback"} = event), do: Map.get(event, "target_phase")
+  defp signal_phase(event), do: Map.get(event, "phase")
+
+  defp resolve_verdict(%{"recommendation" => recommendation} = review, signal, verdict_state)
+       when recommendation in ["continue_implementation", "rework_design"] do
+    agreement = Analytics.maestro_verdict(review, verdict_state, signal)
+
+    cond do
+      verdict_state == "Merging" -> {agreement, "dispatch", nil}
+      signal -> {agreement, "thread", signal.event_id}
+      true -> {agreement, nil, nil}
+    end
+  end
+
   defp resolve_verdict(review, signal, verdict_state) do
-    case thread_agreement(Map.get(review, "recommendation"), signal && signal.verdict) do
+    case thread_agreement(Map.get(review, "recommendation"), signal, verdict_state) do
       nil -> dispatch_verdict(review, verdict_state)
       agreement -> {agreement, "thread", signal.event_id}
     end
   end
 
-  defp thread_agreement("approve", :approved_signal), do: :agreed
-  defp thread_agreement("approve", :rework_signal), do: :overridden
-  defp thread_agreement("request_changes", :rework_signal), do: :agreed
-  defp thread_agreement("request_changes", :approved_signal), do: :overridden
-  defp thread_agreement("merge_nudge", :approved_signal), do: :agreed
-  defp thread_agreement("merge_nudge", :rework_signal), do: :overridden
-  defp thread_agreement(_recommendation, _signal_verdict), do: nil
+  defp thread_agreement("approve", %{verdict: :approved_signal}, _state), do: :agreed
+  defp thread_agreement("approve", %{verdict: :rework_signal}, _state), do: :overridden
+  defp thread_agreement("request_changes", %{verdict: :rework_signal}, _state), do: :agreed
+  defp thread_agreement("request_changes", %{verdict: :approved_signal}, _state), do: :overridden
+  defp thread_agreement("merge_nudge", %{verdict: :approved_signal}, _state), do: :agreed
+  defp thread_agreement("merge_nudge", %{verdict: :rework_signal}, _state), do: :overridden
+  defp thread_agreement(_recommendation, _signal, _state), do: nil
 
   defp dispatch_verdict(review, verdict_state) do
     case Analytics.maestro_verdict(review, verdict_state) do

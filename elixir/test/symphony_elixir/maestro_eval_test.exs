@@ -44,6 +44,7 @@ defmodule SymphonyElixir.MaestroEvalTest do
              verdict_state: "In Progress",
              verdict_at: "2026-06-15T11:00:00Z",
              verdict_source: "dispatch",
+             verdict_phase: nil,
              signal_event_id: nil,
              agreement: :agreed
            }
@@ -65,6 +66,12 @@ defmodule SymphonyElixir.MaestroEvalTest do
         "issue_identifier" => "DEV-13",
         "recommendation" => "request_changes",
         "artifact_comment_id" => "a3"
+      }),
+      phase_event("phase_published", %{
+        "event_id" => "published-before-rework-i3",
+        "issue_id" => "i3",
+        "phase" => "Implementation",
+        "occurred_at" => "2026-06-15T10:15:00Z"
       }),
       # Different artifact, but the review phase of the same issue: still a rework signal.
       phase_event("phase_reworked", %{"event_id" => "rework-i3", "issue_id" => "i3", "artifact_comment_id" => "a3-other"}),
@@ -116,6 +123,76 @@ defmodule SymphonyElixir.MaestroEvalTest do
     assert [nudge_agreed, nudge_overridden] = MaestroEval.pairs(events)
     assert %{agreement: :agreed, verdict_source: "thread", signal_event_id: "close-a1"} = nudge_agreed
     assert %{agreement: :overridden, verdict_source: "thread", signal_event_id: "rollback-i2"} = nudge_overridden
+  end
+
+  test "pairs scores ESCALATED decisions by routed phase and skips Maestro Human Review dispatches" do
+    events = [
+      review_event(%{
+        "event_id" => "continue",
+        "issue_id" => "i1",
+        "phase" => "Implementation",
+        "recommendation" => "continue_implementation"
+      }),
+      run_started_event(%{"issue_id" => "i1", "state" => "Human Review", "recorded_at" => "2026-06-15T10:05:00Z"}),
+      run_started_event(%{"issue_id" => "i1", "state" => "In Progress", "recorded_at" => "2026-06-15T10:10:00Z"}),
+      phase_event("phase_published", %{
+        "event_id" => "implementation-round",
+        "issue_id" => "i1",
+        "phase" => "Implementation",
+        "occurred_at" => "2026-06-15T10:15:00Z"
+      }),
+      review_event(%{
+        "event_id" => "design",
+        "issue_id" => "i2",
+        "phase" => "Implementation",
+        "recommendation" => "rework_design"
+      }),
+      run_started_event(%{"issue_id" => "i2", "state" => "Rework", "recorded_at" => "2026-06-15T10:10:00Z"}),
+      %{
+        "event_type" => "phase_rollback",
+        "event_id" => "design-rollback",
+        "issue_id" => "i2",
+        "from_phase" => "Implementation",
+        "target_phase" => "Design",
+        "occurred_at" => "2026-06-15T10:15:00Z"
+      },
+      review_event(%{
+        "event_id" => "merging",
+        "issue_id" => "i3",
+        "phase" => "Implementation",
+        "recommendation" => "continue_implementation"
+      }),
+      run_started_event(%{"issue_id" => "i3", "state" => "Merging", "recorded_at" => "2026-06-15T10:10:00Z"}),
+      review_event(%{
+        "event_id" => "pending",
+        "issue_id" => "i4",
+        "phase" => "Implementation",
+        "recommendation" => "continue_implementation"
+      })
+    ]
+
+    assert [continued, redesigned, merging, pending] = MaestroEval.pairs(events)
+
+    assert %{
+             agreement: :agreed,
+             verdict_state: "In Progress",
+             verdict_source: "thread",
+             verdict_phase: "Implementation",
+             signal_event_id: "implementation-round"
+           } = continued
+
+    assert %{
+             agreement: :agreed,
+             verdict_state: "Rework",
+             verdict_source: "thread",
+             verdict_phase: "Design",
+             signal_event_id: "design-rollback"
+           } = redesigned
+
+    assert %{agreement: :overridden, verdict_state: "Merging", verdict_source: "dispatch", signal_event_id: nil} =
+             merging
+
+    assert %{agreement: :pending, verdict_state: nil, verdict_source: nil, signal_event_id: nil} = pending
   end
 
   test "thread signals take precedence over the dispatch join" do
@@ -293,6 +370,7 @@ defmodule SymphonyElixir.MaestroEvalTest do
                "verdict_state" => "In Progress",
                "verdict_at" => "2026-06-15T11:00:00Z",
                "verdict_source" => "dispatch",
+               "verdict_phase" => nil,
                "signal_event_id" => nil,
                "agreement" => "agreed"
              },

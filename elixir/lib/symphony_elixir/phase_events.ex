@@ -18,6 +18,8 @@ defmodule SymphonyElixir.PhaseEvents do
   @needs_clarification_regex ~r/(?:\A|\n)\s*###\s+NEEDS CLARIFICATION\b|\[NEEDS CLARIFICATION/iu
 
   @recommendation_markers [
+    {"continue implementation", "continue_implementation"},
+    {"rework design", "rework_design"},
     {"request changes", "request_changes"},
     {"clarification", "ask_clarification"},
     {"merge nudge", "merge_nudge"},
@@ -211,17 +213,39 @@ defmodule SymphonyElixir.PhaseEvents do
   end
 
   defp maestro_review_event(comment, phase) do
-    %{
-      event_type: "maestro_review",
-      event_id: "maestro_review:" <> comment.id,
-      phase: phase,
-      artifact_comment_id: comment.parent_id,
-      recommendation: maestro_recommendation(comment.body),
-      confidence: maestro_confidence(comment.body),
-      auto: String.contains?(comment.body, "🤖 auto"),
-      comment_id: comment.id,
-      occurred_at: occurred_at(comment.created_at)
-    }
+    Map.merge(
+      %{
+        event_type: "maestro_review",
+        event_id: "maestro_review:" <> comment.id,
+        phase: phase,
+        artifact_comment_id: comment.parent_id,
+        recommendation: maestro_recommendation(comment.body),
+        confidence: maestro_confidence(comment.body),
+        auto: String.contains?(comment.body, "🤖 auto"),
+        comment_id: comment.id,
+        occurred_at: occurred_at(comment.created_at)
+      },
+      maestro_judgment_fields(comment.body)
+    )
+  end
+
+  defp maestro_judgment_fields(body) do
+    if String.contains?(body, "收敛判断") do
+      %{
+        target_phase: labeled_value(body, "建议\\s+target\\s+phase", "Requirements|Design|Implementation|Deployment"),
+        target_status: labeled_value(body, "建议\\s+issue\\s+status", "In Progress|Rework|unchanged"),
+        execution_state: if(String.contains?(String.downcase(body), "awaiting human action"), do: "awaiting_human_action")
+      }
+    else
+      %{}
+    end
+  end
+
+  defp labeled_value(body, label, values) do
+    case Regex.run(Regex.compile!("#{label}[^\\n:：]*[:：]\\s*[*_`]*(#{values})", "iu"), body, capture: :all_but_first) do
+      [value] -> value
+      nil -> nil
+    end
   end
 
   defp maestro_recommendation(body) do
@@ -231,7 +255,7 @@ defmodule SymphonyElixir.PhaseEvents do
   end
 
   defp recommendation_from_line(line) do
-    if String.contains?(line, "建议回复方式") do
+    if String.contains?(line, "建议回复方式") or String.contains?(line, "收敛判断") do
       line |> String.downcase() |> String.replace(~r/[_\/-]/u, " ") |> match_recommendation()
     end
   end

@@ -123,8 +123,9 @@ Maestro OAuth app identity.
 
 ## Apply The Recommendation
 
-Every reply starts with `🤖 Maestro 预审核:`, includes `建议回复方式` and (when
-available) `置信度：<N>/10`, and records the reviewed artifact id and Head.
+Every reply starts with `🤖 Maestro 预审核:`, records the reviewed artifact id
+and Head, and includes `置信度：<N>/10` when available. Ordinary replies include
+`建议回复方式`; ESCALATED replies use the judgment card below instead.
 
 ### Auto-rework ordinary request changes
 
@@ -136,11 +137,16 @@ available) `置信度：<N>/10`, and records the reviewed artifact id and Head.
   Implementation, and Deployment review, except an `ESCALATED` Implementation review.
   With auto-rework disabled, leave the issue in `Human Review` and remove the
   label.
-- For `Review verdict: ESCALATED`, require the reviewer recommendation to cite
-  decisive Codex-session events and draft either `/rework implementation ...`,
-  `/rework design ...`, or a human clarification. Never auto-rework it: leave
-  the issue in `Human Review`, remove `symphony:maestro`, and wait for a newer
-  human action.
+- For `Review verdict: ESCALATED`, post a reviewable advisory card with
+  `收敛判断` (`continue implementation`, `rework design`, or
+  `ask clarification`), `建议 target phase`, `建议 issue status`,
+  `执行状态: awaiting human action`, evidence-based `判断理由`, and `下一轮建议方向`.
+  `rework design` also requires `失效的 Design assumption`,
+  `建议修改的机制或边界`, `下一轮 proof / acceptance criteria`, and
+  `不受影响的既有约束`. The card contains no `/rework ...` draft,
+  `建议回复方式: request changes`, or auto-Rework marker. Never change the issue
+  state for this branch: leave it in `Human Review`, remove
+  `symphony:maestro`, and wait for a newer human action.
 - For every other recommendation, reply in the reviewer-selected artifact
   thread, leave the issue in `Human Review`, then remove `symphony:maestro`. A
   merge nudge may mention untidy commits, but must not rewrite history or

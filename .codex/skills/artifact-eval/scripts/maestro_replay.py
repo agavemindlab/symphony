@@ -31,6 +31,7 @@ DEFAULT_CODEX_CMD = (
     "codex exec --sandbox workspace-write "
     "-c sandbox_workspace_write.network_access=true --skip-git-repo-check"
 )
+HERMETIC_CODEX_CMD = "codex exec --sandbox read-only --skip-git-repo-check"
 DEFAULT_OUTPUT_DIR = "eval/reviews/replay"
 DEFAULT_LABELS = "approve,request_changes"
 DEFAULT_CONCURRENCY = 2
@@ -40,7 +41,9 @@ SCOREABLE_LABELS = {"approve": "approve", "request_changes": "request changes"}
 # Longest markers first so "request changes" is not shadowed by a bare "approve".
 RECOMMENDATIONS = (
     "completion confirmation",
+    "continue implementation",
     "ask clarification",
+    "rework design",
     "request changes",
     "merge nudge",
     "no reply yet",
@@ -51,10 +54,13 @@ RECOMMENDATION_LINE_RE = re.compile(r"recommendation\s*[:：]\s*(.+)", re.IGNORE
 CONFIDENCE_LINE_RE = re.compile(r"confidence\s*[:：]\s*(\d+(?:\.\d+)?)", re.IGNORECASE)
 DEFAULT_ROUTING_OUTPUT_DIR = "eval/routing/replay"
 PHASES = ("Requirements", "Design", "Implementation", "Deployment")
+ROUTING_TARGETS = (*PHASES, "Human Review")
 WORKFLOW_RELPATH = Path("workflows/agavemindlab/WORKFLOW.md")
 ROUTING_EXCERPT_START = "## Phase Map"
 ROUTING_EXCERPT_END = "## Skill Interaction Protocol"
 TARGET_PHASE_LINE_RE = re.compile(r"target[ _]?phase\s*[:：]\s*(.+)", re.IGNORECASE)
+CONSUMED_DECISION_LINE_RE = re.compile(r"consumed[ _]?decision\s*[:：]\s*(.+)", re.IGNORECASE)
+CONSUMED_CONTEXT_LINE_RE = re.compile(r"consumed[ _]?context\s*[:：]\s*(.+)", re.IGNORECASE)
 
 
 class ReplayError(RuntimeError):
@@ -81,7 +87,7 @@ def read_jsonl(path: Path) -> list[dict]:
 
 def case_id(case: dict) -> str:
     """Review cases are keyed by artifact, routing cases by their publish event."""
-    return str(case.get("artifact_comment_id") or case.get("published_event_id") or "")
+    return str(case.get("artifact_comment_id") or case.get("published_event_id") or case.get("issue_identifier") or "")
 
 
 def select_cases(
@@ -91,9 +97,10 @@ def select_cases(
     phase: str | None = None,
     sample: int | None = None,
     phase_field: str = "phase",
+    include_frozen: bool = False,
 ) -> list[dict]:
     """Deterministic selection: filter, then stable-sort by case id, then head."""
-    selected = [case for case in cases if labels is None or case.get("label") in labels]
+    selected = [case for case in cases if labels is None or case.get("label") in labels or include_frozen and "case_context" in case]
     if phase:
         selected = [case for case in selected if case.get(phase_field) == phase]
     selected = sorted(selected, key=case_id)
@@ -106,6 +113,18 @@ def compose_prompt(reviewer_prompt: str, case: dict) -> str:
     issue = case.get("issue_identifier") or "unknown"
     artifact = case.get("artifact_comment_id") or "unknown"
     published_at = case.get("published_at") or "unknown"
+    context = frozen_context_json(case)
+    if context is not None:
+        preamble = (
+            f"冻结回放评审 {issue} 的 artifact {artifact}（发布于 {published_at}）。"
+            "以下 case_context 是唯一可用事实；不得读取当前 Linear 或 GitHub，"
+            "不得调用 linear / gh 或任何网络工具，不得写入任何东西。"
+            "先按 reviewer prompt 输出完整判断卡，再以两行审计 contract 结束：\n"
+            f"case_context:\n```json\n{context}\n```\n"
+            "`RECOMMENDATION: <continue implementation|rework design|ask clarification>`\n"
+            "`CONSUMED_CONTEXT: <逗号分隔的原样 marker；没有则 none>`"
+        )
+        return reviewer_prompt.rstrip() + "\n\n" + preamble + "\n"
     preamble = (
         f"回放评审 {issue} 的 artifact {artifact}（发布于 {published_at}）。"
         f"时间旅行纪律：只考虑 createdAt <= {published_at} 的 Linear 评论与当时已存在的 PR 状态；"
@@ -114,8 +133,8 @@ def compose_prompt(reviewer_prompt: str, case: dict) -> str:
         "那里可能包含事后信息；只允许 linear / gh 只读工具与 Linear/GitHub 内容本身。"
         "最后两行输出且仅输出："
         "`CONFIDENCE: <0-10>`（你的置信分）与 "
-        "`RECOMMENDATION: <approve|request changes|ask clarification|merge nudge|"
-        "completion confirmation|no reply yet>`"
+        "`RECOMMENDATION: <approve|request changes|continue implementation|rework design|"
+        "ask clarification|merge nudge|completion confirmation|no reply yet>`"
     )
     return reviewer_prompt.rstrip() + "\n\n" + preamble + "\n"
 
@@ -135,6 +154,20 @@ def compose_routing_prompt(workflow_excerpt: str, case: dict) -> str:
     issue = case.get("issue_identifier") or "unknown"
     dispatch_at = case.get("dispatch_at") or "unknown"
     state = case.get("state") or "unknown"
+    context = frozen_context_json(case)
+    if context is not None:
+        preamble = (
+            f"回放路由决策：issue {issue} 在 {dispatch_at} 以状态 {state} 被派发。"
+            "以下冻结的 case_context 是唯一可用事实；不得读取当前 Linear 或 GitHub，"
+            "不得调用 linear / gh 或任何网络工具，不得写入任何东西。"
+            "只做步骤 3-5 的路由判断，不执行任何阶段工作。\n"
+            f"case_context:\n```json\n{context}\n```\n"
+            "最后三行输出且仅输出：\n"
+            "`TARGET_PHASE: <Requirements|Design|Implementation|Deployment|Human Review>`\n"
+            "`CONSUMED_DECISION: <continue_implementation|rework_design|ask_clarification|none>`\n"
+            "`CONSUMED_CONTEXT: <逗号分隔的原样 marker；没有则 none>`"
+        )
+        return workflow_excerpt.rstrip() + "\n\n" + preamble + "\n"
     preamble = (
         f"回放路由决策：issue {issue} 在 {dispatch_at} 以状态 {state} 被派发。"
         f"时间旅行纪律：只考虑 createdAt <= {dispatch_at} 的 Linear 评论。"
@@ -146,6 +179,10 @@ def compose_routing_prompt(workflow_excerpt: str, case: dict) -> str:
     return workflow_excerpt.rstrip() + "\n\n" + preamble + "\n"
 
 
+def frozen_context_json(case: dict) -> str | None:
+    return json.dumps(case["case_context"], ensure_ascii=False, indent=2, sort_keys=True) if "case_context" in case else None
+
+
 def parse_target_phase(output: str) -> str:
     """Parse the LAST `TARGET_PHASE:` line, tolerating markdown decoration."""
     for line in reversed(output.splitlines()):
@@ -153,11 +190,63 @@ def parse_target_phase(output: str) -> str:
         if not match:
             continue
         value = match.group(1).lower()
-        for phase in PHASES:
+        for phase in ROUTING_TARGETS:
             if phase.lower() in value:
                 return phase
         return "unparsed"
     return "unparsed"
+
+
+def parse_consumed_decision(output: str) -> str:
+    """Parse and normalize the last frozen-routing decision marker."""
+    for line in reversed(output.splitlines()):
+        match = CONSUMED_DECISION_LINE_RE.search(line)
+        if not match:
+            continue
+        normalized = re.sub(r"[_/-]", " ", match.group(1).lower())
+        normalized = " ".join(re.sub(r"[^a-z ]", " ", normalized).split())
+        for decision in ("continue implementation", "ask clarification", "rework design", "none"):
+            if decision in normalized:
+                return decision.replace(" ", "_")
+        return "unparsed"
+    return "unparsed"
+
+
+def parse_marker_list(output: str, pattern: re.Pattern) -> list[str]:
+    for line in reversed(output.splitlines()):
+        match = pattern.search(line)
+        if not match:
+            continue
+        value = match.group(1).strip().strip("`*_ ")
+        if value.lower() == "none":
+            return []
+        return [normalize_marker(marker) for marker in value.split(",") if marker.strip().strip("`*_ ")]
+    return []
+
+
+def normalize_marker(marker: str) -> str:
+    marker = marker.strip().strip("`*_ ")
+    return marker.split(":", 1)[1].strip() if ":" in marker else marker
+
+
+def parse_consumed_context(output: str) -> list[str]:
+    """Parse exact comma-separated context markers from the last contract line."""
+    return parse_marker_list(output, CONSUMED_CONTEXT_LINE_RE)
+
+
+def parse_reviewer_prediction(output: str) -> dict:
+    return {
+        "prediction": parse_recommendation(output),
+        "consumed_context": parse_consumed_context(output),
+    }
+
+
+def parse_routing_prediction(output: str) -> dict:
+    return {
+        "prediction": parse_target_phase(output),
+        "consumed_decision": parse_consumed_decision(output),
+        "consumed_context": parse_consumed_context(output),
+    }
 
 
 def parse_confidence(output: str):
@@ -220,14 +309,16 @@ def run_case(case: dict, *, codex_argv: list[str], prompt: str, timeout_s: float
             cwd=_replay_workdir(),
         )
         output = completed.stdout + ("\n" + completed.stderr if completed.stderr else "")
-        prediction = parse_prediction(output)
+        parsed = parse_prediction(output)
     except subprocess.TimeoutExpired as exc:
         output = _as_text(exc.stdout) + _as_text(exc.stderr)
-        prediction = "timeout"
+        parsed = "timeout"
     duration_s = round(time.monotonic() - started, 1)
+    prediction = parsed if isinstance(parsed, dict) else {"prediction": parsed}
+    prediction["observed_output_markers"] = [marker for marker in case.get("required_output_markers") or [] if marker in output]
     return {
         **case,
-        "prediction": prediction,
+        **prediction,
         "confidence": parse_confidence(output),
         "raw_tail": output[-RAW_TAIL_CHARS:],
         "duration_s": duration_s,
@@ -260,13 +351,12 @@ def execute_replay(cases: list[dict], *, args: argparse.Namespace, prompt_fn, pa
     todo = [case for case in cases if case_id(case) not in done]
     skipped = len(cases) - len(todo)
 
-    codex_argv = shlex.split(args.codex_cmd)
     write_lock = threading.Lock()
 
     def run_and_record(case: dict) -> str:
         prediction = run_case(
             case,
-            codex_argv=codex_argv,
+            codex_argv=codex_argv_for_case(args.codex_cmd, case),
             prompt=prompt_fn(case),
             timeout_s=args.timeout,
             parse_prediction=parse_prediction,
@@ -287,6 +377,12 @@ def execute_replay(cases: list[dict], *, args: argparse.Namespace, prompt_fn, pa
     return 0
 
 
+def codex_argv_for_case(codex_cmd: str, case: dict) -> list[str]:
+    """Frozen cases use Codex's read-only, network-disabled sandbox by default."""
+    command = HERMETIC_CODEX_CMD if "case_context" in case and codex_cmd == DEFAULT_CODEX_CMD else codex_cmd
+    return shlex.split(command)
+
+
 def replay(args: argparse.Namespace) -> int:
     reviewer_prompt_path = Path(args.reviewer_prompt) if args.reviewer_prompt else default_reviewer_prompt_path()
     if not reviewer_prompt_path.is_file():
@@ -294,12 +390,12 @@ def replay(args: argparse.Namespace) -> int:
     reviewer_prompt = reviewer_prompt_path.read_text()
 
     labels = {label.strip() for label in args.labels.split(",") if label.strip()}
-    cases = select_cases(read_jsonl(Path(args.cases)), labels=labels, phase=args.phase, sample=args.sample)
+    cases = select_cases(read_jsonl(Path(args.cases)), labels=labels, phase=args.phase, sample=args.sample, include_frozen=True)
     return execute_replay(
         cases,
         args=args,
         prompt_fn=lambda case: compose_prompt(reviewer_prompt, case),
-        parse_prediction=parse_recommendation,
+        parse_prediction=parse_reviewer_prediction,
     )
 
 
@@ -314,7 +410,7 @@ def routing_replay(args: argparse.Namespace) -> int:
         cases,
         args=args,
         prompt_fn=lambda case: compose_routing_prompt(excerpt, case),
-        parse_prediction=parse_target_phase,
+        parse_prediction=parse_routing_prediction,
     )
 
 
@@ -337,6 +433,8 @@ def finish_stats(stats: dict) -> dict:
 
 
 def review_expected(case: dict) -> str | None:
+    if case.get("expected_decision"):
+        return str(case["expected_decision"]).replace("_", " ")
     label = case.get("label")
     return SCOREABLE_LABELS.get(label) if isinstance(label, str) else None
 
@@ -348,6 +446,7 @@ def score_predictions(
     expected_fn=review_expected,
     label_fn=lambda case: case.get("label"),
     phase_fn=lambda case: case.get("phase") or "unknown",
+    agreement_fn=None,
 ) -> dict:
     """Pure scoring: agreement overall/by-phase/by-label, confusion, disagreements.
 
@@ -378,7 +477,7 @@ def score_predictions(
         label = label_fn(case)
         phase = phase_fn(case)
         predicted = prediction.get("prediction") or "unparsed"
-        agreed = predicted == expected
+        agreed = agreement_fn(case, prediction) if agreement_fn else predicted == expected and required_markers_agreed(case, prediction)
 
         for stats in (
             overall,
@@ -407,6 +506,25 @@ def score_predictions(
         "disagreements": disagreements,
         "excluded": excluded,
     }
+
+
+def routing_agreed(case: dict, prediction: dict) -> bool:
+    """Frozen routes require the target, decision, and every context marker."""
+    if prediction.get("prediction") != case.get("expected_phase"):
+        return False
+    expected_decision = case.get("expected_decision")
+    if expected_decision and prediction.get("consumed_decision") != expected_decision:
+        return False
+    return required_markers_agreed(case, prediction)
+
+
+def required_markers_agreed(case: dict, prediction: dict) -> bool:
+    output = set(prediction.get("observed_output_markers") or [])
+    consumed = {normalize_marker(marker) for marker in prediction.get("consumed_context") or []}
+    return (
+        all(marker in output for marker in case.get("required_output_markers") or [])
+        and all(marker in consumed for marker in case.get("required_context_markers") or [])
+    )
 
 
 def format_rate(rate: float | None) -> str:
@@ -489,6 +607,7 @@ def score(args: argparse.Namespace) -> int:
             "expected_fn": lambda case: case.get("expected_phase"),
             "label_fn": lambda case: case.get("state") or "unknown",
             "phase_fn": lambda case: case.get("expected_phase") or "unknown",
+            "agreement_fn": routing_agreed,
         }
         title = "# Routing Replay Report"
     else:
