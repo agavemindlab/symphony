@@ -227,6 +227,7 @@ defmodule SymphonyElixir.AppServerTest do
       SYMPHONY_PROJECT_SLUG="grotto-slug"
       SYMPHONY_REPO="grotto"
       SYMPHONY_BASE_BRANCH="main"
+      PROJECT_RUNTIME_VALUE="from-selected-project"
       """)
 
       File.write!(Path.join(workflow_dir, "project-for-linear-project.sh"), """
@@ -249,6 +250,7 @@ defmodule SymphonyElixir.AppServerTest do
         printf 'SYMPHONY_BASE_BRANCH=%s\\n' "${SYMPHONY_BASE_BRANCH:-}"
         printf 'SYMPHONY_PROJECT_DIR=%s\\n' "${SYMPHONY_PROJECT_DIR:-}"
         printf 'SYMPHONY_LINEAR_PROJECT_SLUG=%s\\n' "${SYMPHONY_LINEAR_PROJECT_SLUG:-}"
+        printf 'PROJECT_RUNTIME_VALUE=%s\\n' "${PROJECT_RUNTIME_VALUE:-}"
       } > "$trace_file"
 
       count=0
@@ -292,6 +294,95 @@ defmodule SymphonyElixir.AppServerTest do
                SYMPHONY_BASE_BRANCH=main
                SYMPHONY_PROJECT_DIR=#{project_dir}
                SYMPHONY_LINEAR_PROJECT_SLUG=grotto-slug
+               PROJECT_RUNTIME_VALUE=from-selected-project
+               """
+    after
+      Workflow.set_workflow_file_path(original_workflow_path)
+      File.rm_rf(test_root)
+    end
+  end
+
+  test "app server clears stale project env when resolved env omits it" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-app-server-clear-project-env-#{System.unique_integer([:positive])}"
+      )
+
+    original_workflow_path = Workflow.workflow_file_path()
+
+    try do
+      workflow_file = Path.join(test_root, "WORKFLOW.md")
+      workspace_root = Path.join(test_root, "workspaces")
+      workspace = Path.join(workspace_root, "MT-CLEAR-PROJECT-ENV")
+      codex_binary = Path.join(test_root, "fake-codex")
+      trace_file = Path.join(test_root, "codex-clear-project-env.trace")
+      previous_trace = System.get_env("SYMP_TEST_CODEx_TRACE")
+      previous_project_slug = System.get_env("SYMPHONY_PROJECT_SLUG")
+      previous_repo = System.get_env("SYMPHONY_REPO")
+      previous_base_branch = System.get_env("SYMPHONY_BASE_BRANCH")
+
+      on_exit(fn ->
+        restore_env("SYMP_TEST_CODEx_TRACE", previous_trace)
+        restore_env("SYMPHONY_PROJECT_SLUG", previous_project_slug)
+        restore_env("SYMPHONY_REPO", previous_repo)
+        restore_env("SYMPHONY_BASE_BRANCH", previous_base_branch)
+      end)
+
+      File.mkdir_p!(workspace)
+      File.write!(workflow_file, "# workflow\n")
+
+      File.write!(codex_binary, """
+      #!/bin/sh
+      trace_file="${SYMP_TEST_CODEx_TRACE:-/tmp/codex-clear-project-env.trace}"
+      {
+        printf 'SYMPHONY_PROJECT_SLUG=%s\\n' "${SYMPHONY_PROJECT_SLUG:-}"
+        printf 'SYMPHONY_REPO=%s\\n' "${SYMPHONY_REPO:-}"
+        printf 'SYMPHONY_BASE_BRANCH=%s\\n' "${SYMPHONY_BASE_BRANCH:-}"
+        printf 'SYMPHONY_LINEAR_PROJECT_SLUG=%s\\n' "${SYMPHONY_LINEAR_PROJECT_SLUG:-}"
+      } > "$trace_file"
+
+      count=0
+      while IFS= read -r line; do
+        count=$((count + 1))
+        case "$count" in
+          1) printf '%s\\n' '{"id":1,"result":{}}' ;;
+          2) printf '%s\\n' '{"id":2,"result":{"thread":{"id":"thread-clear-project-env"}}}' ;;
+          3) printf '%s\\n' '{"id":3,"result":{"turn":{"id":"turn-clear-project-env"}}}' ;;
+          4) printf '%s\\n' '{"method":"turn/completed"}'; exit 0 ;;
+          *) exit 0 ;;
+        esac
+      done
+      """)
+
+      File.chmod!(codex_binary, 0o755)
+      System.put_env("SYMP_TEST_CODEx_TRACE", trace_file)
+      System.put_env("SYMPHONY_PROJECT_SLUG", "old-project")
+      System.put_env("SYMPHONY_REPO", "old-repo")
+      System.put_env("SYMPHONY_BASE_BRANCH", "old-main")
+      Workflow.set_workflow_file_path(workflow_file)
+
+      write_workflow_file!(Workflow.workflow_file_path(),
+        workspace_root: workspace_root,
+        codex_command: "#{codex_binary} app-server"
+      )
+
+      issue = %Issue{
+        id: "issue-clear-project-env",
+        identifier: "MT-CLEAR-PROJECT-ENV",
+        title: "Clear project env",
+        state: "In Progress",
+        project: %{id: "project-id", slug_id: "new-project", name: "New Project"}
+      }
+
+      assert {:ok, _result} = AppServer.run(workspace, "Validate cleared project env", issue)
+
+      assert File.read!(trace_file) ==
+               """
+               SYMPHONY_PROJECT_SLUG=
+               SYMPHONY_REPO=
+               SYMPHONY_BASE_BRANCH=
+               SYMPHONY_LINEAR_PROJECT_SLUG=new-project
                """
     after
       Workflow.set_workflow_file_path(original_workflow_path)

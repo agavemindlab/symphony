@@ -54,6 +54,8 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
 
     assert first_workspace == second_workspace
     assert Path.basename(first_workspace) == "MT_Det"
+    assert {:ok, reserved_workspace} = Workspace.create_for_issue("..")
+    assert Path.basename(reserved_workspace) == "issue"
   end
 
   test "workspace reuses existing issue directory without deleting local changes" do
@@ -89,6 +91,775 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       assert File.read!(Path.join([second_workspace, "tmp", "scratch.txt"])) == "remove me\n"
     after
       File.rm_rf(workspace_root)
+    end
+  end
+
+  test "workspace identity marker match reuses directory without rerunning after_create" do
+    workspace_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-workspace-identity-match-#{System.unique_integer([:positive])}"
+      )
+
+    with_project_env("project-slug", "symphony", fn ->
+      try do
+        after_create_counter = Path.join(workspace_root, "after-create.count")
+
+        write_workflow_file!(Workflow.workflow_file_path(),
+          workspace_root: workspace_root,
+          hook_after_create: "echo call >> #{after_create_counter}\necho current > repo.txt"
+        )
+
+        issue = %Issue{
+          id: "issue-identity-match",
+          identifier: "MT-IDENTITY-MATCH",
+          title: "Identity match",
+          state: "In Progress",
+          project: %{id: "project-id", slug_id: "project-slug", name: "Project Name"}
+        }
+
+        assert {:ok, first_workspace} = Workspace.create_for_issue(issue)
+        assert {:ok, second_workspace} = Workspace.create_for_issue(issue)
+
+        assert second_workspace == first_workspace
+        assert File.read!(after_create_counter) == "call\n"
+        assert {:ok, project_env} = Workflow.resolve_project_env(issue)
+        assert :ok = Workspace.validate_identity(first_workspace, issue, project_env)
+
+        changed_project_env = put_in(project_env, [:env, "SYMPHONY_REPO"], "grotto")
+
+        assert {:error, {:workspace_identity_changed, {:quarantine, :marker_mismatch}}} =
+                 Workspace.validate_identity(first_workspace, issue, changed_project_env)
+
+        assert workspace_identity_marker(first_workspace) == %{
+                 "version" => 1,
+                 "linear_project_id" => "project-id",
+                 "linear_project_slug_id" => "project-slug",
+                 "linear_project_name" => "Project Name",
+                 "workflow_dir" => Path.dirname(Workflow.workflow_file_path()),
+                 "workflow_file" => Workflow.workflow_file_path(),
+                 "symphony_project_slug" => "project-slug",
+                 "symphony_repo" => "symphony"
+               }
+      after
+        File.rm_rf(workspace_root)
+      end
+    end)
+  end
+
+  test "workspace identity marker mismatch quarantines stale directory before after_create" do
+    workspace_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-workspace-identity-mismatch-#{System.unique_integer([:positive])}"
+      )
+
+    with_project_env("symphony-slug", "symphony", fn ->
+      try do
+        workspace = Path.join(workspace_root, "MT-IDENTITY-MISMATCH")
+        after_create_counter = Path.join(workspace_root, "after-create.count")
+
+        write_workflow_file!(Workflow.workflow_file_path(),
+          workspace_root: workspace_root,
+          hook_after_create: "echo call >> #{after_create_counter}\necho new > repo.txt"
+        )
+
+        File.mkdir_p!(workspace)
+        File.write!(Path.join(workspace, "repo.txt"), "old\n")
+        assert {:ok, canonical_workspace} = SymphonyElixir.PathSafety.canonicalize(workspace)
+
+        write_workspace_identity_marker!(workspace, %{
+          "version" => 1,
+          "linear_project_id" => "old-project-id",
+          "linear_project_slug_id" => "grotto-slug",
+          "linear_project_name" => "Grotto",
+          "workflow_dir" => Path.dirname(Workflow.workflow_file_path()),
+          "workflow_file" => Workflow.workflow_file_path(),
+          "symphony_project_slug" => "grotto-slug",
+          "symphony_repo" => "grotto"
+        })
+
+        issue = %Issue{
+          id: "issue-identity-mismatch",
+          identifier: "MT-IDENTITY-MISMATCH",
+          title: "Identity mismatch",
+          state: "In Progress",
+          project: %{id: "new-project-id", slug_id: "symphony-slug", name: "Symphony"}
+        }
+
+        assert {:ok, ^canonical_workspace} = Workspace.create_for_issue(issue)
+
+        [quarantine] = Path.wildcard(Path.join(workspace_root, "MT-IDENTITY-MISMATCH.quarantine.*"))
+        assert File.read!(Path.join(quarantine, "repo.txt")) == "old\n"
+        assert File.read!(Path.join(workspace, "repo.txt")) == "new\n"
+        assert File.read!(after_create_counter) == "call\n"
+        assert workspace_identity_marker(workspace)["symphony_repo"] == "symphony"
+      after
+        File.rm_rf(workspace_root)
+      end
+    end)
+  end
+
+  test "malformed workspace identity marker quarantines stale directory" do
+    workspace_root =
+      Path.join(System.tmp_dir!(), "symphony-elixir-workspace-identity-malformed-#{System.unique_integer([:positive])}")
+
+    with_project_env("symphony-slug", "symphony", fn ->
+      try do
+        workspace = Path.join(workspace_root, "MT-IDENTITY-MALFORMED")
+        marker = Path.join(workspace, ".symphony/workspace-identity.json")
+
+        write_workflow_file!(Workflow.workflow_file_path(),
+          workspace_root: workspace_root,
+          hook_after_create: "echo new > repo.txt"
+        )
+
+        File.mkdir_p!(Path.dirname(marker))
+        File.write!(Path.join(workspace, "repo.txt"), "old\n")
+        File.write!(marker, "{partial")
+
+        issue = %Issue{
+          id: "issue-identity-malformed",
+          identifier: "MT-IDENTITY-MALFORMED",
+          title: "Malformed identity",
+          state: "In Progress",
+          project: %{id: "project-id", slug_id: "symphony-slug", name: "Symphony"}
+        }
+
+        assert {:ok, _workspace} = Workspace.create_for_issue(issue)
+        [quarantine] = Path.wildcard(Path.join(workspace_root, "MT-IDENTITY-MALFORMED.quarantine.*"))
+        assert File.read!(Path.join(quarantine, "repo.txt")) == "old\n"
+        assert File.read!(Path.join(workspace, "repo.txt")) == "new\n"
+        assert workspace_identity_marker(workspace)["symphony_repo"] == "symphony"
+
+        oversized = Path.join(workspace_root, "MT-IDENTITY-OVERSIZED")
+        oversized_marker = Path.join(oversized, ".symphony/workspace-identity.json")
+        File.mkdir_p!(Path.dirname(oversized_marker))
+        File.write!(oversized_marker, String.duplicate("x", 65_537))
+
+        oversized_issue = %{
+          issue
+          | id: "issue-identity-oversized",
+            identifier: "MT-IDENTITY-OVERSIZED",
+            title: "Oversized identity"
+        }
+
+        assert {:ok, _workspace} = Workspace.create_for_issue(oversized_issue)
+        assert [_quarantine] = Path.wildcard(Path.join(workspace_root, "MT-IDENTITY-OVERSIZED.quarantine.*"))
+        assert workspace_identity_marker(oversized)["symphony_repo"] == "symphony"
+
+        fifo = Path.join(workspace_root, "MT-IDENTITY-FIFO")
+        fifo_marker = Path.join(fifo, ".symphony/workspace-identity.json")
+        File.mkdir_p!(Path.dirname(fifo_marker))
+        assert {_output, 0} = System.cmd("mkfifo", [fifo_marker])
+        fifo_issue = %{issue | id: "issue-identity-fifo", identifier: "MT-IDENTITY-FIFO", title: "FIFO identity"}
+        task = Task.async(fn -> Workspace.create_for_issue(fifo_issue) end)
+        assert {:ok, {:ok, _workspace}} = Task.yield(task, 5_000)
+        assert [_quarantine] = Path.wildcard(Path.join(workspace_root, "MT-IDENTITY-FIFO.quarantine.*"))
+      after
+        File.rm_rf(workspace_root)
+      end
+    end)
+  end
+
+  test "symlinked workspace identity directory is quarantined without writing outside the workspace" do
+    test_root =
+      Path.join(System.tmp_dir!(), "symphony-elixir-workspace-identity-symlink-#{System.unique_integer([:positive])}")
+
+    with_project_env("symphony-slug", "symphony", fn ->
+      try do
+        workspace_root = Path.join(test_root, "workspaces")
+        workspace = Path.join(workspace_root, "MT-IDENTITY-SYMLINK")
+        outside = Path.join(test_root, "outside")
+
+        write_workflow_file!(Workflow.workflow_file_path(),
+          workspace_root: workspace_root,
+          hook_after_create: "echo new > repo.txt"
+        )
+
+        File.mkdir_p!(workspace)
+        File.mkdir_p!(outside)
+        File.write!(Path.join(outside, "sentinel"), "keep\n")
+        File.ln_s!(outside, Path.join(workspace, ".symphony"))
+        assert {_output, 0} = System.cmd("git", ["init", "-b", "main"], cd: workspace)
+        assert {_output, 0} = System.cmd("git", ["remote", "add", "origin", "git@github.com:agavemindlab/symphony.git"], cd: workspace)
+
+        issue = %Issue{
+          id: "issue-identity-symlink",
+          identifier: "MT-IDENTITY-SYMLINK",
+          title: "Symlinked identity",
+          state: "In Progress",
+          project: %{id: "project-id", slug_id: "symphony-slug", name: "Symphony"}
+        }
+
+        assert {:ok, _workspace} = Workspace.create_for_issue(issue)
+        assert [_quarantine] = Path.wildcard(Path.join(workspace_root, "MT-IDENTITY-SYMLINK.quarantine.*"))
+        assert File.read!(Path.join(outside, "sentinel")) == "keep\n"
+        refute File.exists?(Path.join(outside, "workspace-identity.json"))
+        assert workspace_identity_marker(workspace)["symphony_repo"] == "symphony"
+      after
+        File.rm_rf(test_root)
+      end
+    end)
+  end
+
+  test "after_create cannot replace the workspace with an in-root symlink before marker write" do
+    workspace_root =
+      Path.join(System.tmp_dir!(), "symphony-elixir-workspace-post-hook-symlink-#{System.unique_integer([:positive])}")
+
+    with_project_env("symphony-slug", "symphony", fn ->
+      try do
+        sibling = Path.join(workspace_root, "sibling")
+        File.mkdir_p!(sibling)
+        File.write!(Path.join(sibling, "sentinel"), "keep\n")
+
+        write_workflow_file!(Workflow.workflow_file_path(),
+          workspace_root: workspace_root,
+          hook_after_create: "cd .. && rmdir MT-POST-HOOK-SYMLINK && ln -s sibling MT-POST-HOOK-SYMLINK"
+        )
+
+        issue = %Issue{
+          id: "issue-post-hook-symlink",
+          identifier: "MT-POST-HOOK-SYMLINK",
+          title: "Post-hook workspace symlink",
+          state: "In Progress",
+          project: %{id: "project-id", slug_id: "symphony-slug", name: "Symphony"}
+        }
+
+        assert {:error, :unsafe_marker_path} = Workspace.create_for_issue(issue)
+        assert File.read!(Path.join(sibling, "sentinel")) == "keep\n"
+        refute File.exists?(Path.join(sibling, ".symphony/workspace-identity.json"))
+        refute File.exists?(Path.join(workspace_root, "MT-POST-HOOK-SYMLINK"))
+
+        write_workflow_file!(Workflow.workflow_file_path(),
+          workspace_root: workspace_root,
+          hook_after_create: "echo new > repo.txt"
+        )
+
+        assert {:ok, workspace} = Workspace.create_for_issue(issue)
+        assert {:ok, canonical_root} = SymphonyElixir.PathSafety.canonicalize(workspace_root)
+        assert workspace == Path.join(canonical_root, "MT-POST-HOOK-SYMLINK")
+        assert File.read!(Path.join(workspace, "repo.txt")) == "new\n"
+        assert File.read!(Path.join(sibling, "sentinel")) == "keep\n"
+        assert Path.wildcard(Path.join(workspace_root, "sibling.quarantine.*")) == []
+      after
+        File.rm_rf(workspace_root)
+      end
+    end)
+  end
+
+  test "legacy no-marker workspace with matching git remote backfills marker and reuses" do
+    workspace_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-workspace-legacy-match-#{System.unique_integer([:positive])}"
+      )
+
+    with_project_env("symphony-slug", "symphony", fn ->
+      try do
+        workspace = Path.join(workspace_root, "MT-LEGACY-MATCH")
+        after_create_counter = Path.join(workspace_root, "after-create.count")
+
+        write_workflow_file!(Workflow.workflow_file_path(),
+          workspace_root: workspace_root,
+          hook_after_create: "echo call >> #{after_create_counter}"
+        )
+
+        File.mkdir_p!(workspace)
+        assert {_output, 0} = System.cmd("git", ["init", "-b", "main"], cd: workspace)
+        assert {_output, 0} = System.cmd("git", ["remote", "add", "origin", "git@github.com:agavemindlab/symphony.git"], cd: workspace)
+        File.write!(Path.join(workspace, "local-progress.txt"), "keep\n")
+        assert {:ok, canonical_workspace} = SymphonyElixir.PathSafety.canonicalize(workspace)
+
+        issue = %Issue{
+          id: "issue-legacy-match",
+          identifier: "MT-LEGACY-MATCH",
+          title: "Legacy match",
+          state: "In Progress",
+          project: %{id: "project-id", slug_id: "symphony-slug", name: "Symphony"}
+        }
+
+        assert {:ok, ^canonical_workspace} = Workspace.create_for_issue(issue)
+        assert File.read!(Path.join(workspace, "local-progress.txt")) == "keep\n"
+        refute File.exists?(after_create_counter)
+        assert workspace_identity_marker(workspace)["symphony_repo"] == "symphony"
+      after
+        File.rm_rf(workspace_root)
+      end
+    end)
+  end
+
+  test "legacy no-marker workspace with mismatching git remote is quarantined" do
+    workspace_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-workspace-legacy-mismatch-#{System.unique_integer([:positive])}"
+      )
+
+    with_project_env("symphony-slug", "symphony", fn ->
+      try do
+        workspace = Path.join(workspace_root, "MT-LEGACY-MISMATCH")
+
+        write_workflow_file!(Workflow.workflow_file_path(),
+          workspace_root: workspace_root,
+          hook_after_create: "echo new > repo.txt"
+        )
+
+        File.mkdir_p!(workspace)
+        assert {_output, 0} = System.cmd("git", ["init", "-b", "main"], cd: workspace)
+        assert {_output, 0} = System.cmd("git", ["remote", "add", "origin", "https://github.com/agavemindlab/grotto.git"], cd: workspace)
+        File.write!(Path.join(workspace, "repo.txt"), "old\n")
+        assert {:ok, canonical_workspace} = SymphonyElixir.PathSafety.canonicalize(workspace)
+
+        issue = %Issue{
+          id: "issue-legacy-mismatch",
+          identifier: "MT-LEGACY-MISMATCH",
+          title: "Legacy mismatch",
+          state: "In Progress",
+          project: %{id: "project-id", slug_id: "symphony-slug", name: "Symphony"}
+        }
+
+        assert {:ok, ^canonical_workspace} = Workspace.create_for_issue(issue)
+
+        [quarantine] = Path.wildcard(Path.join(workspace_root, "MT-LEGACY-MISMATCH.quarantine.*"))
+        assert File.read!(Path.join(quarantine, "repo.txt")) == "old\n"
+        assert File.read!(Path.join(workspace, "repo.txt")) == "new\n"
+        assert workspace_identity_marker(workspace)["symphony_repo"] == "symphony"
+      after
+        File.rm_rf(workspace_root)
+      end
+    end)
+  end
+
+  test "legacy no-marker workspace with unknown git remote is quarantined" do
+    workspace_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-workspace-legacy-unknown-#{System.unique_integer([:positive])}"
+      )
+
+    with_project_env("symphony-slug", "symphony", fn ->
+      try do
+        workspace = Path.join(workspace_root, "MT-LEGACY-UNKNOWN")
+
+        write_workflow_file!(Workflow.workflow_file_path(),
+          workspace_root: workspace_root,
+          hook_after_create: "echo new > repo.txt"
+        )
+
+        File.mkdir_p!(workspace)
+        assert {_output, 0} = System.cmd("git", ["init", "-b", "main"], cd: workspace)
+        File.write!(Path.join(workspace, "repo.txt"), "old\n")
+        assert {:ok, canonical_workspace} = SymphonyElixir.PathSafety.canonicalize(workspace)
+
+        issue = %Issue{
+          id: "issue-legacy-unknown",
+          identifier: "MT-LEGACY-UNKNOWN",
+          title: "Legacy unknown",
+          state: "In Progress",
+          project: %{id: "project-id", slug_id: "symphony-slug", name: "Symphony"}
+        }
+
+        assert {:ok, ^canonical_workspace} = Workspace.create_for_issue(issue)
+
+        [quarantine] = Path.wildcard(Path.join(workspace_root, "MT-LEGACY-UNKNOWN.quarantine.*"))
+        assert File.read!(Path.join(quarantine, "repo.txt")) == "old\n"
+        assert File.read!(Path.join(workspace, "repo.txt")) == "new\n"
+        assert workspace_identity_marker(workspace)["symphony_repo"] == "symphony"
+      after
+        File.rm_rf(workspace_root)
+      end
+    end)
+  end
+
+  test "legacy git remote inference times out and quarantines" do
+    test_root =
+      Path.join(System.tmp_dir!(), "symphony-elixir-workspace-legacy-timeout-#{System.unique_integer([:positive])}")
+
+    workspace_root = Path.join(test_root, "workspaces")
+    fake_bin = Path.join(test_root, "bin")
+    pid_file = Path.join(test_root, "git.pids")
+    previous_path = System.get_env("PATH")
+
+    with_project_env("symphony-slug", "symphony", fn ->
+      try do
+        workspace = Path.join(workspace_root, "MT-LEGACY-TIMEOUT")
+        File.mkdir_p!(workspace)
+        File.mkdir_p!(fake_bin)
+        File.write!(Path.join(workspace, "repo.txt"), "old\n")
+        File.write!(Path.join(fake_bin, "git"), "#!/bin/sh\nprintf '%s\\n' \"$$\" >> '#{pid_file}'\nexec sleep 2\n")
+        File.chmod!(Path.join(fake_bin, "git"), 0o755)
+        System.put_env("PATH", fake_bin <> ":" <> previous_path)
+
+        write_workflow_file!(Workflow.workflow_file_path(),
+          workspace_root: workspace_root,
+          hook_timeout_ms: 200,
+          hook_after_create: "echo new > repo.txt"
+        )
+
+        issue = %Issue{
+          id: "issue-legacy-timeout",
+          identifier: "MT-LEGACY-TIMEOUT",
+          title: "Legacy remote timeout",
+          state: "In Progress",
+          project: %{id: "project-id", slug_id: "symphony-slug", name: "Symphony"}
+        }
+
+        started_at = System.monotonic_time(:millisecond)
+        assert {:ok, canonical_workspace} = SymphonyElixir.PathSafety.canonicalize(workspace)
+        assert {:ok, ^canonical_workspace} = Workspace.create_for_issue(issue)
+        assert System.monotonic_time(:millisecond) - started_at < 1_000
+
+        [quarantine] = Path.wildcard(Path.join(workspace_root, "MT-LEGACY-TIMEOUT.quarantine.*"))
+        assert File.read!(Path.join(quarantine, "repo.txt")) == "old\n"
+        assert File.read!(Path.join(workspace, "repo.txt")) == "new\n"
+        assert_processes_stopped(pid_file)
+      after
+        restore_env("PATH", previous_path)
+        File.rm_rf(test_root)
+      end
+    end)
+  end
+
+  test "legacy git remote inference caps noisy command output" do
+    test_root =
+      Path.join(System.tmp_dir!(), "symphony-elixir-workspace-legacy-noisy-#{System.unique_integer([:positive])}")
+
+    workspace_root = Path.join(test_root, "workspaces")
+    fake_bin = Path.join(test_root, "bin")
+    pid_file = Path.join(test_root, "git.pids")
+    previous_path = System.get_env("PATH")
+
+    with_project_env("symphony-slug", "symphony", fn ->
+      try do
+        workspace = Path.join(workspace_root, "MT-LEGACY-NOISY")
+        File.mkdir_p!(workspace)
+        File.mkdir_p!(fake_bin)
+        File.write!(Path.join(workspace, "repo.txt"), "old\n")
+
+        File.write!(
+          Path.join(fake_bin, "git"),
+          "#!/bin/sh\nprintf '%s\\n' \"$$\" >> '#{pid_file}'\nwhile :; do printf '0123456789abcdef'; done\n"
+        )
+
+        File.chmod!(Path.join(fake_bin, "git"), 0o755)
+        System.put_env("PATH", fake_bin <> ":" <> previous_path)
+
+        write_workflow_file!(Workflow.workflow_file_path(),
+          workspace_root: workspace_root,
+          hook_timeout_ms: 1_000,
+          hook_after_create: "echo new > repo.txt"
+        )
+
+        issue = %Issue{
+          id: "issue-legacy-noisy",
+          identifier: "MT-LEGACY-NOISY",
+          title: "Legacy noisy remote",
+          state: "In Progress",
+          project: %{id: "project-id", slug_id: "symphony-slug", name: "Symphony"}
+        }
+
+        started_at = System.monotonic_time(:millisecond)
+        assert {:ok, canonical_workspace} = SymphonyElixir.PathSafety.canonicalize(workspace)
+        assert {:ok, ^canonical_workspace} = Workspace.create_for_issue(issue)
+        assert System.monotonic_time(:millisecond) - started_at < 1_000
+
+        assert [_quarantine] = Path.wildcard(Path.join(workspace_root, "MT-LEGACY-NOISY.quarantine.*"))
+        assert_processes_stopped(pid_file)
+      after
+        restore_env("PATH", previous_path)
+        File.rm_rf(test_root)
+      end
+    end)
+  end
+
+  test "aggregate project resolver chooses effective repo before workspace reuse" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-workspace-aggregate-identity-#{System.unique_integer([:positive])}"
+      )
+
+    previous_repo = System.get_env("SYMPHONY_REPO")
+    previous_project_slug = System.get_env("SYMPHONY_PROJECT_SLUG")
+    original_workflow_path = Workflow.workflow_file_path()
+
+    try do
+      workflow_dir = Path.join(test_root, "workflows/grandline")
+      project_dir = Path.join(test_root, "workflows/symphony")
+      workflow_file = Path.join(workflow_dir, "WORKFLOW.md")
+      workspace_root = Path.join(test_root, "workspaces")
+      workspace = Path.join(workspace_root, "MT-AGGREGATE-IDENTITY")
+
+      File.mkdir_p!(workflow_dir)
+      File.mkdir_p!(project_dir)
+      Workflow.set_workflow_file_path(workflow_file)
+
+      File.write!(Path.join(project_dir, "project.env"), """
+      SYMPHONY_PROJECT_SLUG="symphony-slug"
+      SYMPHONY_REPO="symphony"
+      """)
+
+      File.write!(Path.join(workflow_dir, "project-for-linear-project.sh"), """
+      case "${SYMPHONY_LINEAR_PROJECT_SLUG:-}" in
+        symphony-slug) SYMPHONY_PROJECT_DIR="$SYMPHONY_WORKFLOW_DIR/../symphony" ;;
+        *) echo "unknown project: ${SYMPHONY_LINEAR_PROJECT_SLUG:-}" >&2; exit 66 ;;
+      esac
+      SYMPHONY_PROJECT_DIR="$(cd "$SYMPHONY_PROJECT_DIR" && pwd)"
+      set -a
+      . "$SYMPHONY_PROJECT_DIR/project.env"
+      set +a
+      export SYMPHONY_PROJECT_DIR
+      """)
+
+      write_workflow_file!(workflow_file,
+        workspace_root: workspace_root,
+        hook_after_create: "echo symphony > repo.txt"
+      )
+
+      System.put_env("SYMPHONY_REPO", "wrong-process-repo")
+      System.put_env("SYMPHONY_PROJECT_SLUG", "wrong-process-slug")
+
+      File.mkdir_p!(workspace)
+      File.write!(Path.join(workspace, "repo.txt"), "old\n")
+
+      write_workspace_identity_marker!(workspace, %{
+        "version" => 1,
+        "linear_project_id" => "old-project-id",
+        "linear_project_slug_id" => "grotto-slug",
+        "linear_project_name" => "Grotto",
+        "workflow_dir" => workflow_dir,
+        "workflow_file" => workflow_file,
+        "symphony_project_slug" => "grotto-slug",
+        "symphony_repo" => "grotto"
+      })
+
+      issue = %Issue{
+        id: "issue-aggregate-identity",
+        identifier: "MT-AGGREGATE-IDENTITY",
+        title: "Aggregate identity",
+        state: "In Progress",
+        project: %{id: "new-project-id", slug_id: "symphony-slug", name: "Symphony"}
+      }
+
+      assert {:ok, canonical_workspace} = SymphonyElixir.PathSafety.canonicalize(workspace)
+      assert {:ok, ^canonical_workspace} = Workspace.create_for_issue(issue)
+      [quarantine] = Path.wildcard(Path.join(workspace_root, "MT-AGGREGATE-IDENTITY.quarantine.*"))
+      assert File.read!(Path.join(quarantine, "repo.txt")) == "old\n"
+      assert File.read!(Path.join(workspace, "repo.txt")) == "symphony\n"
+      assert workspace_identity_marker(workspace)["symphony_repo"] == "symphony"
+      assert workspace_identity_marker(workspace)["symphony_project_slug"] == "symphony-slug"
+    after
+      Workflow.set_workflow_file_path(original_workflow_path)
+      restore_env("SYMPHONY_REPO", previous_repo)
+      restore_env("SYMPHONY_PROJECT_SLUG", previous_project_slug)
+      File.rm_rf(test_root)
+    end
+  end
+
+  test "workflow project env resolver merges only compatible process project env" do
+    previous_project_slug = System.get_env("SYMPHONY_PROJECT_SLUG")
+    previous_repo = System.get_env("SYMPHONY_REPO")
+
+    try do
+      issue = %Issue{
+        id: 123,
+        identifier: "MT-PROJECT-ENV-COMPAT",
+        title: "Project env compatibility",
+        project: %{id: 123, slug_id: "project-slug", name: "Project"}
+      }
+
+      System.delete_env("SYMPHONY_PROJECT_SLUG")
+      System.put_env("SYMPHONY_REPO", "repo-from-process")
+      assert {:ok, %{env: env}} = Workflow.resolve_project_env(issue)
+      assert env["SYMPHONY_REPO"] == "repo-from-process"
+      assert env["SYMPHONY_LINEAR_PROJECT_ID"] == "123"
+
+      System.put_env("SYMPHONY_PROJECT_SLUG", "")
+      assert {:ok, %{env: env}} = Workflow.resolve_project_env(issue)
+      assert env["SYMPHONY_REPO"] == "repo-from-process"
+
+      System.put_env("SYMPHONY_PROJECT_SLUG", "other-project")
+      assert {:ok, %{env: env}} = Workflow.resolve_project_env(issue)
+      refute Map.has_key?(env, "SYMPHONY_REPO")
+
+      empty_slug_issue = %Issue{
+        id: "empty-project-id",
+        identifier: "MT-PROJECT-ENV-EMPTY",
+        title: "Project env empty slug",
+        project: %{id: "empty-project-id", slug_id: "", name: "Project"}
+      }
+
+      assert {:ok, %{env: env}} = Workflow.resolve_project_env(empty_slug_issue)
+      assert env["SYMPHONY_REPO"] == "repo-from-process"
+    after
+      restore_env("SYMPHONY_PROJECT_SLUG", previous_project_slug)
+      restore_env("SYMPHONY_REPO", previous_repo)
+    end
+  end
+
+  test "project issue without effective repo or project slug fails before reusing existing workspace" do
+    workspace_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-workspace-project-env-missing-#{System.unique_integer([:positive])}"
+      )
+
+    previous_project_slug = System.get_env("SYMPHONY_PROJECT_SLUG")
+    previous_repo = System.get_env("SYMPHONY_REPO")
+
+    try do
+      workspace = Path.join(workspace_root, "MT-MISSING-PROJECT-ENV")
+
+      write_workflow_file!(Workflow.workflow_file_path(),
+        workspace_root: workspace_root,
+        hook_after_create: "echo new > repo.txt"
+      )
+
+      File.mkdir_p!(workspace)
+      File.write!(Path.join(workspace, "repo.txt"), "old\n")
+      System.put_env("SYMPHONY_PROJECT_SLUG", "other-project")
+      System.put_env("SYMPHONY_REPO", "stale-repo")
+
+      issue = %Issue{
+        id: "issue-missing-project-env",
+        identifier: "MT-MISSING-PROJECT-ENV",
+        title: "Missing project env",
+        state: "In Progress",
+        project: %{id: "project-id", slug_id: "project-slug", name: "Project"}
+      }
+
+      assert {:error, {:workspace_identity_missing_project_env, missing_keys}} =
+               Workspace.create_for_issue(issue)
+
+      assert Enum.sort(missing_keys) == ["SYMPHONY_PROJECT_SLUG", "SYMPHONY_REPO"]
+      assert File.read!(Path.join(workspace, "repo.txt")) == "old\n"
+      assert Path.wildcard(Path.join(workspace_root, "MT-MISSING-PROJECT-ENV.quarantine.*")) == []
+      refute File.exists?(Path.join(workspace, ".symphony/workspace-identity.json"))
+    after
+      restore_env("SYMPHONY_PROJECT_SLUG", previous_project_slug)
+      restore_env("SYMPHONY_REPO", previous_repo)
+      File.rm_rf(workspace_root)
+    end
+  end
+
+  test "workflow project env resolver uses selector output and surfaces selector failures" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-workflow-project-env-resolver-#{System.unique_integer([:positive])}"
+      )
+
+    original_workflow_path = Workflow.workflow_file_path()
+
+    try do
+      workflow_dir = Path.join(test_root, "workflows/grandline")
+      workflow_file = Path.join(workflow_dir, "WORKFLOW.md")
+      File.mkdir_p!(workflow_dir)
+      Workflow.set_workflow_file_path(workflow_file)
+      write_workflow_file!(workflow_file)
+
+      File.write!(Path.join(workflow_dir, "project-for-linear-project.sh"), """
+      printf 'selector noise\\n' >&2
+      SYMPHONY_PROJECT_SLUG="project-slug"
+      SYMPHONY_REPO="symphony"
+      """)
+
+      raw_issue = %{
+        "project" => %{
+          "id" => "project-id",
+          "slugId" => "project-slug",
+          "name" => "Symphony"
+        }
+      }
+
+      assert {:ok, %{env: env}} = Workflow.resolve_project_env(raw_issue)
+      assert env["SYMPHONY_LINEAR_PROJECT_ID"] == "project-id"
+      assert env["SYMPHONY_PROJECT_SLUG"] == "project-slug"
+      assert env["SYMPHONY_REPO"] == "symphony"
+
+      injection_marker = Path.join(test_root, "injected")
+
+      injected_issue =
+        put_in(
+          raw_issue,
+          ["project", "name"],
+          "Symphony\n__SYMPHONY_PROJECT_ENV__\tX; touch #{injection_marker}; #\tdg=="
+        )
+
+      File.write!(Path.join(workflow_dir, "project-for-linear-project.sh"), """
+      SYMPHONY_PROJECT_SLUG="project-slug"
+      SYMPHONY_REPO="symphony"
+      """)
+
+      assert {:error, {:invalid_project_env_value, "SYMPHONY_LINEAR_PROJECT_NAME"}} =
+               Workflow.resolve_project_env(injected_issue)
+
+      refute File.exists?(injection_marker)
+
+      File.write!(Path.join(workflow_dir, "project-for-linear-project.sh"), """
+      printf '%s\n' '__SYMPHONY_PROJECT_ENV__\tX; touch #{injection_marker}; #\tdg==' >&2
+      SYMPHONY_PROJECT_SLUG="project-slug"
+      SYMPHONY_REPO="symphony"
+      """)
+
+      assert {:error, {:invalid_project_env_key, _key}} = Workflow.resolve_project_env(raw_issue)
+      refute File.exists?(injection_marker)
+
+      File.write!(Path.join(workflow_dir, "project-for-linear-project.sh"), """
+      printf '%s\n' '__SYMPHONY_PROJECT_ENV__\tSYMPHONY_REPO\t%%%' >&2
+      """)
+
+      assert {:error, {:invalid_project_env_value, "SYMPHONY_REPO"}} =
+               Workflow.resolve_project_env(raw_issue)
+
+      File.write!(Path.join(workflow_dir, "project-for-linear-project.sh"), "exit 0\n")
+      assert {:error, :incomplete_project_env_output} = Workflow.resolve_project_env(raw_issue)
+
+      File.write!(Path.join(workflow_dir, "project-for-linear-project.sh"), """
+      printf 'selector failed\\n' >&2
+      exit 66
+      """)
+
+      assert {:error, {:project_env_resolve_failed, 66, output}} =
+               Workflow.resolve_project_env(raw_issue)
+
+      assert output =~ "selector failed"
+
+      write_workflow_file!(workflow_file, hook_timeout_ms: 10)
+      File.write!(Path.join(workflow_dir, "project-for-linear-project.sh"), "sleep 1\n")
+      assert {:error, {:project_env_resolve_timeout, 10}} = Workflow.resolve_project_env(raw_issue)
+    after
+      Workflow.set_workflow_file_path(original_workflow_path)
+      File.rm_rf(test_root)
+    end
+  end
+
+  test "projectless issue does not source aggregate selector before workspace reuse" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-projectless-aggregate-workspace-#{System.unique_integer([:positive])}"
+      )
+
+    original_workflow_path = Workflow.workflow_file_path()
+
+    try do
+      workflow_dir = Path.join(test_root, "workflows/grandline")
+      workflow_file = Path.join(workflow_dir, "WORKFLOW.md")
+      workspace_root = Path.join(test_root, "workspaces")
+
+      File.mkdir_p!(workflow_dir)
+      Workflow.set_workflow_file_path(workflow_file)
+      File.write!(Path.join(workflow_dir, "project-for-linear-project.sh"), "exit 66\n")
+
+      write_workflow_file!(workflow_file, workspace_root: workspace_root)
+
+      assert {:ok, workspace} = Workspace.create_for_issue("MT-PROJECTLESS-AGGREGATE")
+      assert Path.basename(workspace) == "MT-PROJECTLESS-AGGREGATE"
+    after
+      Workflow.set_workflow_file_path(original_workflow_path)
+      File.rm_rf(test_root)
     end
   end
 
@@ -175,8 +946,12 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       assert {:ok, canonical_outside_root} = SymphonyElixir.PathSafety.canonicalize(outside_root)
       assert {:ok, canonical_workspace_root} = SymphonyElixir.PathSafety.canonicalize(workspace_root)
 
-      assert {:error, {:workspace_outside_root, ^canonical_outside_root, ^canonical_workspace_root}} =
-               Workspace.create_for_issue("MT-SYM")
+      assert {:error, reason} = Workspace.create_for_issue("MT-SYM")
+
+      assert reason in [
+               {:workspace_outside_root, canonical_outside_root, canonical_workspace_root},
+               {:workspace_symlink_escape, Path.expand(symlink_path), canonical_workspace_root}
+             ]
     after
       File.rm_rf(test_root)
     end
@@ -1629,10 +2404,15 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
         "symphony-elixir-project-hook-env-#{System.unique_integer([:positive])}"
       )
 
+    previous_project_slug = System.get_env("SYMPHONY_PROJECT_SLUG")
+    previous_repo = System.get_env("SYMPHONY_REPO")
+
     try do
       workspace_root = Path.join(test_root, "workspaces")
       before_remove_marker = Path.join(test_root, "before-remove-project-env.txt")
       File.mkdir_p!(workspace_root)
+      System.put_env("SYMPHONY_PROJECT_SLUG", "project-slug")
+      System.put_env("SYMPHONY_REPO", "symphony")
 
       write_workflow_file!(Workflow.workflow_file_path(),
         workspace_root: workspace_root,
@@ -1661,6 +2441,47 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       assert :ok = Workspace.remove_issue_workspaces(issue)
       assert File.read!(before_remove_marker) == "project-id\nproject-slug\nProject Name\n"
     after
+      restore_env("SYMPHONY_PROJECT_SLUG", previous_project_slug)
+      restore_env("SYMPHONY_REPO", previous_repo)
+      File.rm_rf(test_root)
+    end
+  end
+
+  test "local workspace hooks clear project env omitted by the project selector" do
+    test_root =
+      Path.join(System.tmp_dir!(), "symphony-elixir-hook-clear-project-env-#{System.unique_integer([:positive])}")
+
+    original_workflow_path = Workflow.workflow_file_path()
+    previous_purpose = System.get_env("SYMPHONY_ACCEPTANCE_USER_PURPOSE")
+
+    try do
+      workflow_file = Path.join(test_root, "WORKFLOW.md")
+      selector = Path.join(test_root, "project-for-linear-project.sh")
+      workspace_root = Path.join(test_root, "workspaces")
+      Workflow.set_workflow_file_path(workflow_file)
+      System.put_env("SYMPHONY_ACCEPTANCE_USER_PURPOSE", "stale-purpose")
+
+      File.mkdir_p!(test_root)
+      File.write!(selector, "SYMPHONY_PROJECT_SLUG=project-slug\nSYMPHONY_REPO=symphony\n")
+
+      write_workflow_file!(workflow_file,
+        workspace_root: workspace_root,
+        hook_after_create: "printf '%s' \"${SYMPHONY_ACCEPTANCE_USER_PURPOSE:-}\" > acceptance-purpose.txt"
+      )
+
+      issue = %Issue{
+        id: "issue-hook-clear-project-env",
+        identifier: "MT-HOOK-CLEAR-PROJECT-ENV",
+        title: "Clear project env",
+        state: "Todo",
+        project: %{id: "project-id", slug_id: "project-slug", name: "Project"}
+      }
+
+      assert {:ok, workspace} = Workspace.create_for_issue(issue)
+      assert File.read!(Path.join(workspace, "acceptance-purpose.txt")) == ""
+    after
+      Workflow.set_workflow_file_path(original_workflow_path)
+      restore_env("SYMPHONY_ACCEPTANCE_USER_PURPOSE", previous_purpose)
       File.rm_rf(test_root)
     end
   end
@@ -2348,10 +3169,14 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
 
     previous_path = System.get_env("PATH")
     previous_trace = System.get_env("SYMP_TEST_SSH_TRACE")
+    previous_project_slug = System.get_env("SYMPHONY_PROJECT_SLUG")
+    previous_repo = System.get_env("SYMPHONY_REPO")
 
     on_exit(fn ->
       restore_env("PATH", previous_path)
       restore_env("SYMP_TEST_SSH_TRACE", previous_trace)
+      restore_env("SYMPHONY_PROJECT_SLUG", previous_project_slug)
+      restore_env("SYMPHONY_REPO", previous_repo)
     end)
 
     try do
@@ -2363,6 +3188,8 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       File.mkdir_p!(test_root)
       System.put_env("SYMP_TEST_SSH_TRACE", trace_file)
       System.put_env("PATH", test_root <> ":" <> (previous_path || ""))
+      System.put_env("SYMPHONY_PROJECT_SLUG", "remote-project")
+      System.put_env("SYMPHONY_REPO", "symphony")
 
       File.write!(fake_ssh, """
       #!/bin/sh
@@ -2370,6 +3197,9 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       printf 'ARGV:%s\\n' "$*" >> "$trace_file"
 
       case "$*" in
+        *"__SYMPHONY_WORKSPACE_INSPECT__"*)
+          printf '%s\\t%s\\n' '__SYMPHONY_WORKSPACE_INSPECT__' 'missing'
+          ;;
         *"__SYMPHONY_WORKSPACE__"*)
           printf '%s\\t%s\\t%s\\n' '__SYMPHONY_WORKSPACE__' '1' '#{workspace_path}'
           ;;
@@ -2426,6 +3256,251 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     after
       File.rm_rf(test_root)
     end
+  end
+
+  test "remote workspace identity mismatch quarantines before after_create hook" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-remote-workspace-identity-#{System.unique_integer([:positive])}"
+      )
+
+    previous_path = System.get_env("PATH")
+    previous_trace = System.get_env("SYMP_TEST_SSH_TRACE")
+
+    with_project_env("remote-project", "symphony", fn ->
+      on_exit(fn ->
+        restore_env("PATH", previous_path)
+        restore_env("SYMP_TEST_SSH_TRACE", previous_trace)
+      end)
+
+      try do
+        trace_file = Path.join(test_root, "ssh.trace")
+        fake_ssh = Path.join(test_root, "ssh")
+        workspace_root = "~/.symphony-remote-workspaces"
+        workspace_path = "/remote/home/.symphony-remote-workspaces/MT-SSH-IDENTITY"
+
+        stale_marker =
+          Jason.encode!(%{
+            "version" => 1,
+            "linear_project_id" => "old-project-id",
+            "linear_project_slug_id" => "grotto",
+            "linear_project_name" => "Grotto",
+            "workflow_dir" => "/old/workflow",
+            "workflow_file" => "/old/workflow/WORKFLOW.md",
+            "symphony_project_slug" => "grotto",
+            "symphony_repo" => "grotto"
+          })
+
+        File.mkdir_p!(test_root)
+        System.put_env("SYMP_TEST_SSH_TRACE", trace_file)
+        System.put_env("PATH", test_root <> ":" <> (previous_path || ""))
+
+        File.write!(fake_ssh, """
+        #!/bin/sh
+        trace_file="${SYMP_TEST_SSH_TRACE:-/tmp/symphony-fake-ssh.trace}"
+        printf 'ARGV:%s\\n' "$*" >> "$trace_file"
+
+        case "$*" in
+          *"__SYMPHONY_WORKSPACE_INSPECT__"*)
+            printf '%s\\t%s\\n' '__SYMPHONY_WORKSPACE_INSPECT__' 'dir'
+            printf '%s\\t%s\\n' '__SYMPHONY_WORKSPACE_MARKER__' '#{Base.encode64(stale_marker)}'
+            ;;
+          *"__SYMPHONY_WORKSPACE__"*)
+            printf '%s\\t%s\\t%s\\n' '__SYMPHONY_WORKSPACE__' '1' '#{workspace_path}'
+            ;;
+        esac
+
+        exit 0
+        """)
+
+        File.chmod!(fake_ssh, 0o755)
+
+        write_workflow_file!(Workflow.workflow_file_path(),
+          workspace_root: workspace_root,
+          worker_ssh_hosts: ["worker-identity"],
+          hook_after_create: "echo after-create"
+        )
+
+        issue = %Issue{
+          id: "issue-ssh-identity",
+          identifier: "MT-SSH-IDENTITY",
+          title: "Remote identity",
+          state: "Todo",
+          project: %{id: "remote-project-id", slug_id: "remote-project", name: "Remote Project"}
+        }
+
+        assert {:ok, ^workspace_path} = Workspace.create_for_issue(issue, "worker-identity")
+
+        trace = File.read!(trace_file)
+        assert trace =~ "__SYMPHONY_WORKSPACE_INSPECT__"
+        assert trace =~ ".symphony/workspace-identity.json"
+        assert trace =~ "__SYMPHONY_WORKSPACE_MARKER_WRITE__"
+        assert trace =~ ".quarantine."
+        assert trace =~ "echo after-create"
+
+        assert trace_index(trace, ".quarantine.") < trace_index(trace, "echo after-create")
+        assert trace_index(trace, "echo after-create") < trace_index(trace, "__SYMPHONY_WORKSPACE_MARKER_WRITE__")
+      after
+        File.rm_rf(test_root)
+      end
+    end)
+  end
+
+  test "remote unsafe workspace identity marker quarantines before after_create hook" do
+    trace = run_remote_marker_case!("MT-SSH-UNSAFE-MARKER", "unsafe_marker", nil)
+    assert trace =~ "[ -L"
+    assert trace =~ "wc -c"
+    assert trace =~ "65536"
+    assert trace =~ ~s([ ! -d "$marker_dir" ])
+    assert trace =~ ~s([ ! -f "$marker" ])
+    assert trace_index(trace, "[ -L") < trace_index(trace, ".symphony/workspace-identity.json")
+    assert trace_index(trace, ".quarantine.") < trace_index(trace, "echo after-create")
+  end
+
+  test "remote final workspace symlink is quarantined" do
+    trace = run_remote_marker_case!("MT-SSH-WORKSPACE-LINK", "link", nil)
+    assert trace_index(trace, ".quarantine.") < trace_index(trace, "echo after-create")
+  end
+
+  test "remote malformed workspace identity marker is quarantined" do
+    trace =
+      run_remote_marker_case!(
+        "MT-SSH-MALFORMED-MARKER",
+        "dir",
+        "{partial\n__SYMPHONY_WORKSPACE_INSPECT__\tmissing"
+      )
+
+    assert trace =~ "__SYMPHONY_WORKSPACE_MARKER__"
+    assert trace_index(trace, ".quarantine.") < trace_index(trace, "echo after-create")
+  end
+
+  test "remote empty workspace identity marker is quarantined" do
+    trace = run_remote_marker_case!("MT-SSH-EMPTY-MARKER", "dir", "")
+    assert trace_index(trace, ".quarantine.") < trace_index(trace, "echo after-create")
+  end
+
+  test "remote legacy no-marker workspace with matching git remote backfills marker and reuses" do
+    trace =
+      run_remote_legacy_no_marker_case!(
+        "MT-SSH-LEGACY-MATCH",
+        "worker-legacy-match",
+        "git@github.com:agavemindlab/symphony.git"
+      )
+
+    assert trace =~ "__SYMPHONY_WORKSPACE_INSPECT__"
+    assert trace =~ "__SYMPHONY_WORKSPACE_REMOTE__"
+    assert trace =~ "REMOTE_OUTPUT:git@github.com:agavemindlab/symphony.git"
+    assert trace =~ "__SYMPHONY_WORKSPACE_MARKER_WRITE__"
+    refute trace =~ ".quarantine."
+    refute trace =~ "echo after-create"
+    assert trace_index(trace, "__SYMPHONY_WORKSPACE_INSPECT__") < trace_index(trace, "__SYMPHONY_WORKSPACE_MARKER_WRITE__")
+  end
+
+  test "remote legacy no-marker workspace with mismatching git remote is quarantined" do
+    trace =
+      run_remote_legacy_no_marker_case!(
+        "MT-SSH-LEGACY-MISMATCH",
+        "worker-legacy-mismatch",
+        "https://github.com/agavemindlab/grotto.git"
+      )
+
+    assert trace =~ "__SYMPHONY_WORKSPACE_INSPECT__"
+    assert trace =~ "REMOTE_OUTPUT:https://github.com/agavemindlab/grotto.git"
+    assert trace =~ ".quarantine."
+    assert trace =~ "echo after-create"
+    assert trace =~ "__SYMPHONY_WORKSPACE_MARKER_WRITE__"
+    assert trace_index(trace, "__SYMPHONY_WORKSPACE_REMOTE__") < trace_index(trace, ".quarantine.")
+    assert trace_index(trace, ".quarantine.") < trace_index(trace, "echo after-create")
+    assert trace_index(trace, "echo after-create") < trace_index(trace, "__SYMPHONY_WORKSPACE_MARKER_WRITE__")
+  end
+
+  test "remote legacy no-marker workspace with unknown git remote is quarantined" do
+    trace = run_remote_legacy_no_marker_case!("MT-SSH-LEGACY-UNKNOWN", "worker-legacy-unknown", nil)
+
+    assert trace =~ "__SYMPHONY_WORKSPACE_INSPECT__"
+    assert trace =~ "REMOTE_OUTPUT:<none>"
+    assert trace =~ ".quarantine."
+    assert trace =~ "echo after-create"
+    assert trace =~ "__SYMPHONY_WORKSPACE_MARKER_WRITE__"
+    assert trace_index(trace, "__SYMPHONY_WORKSPACE_INSPECT__") < trace_index(trace, ".quarantine.")
+    assert trace_index(trace, ".quarantine.") < trace_index(trace, "echo after-create")
+    assert trace_index(trace, "echo after-create") < trace_index(trace, "__SYMPHONY_WORKSPACE_MARKER_WRITE__")
+  end
+
+  test "remote workspace intermediate symlink escape fails closed before marker read or hook" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-remote-workspace-symlink-escape-#{System.unique_integer([:positive])}"
+      )
+
+    previous_path = System.get_env("PATH")
+    previous_trace = System.get_env("SYMP_TEST_SSH_TRACE")
+
+    with_project_env("remote-project", "symphony", fn ->
+      on_exit(fn ->
+        restore_env("PATH", previous_path)
+        restore_env("SYMP_TEST_SSH_TRACE", previous_trace)
+      end)
+
+      try do
+        trace_file = Path.join(test_root, "ssh.trace")
+        fake_ssh = Path.join(test_root, "ssh")
+        workspace_root = "~/.symphony-remote-workspaces"
+        workspace_path = "/remote/home/.symphony-remote-workspaces/MT-SSH-ESCAPE"
+
+        File.mkdir_p!(test_root)
+        System.put_env("SYMP_TEST_SSH_TRACE", trace_file)
+        System.put_env("PATH", test_root <> ":" <> (previous_path || ""))
+
+        File.write!(fake_ssh, """
+        #!/bin/sh
+        trace_file="${SYMP_TEST_SSH_TRACE:-/tmp/symphony-fake-ssh.trace}"
+        printf 'ARGV:%s\\n' "$*" >> "$trace_file"
+
+        case "$*" in
+          *"__SYMPHONY_WORKSPACE_INSPECT__"*)
+            printf '%s\\t%s\\n' '__SYMPHONY_WORKSPACE_INSPECT__' 'escape'
+            printf '%s\\t%s\\n' '__SYMPHONY_WORKSPACE_PATH__' '#{Base.encode64("/outside/old-repo")}'
+            ;;
+          *"__SYMPHONY_WORKSPACE__"*)
+            printf '%s\\t%s\\t%s\\n' '__SYMPHONY_WORKSPACE__' '1' '#{workspace_path}'
+            ;;
+        esac
+
+        exit 0
+        """)
+
+        File.chmod!(fake_ssh, 0o755)
+
+        write_workflow_file!(Workflow.workflow_file_path(),
+          workspace_root: workspace_root,
+          worker_ssh_hosts: ["worker-escape"],
+          hook_after_create: "echo after-create"
+        )
+
+        issue = %Issue{
+          id: "issue-ssh-escape",
+          identifier: "MT-SSH-ESCAPE",
+          title: "Remote escape",
+          state: "Todo",
+          project: %{id: "remote-project-id", slug_id: "remote-project", name: "Remote Project"}
+        }
+
+        assert {:error, {:workspace_symlink_escape, :intermediate_symlink}} =
+                 Workspace.create_for_issue(issue, "worker-escape")
+
+        trace = File.read!(trace_file)
+        assert trace =~ "__SYMPHONY_WORKSPACE_INSPECT__"
+        assert trace =~ "pwd -P"
+        refute trace =~ ".quarantine."
+        refute trace =~ "echo after-create"
+        assert trace_index(trace, "pwd -P") < trace_index(trace, ".symphony/workspace-identity.json")
+      after
+        File.rm_rf(test_root)
+      end
+    end)
   end
 
   defp configure_fake_gh_clone!(test_root) do
@@ -2540,6 +3615,204 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     """)
 
     File.chmod!(fake_gh, 0o755)
+  end
+
+  defp with_project_env(project_slug, repo, fun) when is_function(fun, 0) do
+    previous_project_slug = System.get_env("SYMPHONY_PROJECT_SLUG")
+    previous_repo = System.get_env("SYMPHONY_REPO")
+
+    try do
+      System.put_env("SYMPHONY_PROJECT_SLUG", project_slug)
+      System.put_env("SYMPHONY_REPO", repo)
+      fun.()
+    after
+      restore_env("SYMPHONY_PROJECT_SLUG", previous_project_slug)
+      restore_env("SYMPHONY_REPO", previous_repo)
+    end
+  end
+
+  defp assert_processes_stopped(pid_file) do
+    pid_file
+    |> File.read!()
+    |> String.split("\n", trim: true)
+    |> Enum.each(fn pid ->
+      assert {_output, status} = System.cmd("kill", ["-0", pid], stderr_to_stdout: true)
+      assert status != 0
+    end)
+  end
+
+  defp workspace_identity_marker(workspace) do
+    workspace
+    |> Path.join(".symphony/workspace-identity.json")
+    |> File.read!()
+    |> Jason.decode!()
+  end
+
+  defp write_workspace_identity_marker!(workspace, marker) when is_map(marker) do
+    marker_path = Path.join(workspace, ".symphony/workspace-identity.json")
+    File.mkdir_p!(Path.dirname(marker_path))
+    File.write!(marker_path, Jason.encode!(marker))
+  end
+
+  defp run_remote_legacy_no_marker_case!(identifier, worker_host, remote_url) do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-remote-legacy-#{System.unique_integer([:positive])}"
+      )
+
+    previous_path = System.get_env("PATH")
+    previous_trace = System.get_env("SYMP_TEST_SSH_TRACE")
+
+    with_project_env("remote-project", "symphony", fn ->
+      on_exit(fn ->
+        restore_env("PATH", previous_path)
+        restore_env("SYMP_TEST_SSH_TRACE", previous_trace)
+      end)
+
+      try do
+        trace_file = Path.join(test_root, "ssh.trace")
+        fake_ssh = Path.join(test_root, "ssh")
+        workspace_root = "~/.symphony-remote-workspaces"
+        workspace_path = "/remote/home/.symphony-remote-workspaces/#{identifier}"
+
+        File.mkdir_p!(test_root)
+        System.put_env("SYMP_TEST_SSH_TRACE", trace_file)
+        System.put_env("PATH", test_root <> ":" <> (previous_path || ""))
+
+        File.write!(fake_ssh, remote_legacy_no_marker_ssh_script(workspace_path, remote_url))
+        File.chmod!(fake_ssh, 0o755)
+
+        write_workflow_file!(Workflow.workflow_file_path(),
+          workspace_root: workspace_root,
+          worker_ssh_hosts: [worker_host],
+          hook_after_create: "echo after-create"
+        )
+
+        issue = %Issue{
+          id: "issue-#{String.downcase(identifier)}",
+          identifier: identifier,
+          title: "Remote legacy no-marker",
+          state: "Todo",
+          project: %{id: "remote-project-id", slug_id: "remote-project", name: "Remote Project"}
+        }
+
+        assert {:ok, ^workspace_path} = Workspace.create_for_issue(issue, worker_host)
+        File.read!(trace_file)
+      after
+        File.rm_rf(test_root)
+      end
+    end)
+  end
+
+  defp remote_legacy_no_marker_ssh_script(workspace_path, nil) do
+    """
+    #!/bin/sh
+    trace_file="${SYMP_TEST_SSH_TRACE:-/tmp/symphony-fake-ssh.trace}"
+    printf 'ARGV:%s\\n' "$*" >> "$trace_file"
+
+    case "$*" in
+      *"__SYMPHONY_WORKSPACE_INSPECT__"*)
+        printf '%s\\t%s\\n' '__SYMPHONY_WORKSPACE_INSPECT__' 'dir'
+        printf '%s\\t%s\\n' '__SYMPHONY_WORKSPACE_PATH__' '#{Base.encode64(workspace_path)}'
+        printf 'REMOTE_OUTPUT:<none>\\n' >> "$trace_file"
+        ;;
+      *"__SYMPHONY_WORKSPACE__"*)
+        printf '%s\\t%s\\t%s\\n' '__SYMPHONY_WORKSPACE__' '1' '#{workspace_path}'
+        ;;
+    esac
+
+    exit 0
+    """
+  end
+
+  defp remote_legacy_no_marker_ssh_script(workspace_path, remote_url) when is_binary(remote_url) do
+    """
+    #!/bin/sh
+    trace_file="${SYMP_TEST_SSH_TRACE:-/tmp/symphony-fake-ssh.trace}"
+    printf 'ARGV:%s\\n' "$*" >> "$trace_file"
+
+    case "$*" in
+      *"__SYMPHONY_WORKSPACE_INSPECT__"*)
+        printf '%s\\t%s\\n' '__SYMPHONY_WORKSPACE_INSPECT__' 'dir'
+        printf '%s\\t%s\\n' '__SYMPHONY_WORKSPACE_PATH__' '#{Base.encode64(workspace_path)}'
+        printf '%s\\t%s\\n' '__SYMPHONY_WORKSPACE_REMOTE__' '#{Base.encode64(remote_url)}'
+        printf 'REMOTE_OUTPUT:%s\\n' '#{remote_url}' >> "$trace_file"
+        ;;
+      *"__SYMPHONY_WORKSPACE__"*)
+        printf '%s\\t%s\\t%s\\n' '__SYMPHONY_WORKSPACE__' '1' '#{workspace_path}'
+        ;;
+    esac
+
+    exit 0
+    """
+  end
+
+  defp run_remote_marker_case!(identifier, inspection_kind, marker) do
+    test_root =
+      Path.join(System.tmp_dir!(), "symphony-elixir-remote-marker-#{System.unique_integer([:positive])}")
+
+    previous_path = System.get_env("PATH")
+    previous_trace = System.get_env("SYMP_TEST_SSH_TRACE")
+
+    with_project_env("remote-project", "symphony", fn ->
+      try do
+        trace_file = Path.join(test_root, "ssh.trace")
+        fake_ssh = Path.join(test_root, "ssh")
+        workspace_path = "/remote/home/.symphony-remote-workspaces/#{identifier}"
+        marker_output = if marker, do: "printf '%s\\t%s\\n' '__SYMPHONY_WORKSPACE_MARKER__' '#{Base.encode64(marker)}'", else: ""
+
+        File.mkdir_p!(test_root)
+        System.put_env("SYMP_TEST_SSH_TRACE", trace_file)
+        System.put_env("PATH", test_root <> ":" <> (previous_path || ""))
+
+        File.write!(fake_ssh, """
+        #!/bin/sh
+        printf 'ARGV:%s\\n' "$*" >> "$SYMP_TEST_SSH_TRACE"
+        case "$*" in
+          *"__SYMPHONY_WORKSPACE_INSPECT__"*)
+            printf '%s\\t%s\\n' '__SYMPHONY_WORKSPACE_INSPECT__' '#{inspection_kind}'
+            #{marker_output}
+            ;;
+          *"__SYMPHONY_WORKSPACE__"*)
+            printf '%s\\t%s\\t%s\\n' '__SYMPHONY_WORKSPACE__' '1' '#{workspace_path}'
+            ;;
+        esac
+        """)
+
+        File.chmod!(fake_ssh, 0o755)
+
+        write_workflow_file!(Workflow.workflow_file_path(),
+          workspace_root: "~/.symphony-remote-workspaces",
+          worker_ssh_hosts: ["worker-marker"],
+          hook_after_create: "echo after-create"
+        )
+
+        issue = %Issue{
+          id: "issue-#{String.downcase(identifier)}",
+          identifier: identifier,
+          title: "Remote marker",
+          state: "Todo",
+          project: %{id: "remote-project-id", slug_id: "remote-project", name: "Remote Project"}
+        }
+
+        assert {:ok, ^workspace_path} = Workspace.create_for_issue(issue, "worker-marker")
+        trace = File.read!(trace_file)
+        assert trace =~ ".quarantine."
+        trace
+      after
+        restore_env("PATH", previous_path)
+        restore_env("SYMP_TEST_SSH_TRACE", previous_trace)
+        File.rm_rf(test_root)
+      end
+    end)
+  end
+
+  defp trace_index(trace, needle) do
+    case :binary.match(trace, needle) do
+      {index, _length} -> index
+      :nomatch -> flunk("expected trace to contain #{inspect(needle)}")
+    end
   end
 
   defp restore_app_env(key, nil), do: Application.delete_env(:symphony_elixir, key)

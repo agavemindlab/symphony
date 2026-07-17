@@ -176,6 +176,15 @@ Notes:
   identifier, title, and body.
 - Use `hooks.after_create` to bootstrap a fresh workspace. For a Git-backed repo, you can run
   `git clone ... .` there, along with any other setup commands you need.
+- For Linear issues with project data and an effective `SYMPHONY_PROJECT_SLUG`
+  / `SYMPHONY_REPO`, Symphony records `.symphony/workspace-identity.json`
+  after `hooks.after_create` succeeds. Existing workspaces are reused only when
+  that marker still matches the issue project, workflow path, and repo. A
+  mismatch is renamed to a sibling `.quarantine.<timestamp>` path before the
+  fresh workspace is created.
+- Legacy workspaces without a marker are inferred from `git remote` metadata.
+  A repo match backfills the marker and reuses the directory; a mismatch or
+  unknown remote is quarantined.
 - Use `hooks.issue_running` and `hooks.issue_stopped` to set or clear a tracker-visible
   "currently handled by Symphony" marker. These hooks run from the workflow directory with
   `SYMPHONY_WORKFLOW_DIR`, `SYMPHONY_HOOK_EVENT`, `SYMPHONY_HOOK_REASON`,

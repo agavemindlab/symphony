@@ -855,19 +855,34 @@ Workspace persistence:
 
 - Workspaces are reused across runs for the same issue.
 - Successful runs do not auto-delete workspaces.
+- Implementations that can resolve a current project/workflow/repository
+  identity SHOULD record that identity in the workspace and validate it before
+  reuse. If the recorded identity mismatches the current issue, the old
+  workspace MUST NOT be reused for the new run.
 
 ### 9.2 Workspace Creation and Reuse
 
-Input: `issue.identifier`
+Input: `issue.identifier` plus tracker project metadata when available.
 
 Algorithm summary:
 
 1. Sanitize identifier to `workspace_key`.
 2. Compute workspace path under workspace root.
-3. Ensure the workspace path exists as a directory.
-4. Mark `created_now=true` only if the directory was created during this call; otherwise
+3. Resolve the effective project/workflow/repository identity when the
+   implementation has enough information to do so.
+4. If the workspace already exists and has a recorded identity, compare it to
+   the current identity before reuse. Mismatch requires preserving or replacing
+   the stale path according to implementation policy before any hooks or agent
+   startup run inside it.
+5. If the workspace exists without a recorded identity, implementations MAY
+   infer identity from local metadata such as VCS remotes. Unsafe inference
+   MUST NOT silently bless the workspace for reuse.
+6. Ensure the workspace path exists as a directory.
+7. Mark `created_now=true` only if the directory was created during this call; otherwise
    `created_now=false`.
-5. If `created_now=true`, run `after_create` hook if configured.
+8. If `created_now=true`, run `after_create` hook if configured.
+9. If identity validation is enabled, record the new identity only after
+   workspace creation and `after_create` succeed.
 
 Notes:
 
