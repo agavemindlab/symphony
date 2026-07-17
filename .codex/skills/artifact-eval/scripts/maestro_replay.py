@@ -228,7 +228,7 @@ def parse_marker_list(output: str, pattern: re.Pattern) -> list[str]:
         value = match.group(1).strip().strip("`*_ ")
         if value.lower() == "none":
             return []
-        return [normalize_marker(marker) for marker in value.split(",") if marker.strip().strip("`*_ ")]
+        return [normalize_marker(marker) for marker in re.split(r"[,，]", value) if marker.strip().strip("`*_ ")]
     return []
 
 
@@ -282,6 +282,25 @@ def _as_text(value: object) -> str:
     return ""
 
 
+def output_marker_present(marker: str, output: str) -> bool:
+    """Require prose contract markers to be field labels, not mentions."""
+    if re.fullmatch(r"[a-z0-9][a-z0-9_-]*", marker, re.IGNORECASE):
+        return re.search(rf"(?<![a-z0-9_-]){re.escape(marker)}(?![a-z0-9_-])", output, re.IGNORECASE) is not None
+
+    expected = re.sub(r"\s*:\s*", ":", marker.replace("：", ":").strip())
+    for line in output.splitlines():
+        normalized = re.sub(r"^\s*(?:(?:[-*+]|#+|>)\s+)*", "", line).replace("**", "").replace("：", ":").strip().strip("`_ ")
+        normalized = re.sub(r"\s*:\s*", ":", normalized)
+        if ":" in expected:
+            if normalized.startswith(expected):
+                return True
+        else:
+            label = normalized.split(":", 1)[0].strip().strip("`*_ ")
+            if label == expected or label.endswith(" " + expected):
+                return True
+    return False
+
+
 _REPLAY_WORKDIR: list[str] = []
 
 
@@ -306,19 +325,22 @@ def run_case(case: dict, *, codex_argv: list[str], prompt: str, timeout_s: float
             cwd=_replay_workdir(),
         )
         output = completed.stdout + ("\n" + completed.stderr if completed.stderr else "")
-        parsed = parse_prediction(output)
+        parsed = parse_prediction(output) if completed.returncode == 0 else "error"
+        returncode = completed.returncode
     except subprocess.TimeoutExpired as exc:
         output = _as_text(exc.stdout) + _as_text(exc.stderr)
         parsed = "timeout"
+        returncode = None
     duration_s = round(time.monotonic() - started, 1)
     prediction = parsed if isinstance(parsed, dict) else {"prediction": parsed}
-    prediction["observed_output_markers"] = [marker for marker in case.get("required_output_markers") or [] if marker in output]
+    prediction["observed_output_markers"] = [marker for marker in case.get("required_output_markers") or [] if output_marker_present(marker, output)]
     return {
         **case,
         **prediction,
         "confidence": parse_confidence(output),
         "raw_tail": output[-RAW_TAIL_CHARS:],
         "duration_s": duration_s,
+        "returncode": returncode,
     }
 
 
@@ -454,23 +476,20 @@ def score_predictions(
     replay processes appending to one file must not double-count a case.
     """
     label_by_id = {case_id(case): case for case in cases if case_id(case)}
-    predictions = list({case_id(p): p for p in predictions}.values())
+    prediction_by_id = {case_id(prediction): prediction for prediction in predictions if case_id(prediction)}
     overall = empty_stats()
     by_phase: dict[str, dict] = {}
     by_label: dict[str, dict] = {}
     confusion: dict[str, dict[str, int]] = {}
     disagreements: list[dict] = []
-    excluded = 0
+    excluded = sum(prediction_id not in label_by_id for prediction_id in prediction_by_id)
 
-    for prediction in predictions:
-        case = label_by_id.get(case_id(prediction))
-        if case is None:
-            excluded += 1
-            continue
+    for case in label_by_id.values():
         expected = expected_fn(case)
         if expected is None:
             excluded += 1
             continue
+        prediction = prediction_by_id.get(case_id(case), {})
         label = label_fn(case)
         phase = phase_fn(case)
         predicted = prediction.get("prediction") or "unparsed"

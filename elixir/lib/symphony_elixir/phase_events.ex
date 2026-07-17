@@ -16,6 +16,7 @@ defmodule SymphonyElixir.PhaseEvents do
   @confidence_label_regex ~r/置信度\s*[:：]?\s*(\d+(?:\.\d+)?)/u
   @marker_decoration_regex ~r/\A[\s>#*_`~-]+/u
   @needs_clarification_regex ~r/(?:\A|\n)\s*###\s+NEEDS CLARIFICATION\b|\[NEEDS CLARIFICATION/iu
+  @convergence_decision_regex ~r/\A\s*(?:[-*+]\s+)?(?:\*\*)?收敛判断(?:\*\*)?\s*[:：]\s*[*_`]*(continue[ _\/-]+implementation|rework[ _\/-]+design|ask[ _\/-]+clarification)[*_`]*\s*\z/iu
 
   @recommendation_markers [
     {"continue implementation", "continue_implementation"},
@@ -255,8 +256,15 @@ defmodule SymphonyElixir.PhaseEvents do
   end
 
   defp recommendation_from_line(line) do
-    if String.contains?(line, "建议回复方式") or String.contains?(line, "收敛判断") do
-      line |> String.downcase() |> String.replace(~r/[_\/-]/u, " ") |> match_recommendation()
+    if String.contains?(line, "收敛判断") do
+      case Regex.run(@convergence_decision_regex, line, capture: :all_but_first) do
+        [decision] -> decision |> String.downcase() |> String.replace(~r/[ _\/-]+/u, " ") |> match_recommendation()
+        nil -> "unknown"
+      end
+    else
+      if String.contains?(line, "建议回复方式") do
+        line |> String.downcase() |> String.replace(~r/[_\/-]/u, " ") |> match_recommendation()
+      end
     end
   end
 

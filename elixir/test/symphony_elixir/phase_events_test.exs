@@ -300,6 +300,15 @@ defmodule SymphonyElixir.PhaseEventsTest do
   test "maestro reviews without a recognizable recommendation are unknown" do
     assert %{recommendation: "unknown"} = derive_maestro_event("🤖 Maestro 预审核:\n建议回复方式: hold off for now")
     assert %{recommendation: "unknown", confidence: nil} = derive_maestro_event("🤖 Maestro 预审核: 只留了一句话，没有建议行。")
+
+    for decision <- [
+          "rework design or continue implementation",
+          "not continue implementation",
+          "continue implementation（待确认）"
+        ] do
+      assert %{recommendation: "unknown"} =
+               derive_maestro_event("🤖 Maestro 预审核:\n收敛判断: #{decision}")
+    end
   end
 
   test "derive_all adds one human_comment event per non-bot comment, thread replies included" do

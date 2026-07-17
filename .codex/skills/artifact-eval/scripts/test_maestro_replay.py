@@ -69,6 +69,23 @@ class ParseRecommendationTest(unittest.TestCase):
             },
         )
 
+        self.assertEqual(
+            maestro_replay.parse_consumed_context("CONSUMED_CONTEXT: marker-a，marker-b"),
+            ["marker-a", "marker-b"],
+        )
+
+    def test_output_markers_require_contract_fields_not_prose_mentions(self) -> None:
+        output = "卡片缺少待人工回答的问题和回答判定标准。"
+        self.assertFalse(maestro_replay.output_marker_present("待人工回答的问题", output))
+        self.assertFalse(maestro_replay.output_marker_present("回答判定标准", output))
+        self.assertTrue(maestro_replay.output_marker_present("待人工回答的问题", "### 待人工回答的问题: 请选择"))
+        self.assertTrue(
+            maestro_replay.output_marker_present(
+                "执行状态: awaiting human action",
+                "- **执行状态**：awaiting human action",
+            ),
+        )
+
 
 class SelectCasesTest(unittest.TestCase):
     CASES = [
@@ -168,6 +185,14 @@ class ScoreTest(unittest.TestCase):
             [(item["issue_identifier"], item["prediction"]) for item in result["disagreements"]],
             [("DEV-2", "approve"), ("DEV-3", "timeout")],
         )
+
+    def test_missing_prediction_counts_as_disagreement(self) -> None:
+        cases = [case("DEV-1", "a1"), case("DEV-2", "a2")]
+
+        result = maestro_replay.score_predictions(cases, [prediction("DEV-1", "a1", "approve")])
+
+        self.assertEqual(result["overall"], {"total": 2, "agreed": 1, "disagreed": 1, "agreement_rate": 0.5})
+        self.assertEqual(result["confusion"]["approve"], {"approve": 1, "unparsed": 1})
 
     def test_render_report_lists_tables_and_disagreements(self) -> None:
         cases = [case("DEV-1", "a1"), case("DEV-2", "a2", label="request_changes")]
@@ -371,6 +396,16 @@ class ReplayCommandTest(unittest.TestCase):
         self.assertEqual(result["prediction"], "timeout")
         self.assertEqual(result["artifact_comment_id"], "a1")
         self.assertGreaterEqual(result["duration_s"], 0.5)
+
+    def test_nonzero_exit_is_classified_as_error(self) -> None:
+        result = maestro_replay.run_case(
+            case("DEV-1", "a1"),
+            codex_argv=[sys.executable, "-c", "print('RECOMMENDATION: approve'); raise SystemExit(1)"],
+            prompt="prompt",
+            timeout_s=5,
+        )
+        self.assertEqual(result["prediction"], "error")
+        self.assertEqual(result["returncode"], 1)
 
     def test_score_command_writes_report(self) -> None:
         predictions_path = self.tmp / "predictions.jsonl"

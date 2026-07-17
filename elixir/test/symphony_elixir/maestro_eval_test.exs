@@ -234,6 +234,35 @@ defmodule SymphonyElixir.MaestroEvalTest do
              MaestroEval.pairs(events)
   end
 
+  test "a newer Maestro card closes the prior convergence outcome window" do
+    events = [
+      review_event(%{
+        "event_id" => "first-card",
+        "issue_id" => "i1",
+        "phase" => "Implementation",
+        "recommendation" => "continue_implementation"
+      }),
+      review_event(%{
+        "event_id" => "second-card",
+        "issue_id" => "i1",
+        "phase" => "Implementation",
+        "recommendation" => "rework_design",
+        "occurred_at" => "2026-06-15T10:10:00Z"
+      }),
+      %{
+        "event_type" => "phase_rollback",
+        "event_id" => "design-rollback",
+        "issue_id" => "i1",
+        "target_phase" => "Design",
+        "occurred_at" => "2026-06-15T10:20:00Z"
+      }
+    ]
+
+    assert [first, second] = MaestroEval.pairs(events)
+    assert %{agreement: :pending, verdict_source: nil} = first
+    assert %{agreement: :agreed, verdict_source: "thread", signal_event_id: "design-rollback"} = second
+  end
+
   test "thread signals take precedence over the dispatch join" do
     events = [
       review_event(%{

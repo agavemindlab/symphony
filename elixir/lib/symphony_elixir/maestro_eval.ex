@@ -72,7 +72,7 @@ defmodule SymphonyElixir.MaestroEval do
         do: Analytics.phase_outcome_entries(events),
         else: []
 
-    Enum.map(reviews, &build_pair(&1, run_starts, signals, outcomes))
+    Enum.map(reviews, &build_pair(&1, run_starts, signals, outcomes, reviews))
   end
 
   @doc """
@@ -166,14 +166,14 @@ defmodule SymphonyElixir.MaestroEval do
     end
   end
 
-  defp build_pair(review, run_starts, signals, outcomes) do
+  defp build_pair(review, run_starts, signals, outcomes, reviews) do
     reviewed_at = parse_datetime(Map.get(review, "occurred_at") || Map.get(review, "recorded_at"))
     verdict = next_run_start(review, reviewed_at, run_starts)
     verdict_state = verdict && verdict.state
 
     signal =
       if Analytics.convergence_review?(review),
-        do: convergence_signal(review, reviewed_at, outcomes),
+        do: convergence_signal(review, reviewed_at, outcomes, reviews),
         else: thread_signal(review, reviewed_at, signals)
 
     {agreement, verdict_source, signal_event_id} = resolve_verdict(review, signal, verdict_state)
@@ -222,19 +222,8 @@ defmodule SymphonyElixir.MaestroEval do
     end
   end
 
-  defp convergence_signal(_review, nil, _outcomes), do: nil
-
-  defp convergence_signal(review, reviewed_at, outcomes) do
-    issue_id = Map.get(review, "issue_id")
-
-    outcomes
-    |> Enum.filter(fn outcome ->
-      not is_nil(issue_id) and
-        outcome.issue_id == issue_id and
-        DateTime.compare(outcome.occurred_at, reviewed_at) == :gt
-    end)
-    |> Enum.min_by(& &1.occurred_at, DateTime, fn -> nil end)
-    |> case do
+  defp convergence_signal(review, _reviewed_at, outcomes, reviews) do
+    case Analytics.next_phase_outcome(review, outcomes, reviews) do
       nil ->
         nil
 
@@ -277,8 +266,13 @@ defmodule SymphonyElixir.MaestroEval do
   defp signal_phase(%{"event_type" => "phase_rollback"} = event), do: Map.get(event, "target_phase")
   defp signal_phase(event), do: Map.get(event, "phase")
 
-  defp resolve_verdict(%{"recommendation" => recommendation} = review, signal, verdict_state)
-       when recommendation in ["continue_implementation", "rework_design"] do
+  defp resolve_verdict(review, signal, verdict_state) do
+    if Analytics.convergence_review?(review),
+      do: resolve_convergence_verdict(review, signal, verdict_state),
+      else: resolve_ordinary_verdict(review, signal, verdict_state)
+  end
+
+  defp resolve_convergence_verdict(review, signal, verdict_state) do
     agreement = Analytics.maestro_verdict(review, verdict_state, signal)
 
     cond do
@@ -288,7 +282,7 @@ defmodule SymphonyElixir.MaestroEval do
     end
   end
 
-  defp resolve_verdict(review, signal, verdict_state) do
+  defp resolve_ordinary_verdict(review, signal, verdict_state) do
     case thread_agreement(Map.get(review, "recommendation"), signal, verdict_state) do
       nil -> dispatch_verdict(review, verdict_state)
       agreement -> {agreement, "thread", signal.event_id}

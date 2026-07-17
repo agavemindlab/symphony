@@ -572,7 +572,7 @@ defmodule SymphonyElixir.Analytics do
       if Enum.any?(reviews, &convergence_review?/1), do: phase_outcome_entries(events), else: []
 
     Enum.reduce(reviews, %{review_count: 0, agreed: 0, overridden: 0, pending: 0}, fn review, acc ->
-      outcome = if convergence_review?(review), do: next_phase_outcome(review, phase_outcomes)
+      outcome = if convergence_review?(review), do: next_phase_outcome(review, phase_outcomes, reviews)
       verdict = maestro_verdict(review, next_run_state(review, run_starts), outcome)
 
       acc
@@ -708,12 +708,25 @@ defmodule SymphonyElixir.Analytics do
   defp outcome_phase(event), do: Map.get(event, "target_phase")
 
   @doc false
-  @spec next_phase_outcome(map(), [map()]) :: map() | nil
-  def next_phase_outcome(review, phase_outcomes) do
+  @spec next_phase_outcome(map(), [map()], [map()]) :: map() | nil
+  def next_phase_outcome(review, phase_outcomes, reviews) do
     with issue_id when not is_nil(issue_id) <- Map.get(review, "issue_id"),
          %DateTime{} = reviewed_at <- maestro_reviewed_at(review) do
+      next_reviewed_at =
+        reviews
+        |> Enum.filter(fn candidate ->
+          Map.get(candidate, "issue_id") == issue_id and
+            match?(%DateTime{}, maestro_reviewed_at(candidate)) and
+            DateTime.compare(maestro_reviewed_at(candidate), reviewed_at) == :gt
+        end)
+        |> Enum.map(&maestro_reviewed_at/1)
+        |> Enum.min(DateTime, fn -> nil end)
+
       phase_outcomes
-      |> Enum.filter(&(&1.issue_id == issue_id and DateTime.compare(&1.occurred_at, reviewed_at) == :gt))
+      |> Enum.filter(fn outcome ->
+        outcome.issue_id == issue_id and DateTime.compare(outcome.occurred_at, reviewed_at) == :gt and
+          (is_nil(next_reviewed_at) or DateTime.compare(outcome.occurred_at, next_reviewed_at) == :lt)
+      end)
       |> Enum.min_by(& &1.occurred_at, DateTime, fn -> nil end)
     else
       _ -> nil
