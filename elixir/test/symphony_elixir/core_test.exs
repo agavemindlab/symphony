@@ -367,6 +367,8 @@ defmodule SymphonyElixir.CoreTest do
       assert prompt =~ "awaiting human action"
       assert prompt =~ "判断理由"
       assert prompt =~ "下一轮建议方向"
+      assert prompt =~ "待人工回答的问题"
+      assert prompt =~ "回答判定标准"
     end
 
     assert maestro_reviewer =~ "`continue implementation` to Implementation / `In Progress`"
@@ -392,6 +394,8 @@ defmodule SymphonyElixir.CoreTest do
     assert workflow =~ "actor.app == false"
     assert workflow =~ "newest row that produced the current state"
     assert workflow =~ "has no `botActor`"
+    assert workflow =~ "differs from the Maestro card author's actor id"
+    assert workflow =~ "using a user-actor token"
     assert normalized_workflow =~ "matching the current Implementation artifact id and PR Head"
     assert workflow =~ "human `In Progress` + `continue implementation`"
     assert workflow =~ "human `Rework` + `rework design`"

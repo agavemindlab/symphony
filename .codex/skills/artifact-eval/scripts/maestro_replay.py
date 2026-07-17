@@ -33,7 +33,7 @@ DEFAULT_CODEX_CMD = (
 )
 HERMETIC_CODEX_CMD = "codex exec --sandbox read-only --skip-git-repo-check"
 DEFAULT_OUTPUT_DIR = "eval/reviews/replay"
-DEFAULT_LABELS = "approve,request_changes"
+DEFAULT_LABELS = "approve,request_changes,escalated"
 DEFAULT_CONCURRENCY = 2
 DEFAULT_TIMEOUT_S = 600.0
 RAW_TAIL_CHARS = 2000
@@ -50,7 +50,9 @@ RECOMMENDATIONS = (
     "approve",
 )
 REVIEWER_PROMPT_RELPATH = Path(".codex/skills/maestro/agents/maestro-reviewer.md")
-RECOMMENDATION_LINE_RE = re.compile(r"recommendation\s*[:：]\s*(.+)", re.IGNORECASE)
+CONTRACT_PREFIX = r"^\s*(?:[-*>]\s*)*(?:[`*_]+\s*)?"
+CONTRACT_FIELD_END = r"(?:\s*[`*_]+)?\s*[:：]\s*(.+?)\s*$"
+RECOMMENDATION_LINE_RE = re.compile(CONTRACT_PREFIX + r"recommendation" + CONTRACT_FIELD_END, re.IGNORECASE)
 CONFIDENCE_LINE_RE = re.compile(r"confidence\s*[:：]\s*(\d+(?:\.\d+)?)", re.IGNORECASE)
 DEFAULT_ROUTING_OUTPUT_DIR = "eval/routing/replay"
 PHASES = ("Requirements", "Design", "Implementation", "Deployment")
@@ -58,8 +60,8 @@ ROUTING_TARGETS = (*PHASES, "Human Review")
 WORKFLOW_RELPATH = Path("workflows/agavemindlab/WORKFLOW.md")
 ROUTING_EXCERPT_START = "## Phase Map"
 ROUTING_EXCERPT_END = "## Skill Interaction Protocol"
-TARGET_PHASE_LINE_RE = re.compile(r"target[ _]?phase\s*[:：]\s*(.+)", re.IGNORECASE)
-CONSUMED_DECISION_LINE_RE = re.compile(r"consumed[ _]?decision\s*[:：]\s*(.+)", re.IGNORECASE)
+TARGET_PHASE_LINE_RE = re.compile(CONTRACT_PREFIX + r"target[ _]?phase" + CONTRACT_FIELD_END, re.IGNORECASE)
+CONSUMED_DECISION_LINE_RE = re.compile(CONTRACT_PREFIX + r"consumed[ _]?decision" + CONTRACT_FIELD_END, re.IGNORECASE)
 CONSUMED_CONTEXT_LINE_RE = re.compile(r"consumed[ _]?context\s*[:：]\s*(.+)", re.IGNORECASE)
 
 
@@ -87,7 +89,12 @@ def read_jsonl(path: Path) -> list[dict]:
 
 def case_id(case: dict) -> str:
     """Review cases are keyed by artifact, routing cases by their publish event."""
-    return str(case.get("artifact_comment_id") or case.get("published_event_id") or case.get("issue_identifier") or "")
+    explicit = case.get("id") or case.get("artifact_comment_id") or case.get("published_event_id")
+    if explicit:
+        return str(explicit)
+    issue = case.get("issue_identifier") or ""
+    dispatch_at = case.get("dispatch_at")
+    return f"{issue}@{dispatch_at}" if dispatch_at else str(issue)
 
 
 def select_cases(
@@ -97,10 +104,9 @@ def select_cases(
     phase: str | None = None,
     sample: int | None = None,
     phase_field: str = "phase",
-    include_frozen: bool = False,
 ) -> list[dict]:
     """Deterministic selection: filter, then stable-sort by case id, then head."""
-    selected = [case for case in cases if labels is None or case.get("label") in labels or include_frozen and "case_context" in case]
+    selected = [case for case in cases if labels is None or case.get("label") in labels]
     if phase:
         selected = [case for case in selected if case.get(phase_field) == phase]
     selected = sorted(selected, key=case_id)
@@ -164,7 +170,8 @@ def compose_routing_prompt(workflow_excerpt: str, case: dict) -> str:
             f"case_context:\n```json\n{context}\n```\n"
             "最后三行输出且仅输出：\n"
             "`TARGET_PHASE: <Requirements|Design|Implementation|Deployment|Human Review>`\n"
-            "`CONSUMED_DECISION: <continue_implementation|rework_design|ask_clarification|none>`\n"
+            "`CONSUMED_DECISION: <本次路由实际消费的 Maestro 卡片判断；"
+            "continue_implementation|rework_design|ask_clarification|none>`\n"
             "`CONSUMED_CONTEXT: <逗号分隔的原样 marker；没有则 none>`"
         )
         return workflow_excerpt.rstrip() + "\n\n" + preamble + "\n"
@@ -185,29 +192,30 @@ def frozen_context_json(case: dict) -> str | None:
 
 def parse_target_phase(output: str) -> str:
     """Parse the LAST `TARGET_PHASE:` line, tolerating markdown decoration."""
-    for line in reversed(output.splitlines()):
-        match = TARGET_PHASE_LINE_RE.search(line)
-        if not match:
-            continue
-        value = match.group(1).lower()
-        for phase in ROUTING_TARGETS:
-            if phase.lower() in value:
-                return phase
-        return "unparsed"
-    return "unparsed"
+    return _parse_enum_line(output, TARGET_PHASE_LINE_RE, ROUTING_TARGETS)
 
 
 def parse_consumed_decision(output: str) -> str:
     """Parse and normalize the last frozen-routing decision marker."""
+    parsed = _parse_enum_line(
+        output,
+        CONSUMED_DECISION_LINE_RE,
+        ("continue implementation", "ask clarification", "rework design", "none"),
+    )
+    return parsed.replace(" ", "_") if parsed != "unparsed" else parsed
+
+
+def _parse_enum_line(output: str, pattern: re.Pattern, allowed: tuple[str, ...]) -> str:
+    """Parse one exact enum value with optional markdown and parenthetical notes."""
     for line in reversed(output.splitlines()):
-        match = CONSUMED_DECISION_LINE_RE.search(line)
+        match = pattern.match(line)
         if not match:
             continue
-        normalized = re.sub(r"[_/-]", " ", match.group(1).lower())
-        normalized = " ".join(re.sub(r"[^a-z ]", " ", normalized).split())
-        for decision in ("continue implementation", "ask clarification", "rework design", "none"):
-            if decision in normalized:
-                return decision.replace(" ", "_")
+        value = match.group(1).strip().strip("`*_ ")
+        for item in allowed:
+            token = re.sub(r"\\ ", r"[ _/-]+", re.escape(item))
+            if re.fullmatch(rf"{token}(?:\s*[（(][^()（）]*[)）])?", value, re.IGNORECASE):
+                return item
         return "unparsed"
     return "unparsed"
 
@@ -263,18 +271,7 @@ def parse_confidence(output: str):
 
 def parse_recommendation(output: str) -> str:
     """Parse the LAST `RECOMMENDATION:` line, tolerating markdown decoration."""
-    for line in reversed(output.splitlines()):
-        match = RECOMMENDATION_LINE_RE.search(line)
-        if not match:
-            continue
-        normalized = re.sub(r"[_/-]", " ", match.group(1).lower())
-        normalized = re.sub(r"[^a-z ]", " ", normalized)
-        normalized = " ".join(normalized.split())
-        for recommendation in RECOMMENDATIONS:
-            if recommendation in normalized:
-                return recommendation
-        return "unparsed"
-    return "unparsed"
+    return _parse_enum_line(output, RECOMMENDATION_LINE_RE, RECOMMENDATIONS)
 
 
 def _as_text(value: object) -> str:
@@ -390,7 +387,7 @@ def replay(args: argparse.Namespace) -> int:
     reviewer_prompt = reviewer_prompt_path.read_text()
 
     labels = {label.strip() for label in args.labels.split(",") if label.strip()}
-    cases = select_cases(read_jsonl(Path(args.cases)), labels=labels, phase=args.phase, sample=args.sample, include_frozen=True)
+    cases = select_cases(read_jsonl(Path(args.cases)), labels=labels, phase=args.phase, sample=args.sample)
     return execute_replay(
         cases,
         args=args,

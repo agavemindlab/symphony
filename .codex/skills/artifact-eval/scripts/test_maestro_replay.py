@@ -49,6 +49,14 @@ class ParseRecommendationTest(unittest.TestCase):
         self.assertEqual(maestro_replay.parse_recommendation("RECOMMENDATION: 略"), "unparsed")
         self.assertEqual(maestro_replay.parse_recommendation(""), "unparsed")
 
+    def test_rejects_negated_ambiguous_or_non_contract_values(self) -> None:
+        self.assertEqual(maestro_replay.parse_recommendation("RECOMMENDATION: not approve"), "unparsed")
+        self.assertEqual(
+            maestro_replay.parse_recommendation("RECOMMENDATION: approve or request changes"),
+            "unparsed",
+        )
+        self.assertEqual(maestro_replay.parse_recommendation("I think RECOMMENDATION: approve"), "unparsed")
+
     def test_parses_frozen_reviewer_context(self) -> None:
         self.assertEqual(
             maestro_replay.parse_reviewer_prediction(
@@ -86,6 +94,10 @@ class SelectCasesTest(unittest.TestCase):
         auto_only = maestro_replay.select_cases(self.CASES, labels={"auto_advanced"})
         self.assertEqual([c["artifact_comment_id"] for c in auto_only], ["bbb"])
 
+    def test_frozen_cases_do_not_bypass_label_filter(self) -> None:
+        frozen = {**case("DEV-6", "fff", label="pending"), "case_context": {}}
+        self.assertEqual(maestro_replay.select_cases([frozen], labels={"escalated"}), [])
+
 
 class FrozenDecisionFixtureTest(unittest.TestCase):
     BASE_MARKERS = {
@@ -105,6 +117,7 @@ class FrozenDecisionFixtureTest(unittest.TestCase):
 
         self.assertEqual({case["expected_decision"] for case in cases}, {"continue_implementation", "rework_design", "ask_clarification"})
         self.assertTrue(all(self.BASE_MARKERS <= set(case["required_output_markers"]) for case in cases))
+        self.assertTrue(all(case["label"] == "escalated" for case in cases))
         self.assertTrue(all(case["case_context"] and case["required_context_markers"] for case in cases))
         rework = next(case for case in cases if case["expected_decision"] == "rework_design")
         self.assertTrue(
@@ -119,6 +132,10 @@ class FrozenDecisionFixtureTest(unittest.TestCase):
                 "constraint-human-gate",
             }
             <= set(rework["required_output_markers"]),
+        )
+        clarification = next(case for case in cases if case["expected_decision"] == "ask_clarification")
+        self.assertTrue(
+            {"待人工回答的问题", "回答判定标准"} <= set(clarification["required_output_markers"]),
         )
 
 
@@ -476,6 +493,19 @@ class ParseTargetPhaseTest(unittest.TestCase):
         self.assertEqual(maestro_replay.parse_target_phase("TARGET_PHASE: 略"), "unparsed")
         self.assertEqual(maestro_replay.parse_target_phase(""), "unparsed")
 
+    def test_rejects_negated_ambiguous_or_non_contract_values(self) -> None:
+        self.assertEqual(maestro_replay.parse_target_phase("TARGET_PHASE: not Design"), "unparsed")
+        self.assertEqual(maestro_replay.parse_target_phase("TARGET_PHASE: Design or Implementation"), "unparsed")
+        self.assertEqual(maestro_replay.parse_target_phase("result TARGET_PHASE: Design"), "unparsed")
+        self.assertEqual(
+            maestro_replay.parse_consumed_decision("CONSUMED_DECISION: not continue implementation"),
+            "unparsed",
+        )
+        self.assertEqual(
+            maestro_replay.parse_consumed_decision("CONSUMED_DECISION: rework design or ask clarification"),
+            "unparsed",
+        )
+
     def test_parses_the_frozen_routing_contract(self) -> None:
         self.assertEqual(
             maestro_replay.parse_routing_prediction(
@@ -515,26 +545,41 @@ class RoutingSelectCasesTest(unittest.TestCase):
         implementation = maestro_replay.select_cases(self.CASES, phase="Implementation", phase_field="expected_phase")
         self.assertEqual([c["published_event_id"] for c in implementation], ["phase_published:c2"])
 
+    def test_fallback_case_id_includes_dispatch_time(self) -> None:
+        first = {"issue_identifier": "DEV-1", "dispatch_at": "2026-01-01T00:00:00Z"}
+        second = {"issue_identifier": "DEV-1", "dispatch_at": "2026-01-02T00:00:00Z"}
+        self.assertNotEqual(maestro_replay.case_id(first), maestro_replay.case_id(second))
+
 
 class FrozenRoutingFixtureTest(unittest.TestCase):
-    def test_covers_human_status_routes_and_automation_negatives(self) -> None:
+    def test_covers_escalated_route_families(self) -> None:
         path = Path(__file__).resolve().parent.parent / "fixtures" / "escalated-routing-cases.jsonl"
         cases = maestro_replay.read_jsonl(path)
 
         self.assertEqual(len({maestro_replay.case_id(case) for case in cases}), len(cases))
-        self.assertEqual(
-            {(case["state"], case["expected_decision"], case["expected_phase"]) for case in cases},
+        families = {case["family"] for case in cases}
+        self.assertTrue(
             {
-                ("In Progress", "continue_implementation", "Implementation"),
-                ("Rework", "rework_design", "Design"),
-                ("In Progress", "none", "Human Review"),
-                ("Rework", "none", "Human Review"),
-            },
+                "continue_status",
+                "rework_status",
+                "clarification_unanswered",
+                "clarification_answered",
+                "stale_binding",
+                "missing_action",
+                "unknown_actor",
+                "unreadable_history",
+                "card_status_mismatch",
+                "slash_command_precedence",
+                "card_author_token",
+            }
+            <= families,
         )
         self.assertTrue(all(set(case["case_context"]) == {"artifact", "maestro_card", "state_history", "human_feedback"} for case in cases))
-        rejected = [case for case in cases if case["expected_phase"] == "Human Review"]
-        self.assertTrue(any(case["case_context"]["state_history"][0]["actor"]["app"] for case in rejected))
-        self.assertTrue(any(case["case_context"]["state_history"][0]["botActor"] for case in rejected))
+        author_token = next(case for case in cases if case["family"] == "card_author_token")
+        self.assertEqual(
+            author_token["case_context"]["state_history"][0]["actor"]["id"],
+            author_token["case_context"]["maestro_card"]["author_id"],
+        )
 
 
 class RoutingScoreTest(unittest.TestCase):

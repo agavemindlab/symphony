@@ -13,6 +13,8 @@ defmodule SymphonyElixir.Analytics do
   @lock_timeout_ms 5_000
 
   @windows [:h24, :d7, :d30, :all]
+  @convergence_recommendations ["continue_implementation", "rework_design"]
+  @valid_phases ["Requirements", "Design", "Implementation", "Deployment"]
 
   @type event :: map()
   @type window :: :h24 | :d7 | :d30 | :all
@@ -564,12 +566,14 @@ defmodule SymphonyElixir.Analytics do
 
   defp maestro_metrics(events) do
     run_starts = run_started_entries(events)
-    phase_outcomes = phase_outcome_entries(events)
+    reviews = Enum.filter(events, &(Map.get(&1, "event_type") == "maestro_review"))
 
-    events
-    |> Enum.filter(&(Map.get(&1, "event_type") == "maestro_review"))
-    |> Enum.reduce(%{review_count: 0, agreed: 0, overridden: 0, pending: 0}, fn review, acc ->
-      verdict = maestro_verdict(review, next_run_state(review, run_starts), next_phase_outcome(review, phase_outcomes))
+    phase_outcomes =
+      if Enum.any?(reviews, &convergence_review?/1), do: phase_outcome_entries(events), else: []
+
+    Enum.reduce(reviews, %{review_count: 0, agreed: 0, overridden: 0, pending: 0}, fn review, acc ->
+      outcome = if convergence_review?(review), do: next_phase_outcome(review, phase_outcomes)
+      verdict = maestro_verdict(review, next_run_state(review, run_starts), outcome)
 
       acc
       |> Map.update!(:review_count, &(&1 + 1))
@@ -581,9 +585,9 @@ defmodule SymphonyElixir.Analytics do
   defp tally_maestro_verdict(acc, verdict), do: Map.update!(acc, verdict, &(&1 + 1))
 
   @doc """
-  Classifies whether the human verdict (the state of the next `run_started`
-  dispatch for the issue, or `nil` when none exists yet) agreed with a
-  `maestro_review` event's recommendation.
+  Classifies whether the next observed human route agreed with a
+  `maestro_review` event's recommendation. Ordinary recommendations use the
+  next dispatch state; convergence recommendations require a phase outcome.
   """
   @spec maestro_verdict(map(), String.t() | nil) :: :agreed | :overridden | :pending | :excluded
   def maestro_verdict(review, next_state) when is_map(review) do
@@ -631,7 +635,11 @@ defmodule SymphonyElixir.Analytics do
 
   defp convergence_verdict(_expected_phase, "Merging", _outcome), do: :overridden
   defp convergence_verdict(expected_phase, _next_state, %{target_phase: expected_phase}), do: :agreed
-  defp convergence_verdict(_expected_phase, _next_state, %{target_phase: _other_phase}), do: :overridden
+
+  defp convergence_verdict(_expected_phase, _next_state, %{target_phase: other_phase})
+       when other_phase in @valid_phases,
+       do: :overridden
+
   defp convergence_verdict(_expected_phase, _next_state, _outcome), do: :pending
 
   defp merge_expectation_verdict("Merging"), do: :agreed
@@ -670,13 +678,28 @@ defmodule SymphonyElixir.Analytics do
     end
   end
 
-  defp phase_outcome_entries(events) do
+  @doc false
+  @spec convergence_review?(map()) :: boolean()
+  def convergence_review?(review), do: Map.get(review, "recommendation") in @convergence_recommendations
+
+  @doc false
+  @spec phase_outcome_entries([map()]) :: [map()]
+  def phase_outcome_entries(events) do
     events
     |> Enum.filter(&(Map.get(&1, "event_type") in ["phase_published", "phase_rollback"]))
     |> Enum.flat_map(fn event ->
-      case parse_datetime(Map.get(event, "occurred_at") || Map.get(event, "recorded_at")) do
-        nil -> []
-        occurred_at -> [%{issue_id: Map.get(event, "issue_id"), occurred_at: occurred_at, target_phase: outcome_phase(event)}]
+      with target_phase when target_phase in @valid_phases <- outcome_phase(event),
+           %DateTime{} = occurred_at <- parse_datetime(Map.get(event, "occurred_at") || Map.get(event, "recorded_at")) do
+        [
+          %{
+            issue_id: Map.get(event, "issue_id"),
+            occurred_at: occurred_at,
+            target_phase: target_phase,
+            event_id: Map.get(event, "event_id")
+          }
+        ]
+      else
+        _invalid -> []
       end
     end)
   end
@@ -684,7 +707,9 @@ defmodule SymphonyElixir.Analytics do
   defp outcome_phase(%{"event_type" => "phase_published"} = event), do: Map.get(event, "phase")
   defp outcome_phase(event), do: Map.get(event, "target_phase")
 
-  defp next_phase_outcome(review, phase_outcomes) do
+  @doc false
+  @spec next_phase_outcome(map(), [map()]) :: map() | nil
+  def next_phase_outcome(review, phase_outcomes) do
     with issue_id when not is_nil(issue_id) <- Map.get(review, "issue_id"),
          %DateTime{} = reviewed_at <- maestro_reviewed_at(review) do
       phase_outcomes

@@ -86,7 +86,9 @@ Map `continue implementation` to Implementation / `In Progress`, `rework design`
 to Design / `Rework`, and `ask clarification` to Implementation / `unchanged`.
 For `rework design`, also state `失效的 Design assumption`,
 `建议修改的机制或边界`, `下一轮 proof / acceptance criteria`, and
-`不受影响的既有约束`. The card is reviewable advice, not a ready-to-send
+`不受影响的既有约束`. For `ask clarification`, also state one concrete
+`待人工回答的问题` and its `回答判定标准`, so a later reply can be classified
+as an answer rather than unrelated discussion. The card is reviewable advice, not a ready-to-send
 artifact reply: do not include `/rework ...`, `建议回复方式: request changes`,
 or an auto-Rework marker.
 Approve or merge nudge drafts must not include caveats such as "do not

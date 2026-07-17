@@ -628,6 +628,18 @@ defmodule SymphonyElixir.AnalyticsTest do
              "In Progress",
              %{target_phase: "Design"}
            ) == :overridden
+
+    assert Analytics.maestro_verdict(
+             review.("continue_implementation"),
+             "In Progress",
+             %{target_phase: nil}
+           ) == :pending
+
+    assert Analytics.maestro_verdict(
+             review.("continue_implementation"),
+             "In Progress",
+             %{target_phase: "Unknown"}
+           ) == :pending
   end
 
   test "dashboard agreement for ESCALATED decisions follows the next phase outcome" do
@@ -643,6 +655,12 @@ defmodule SymphonyElixir.AnalyticsTest do
         occurred_at: "2026-07-15T10:00:00Z"
       },
       %{event_type: :run_started, issue_id: "issue-continue", state: "In Progress", recorded_at: "2026-07-15T10:05:00Z"},
+      %{
+        event_type: :phase_published,
+        event_id: "phase_published:malformed",
+        issue_id: "issue-continue",
+        occurred_at: "2026-07-15T10:07:00Z"
+      },
       %{
         event_type: :phase_published,
         event_id: "phase_published:continue",

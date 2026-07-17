@@ -6,9 +6,10 @@ defmodule SymphonyElixir.AnalyticsRollup do
   sees the latest 500 events); this module streams the FULL file to build the
   historical per-day / per-issue view behind `mix symphony.analytics.rollup`.
 
-  Maestro review verdicts reuse the public `Analytics.maestro_verdict/2`
-  classifier; the review -> next `run_started` join it needs is private in
-  `Analytics` via `Analytics.run_started_entries/1` + `Analytics.next_run_state/2`.
+  Maestro review verdicts reuse the public `Analytics.maestro_verdict/3`
+  classifier. Ordinary recommendations join the next `run_started`; ESCALATED
+  convergence recommendations additionally join the next valid
+  `phase_published` / `phase_rollback` outcome for the same issue.
   """
 
   alias SymphonyElixir.Analytics
@@ -71,8 +72,9 @@ defmodule SymphonyElixir.AnalyticsRollup do
   @spec rollup([map()]) :: %{per_day: [map()], per_issue: %{optional(String.t()) => map()}, totals: map()}
   def rollup(events) do
     run_starts = Analytics.run_started_entries(events)
+    phase_outcomes = convergence_outcomes(events)
     initial = %{days: %{}, active: %{}, issues: %{}, snapshots: %{}, first_published: %{}}
-    acc = Enum.reduce(events, initial, &accumulate_event(&1, &2, run_starts))
+    acc = Enum.reduce(events, initial, &accumulate_event(&1, &2, run_starts, phase_outcomes))
 
     per_day = finalize_days(acc)
     per_issue = finalize_issues(acc.issues)
@@ -137,7 +139,11 @@ defmodule SymphonyElixir.AnalyticsRollup do
     end
   end
 
-  defp accumulate_event(event, acc, run_starts) do
+  defp convergence_outcomes(events) do
+    if Enum.any?(events, &Analytics.convergence_review?/1), do: Analytics.phase_outcome_entries(events), else: []
+  end
+
+  defp accumulate_event(event, acc, run_starts, phase_outcomes) do
     case event_datetime(event) do
       nil ->
         acc
@@ -146,18 +152,19 @@ defmodule SymphonyElixir.AnalyticsRollup do
         date = datetime |> DateTime.to_date() |> Date.to_iso8601()
 
         acc
-        |> bump_day_counters(event, date, run_starts)
+        |> bump_day_counters(event, date, run_starts, phase_outcomes)
         |> track_issue(event, date, datetime)
         |> track_tokens(event, date)
     end
   end
 
-  defp bump_day_counters(acc, %{"event_type" => "maestro_review"} = event, date, run_starts) do
-    verdict = Analytics.maestro_verdict(event, Analytics.next_run_state(event, run_starts))
+  defp bump_day_counters(acc, %{"event_type" => "maestro_review"} = event, date, run_starts, phase_outcomes) do
+    outcome = if Analytics.convergence_review?(event), do: Analytics.next_phase_outcome(event, phase_outcomes)
+    verdict = Analytics.maestro_verdict(event, Analytics.next_run_state(event, run_starts), outcome)
     update_day(acc, date, fn day -> day |> Map.update!(:maestro_reviews, &(&1 + 1)) |> bump_maestro_verdict(verdict) end)
   end
 
-  defp bump_day_counters(acc, event, date, _run_starts) do
+  defp bump_day_counters(acc, event, date, _run_starts, _phase_outcomes) do
     update_day(acc, date, &apply_event_to_day(&1, Map.get(event, "event_type"), event))
   end
 

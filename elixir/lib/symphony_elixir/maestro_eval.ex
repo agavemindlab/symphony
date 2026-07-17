@@ -5,17 +5,14 @@ defmodule SymphonyElixir.MaestroEval do
   `pairs/1` resolves the human verdict (ground truth) for each
   `maestro_review` analytics event from two sources, thread signal first:
 
-    * **thread** — the first subsequent `phase_approved` reply on the reviewed
-      artifact (`artifact_comment_id`) is an approval signal; the first
-      subsequent `phase_reworked` on the same artifact (or on the review phase
-      of the same issue) or `phase_rollback` out of the review phase is a
-      rework signal. Thread signals are more precise than the dispatch join
-      and also cover issues without `run_started` coverage (e.g. backfilled
-      history).
+    * **thread** — ordinary recommendations use the first subsequent
+      `phase_approved`, `phase_reworked`, or `phase_rollback` signal.
+      ESCALATED convergence recommendations instead use only the next valid
+      `phase_published` / `phase_rollback` outcome for the same issue.
     * **dispatch** — when no thread signal exists, the review is joined with
       the first subsequent `run_started` dispatch for the same issue and
-      classified via the public `SymphonyElixir.Analytics.maestro_verdict/2`,
-      so labels agree with the dashboard agreement metrics.
+      classified via `SymphonyElixir.Analytics.maestro_verdict/2` or `/3`, so
+      labels agree with the dashboard agreement metrics.
 
   `summarize/1` and `report/1` are pure; `read_all_events/1` and
   `write_corpus!/2` are the thin IO layer used by `mix symphony.eval.maestro`.
@@ -66,12 +63,16 @@ defmodule SymphonyElixir.MaestroEval do
   @spec pairs([map()]) :: [pair()]
   def pairs(events) when is_list(events) do
     events = dedup_events(events)
+    reviews = Enum.filter(events, &(Map.get(&1, "event_type") == "maestro_review"))
     run_starts = Analytics.run_started_entries(events)
-    signals = signal_candidates(events)
+    signals = signal_candidates(events, ["phase_approved", "phase_reworked", "phase_rollback"])
 
-    events
-    |> Enum.filter(&(Map.get(&1, "event_type") == "maestro_review"))
-    |> Enum.map(&build_pair(&1, run_starts, signals))
+    outcomes =
+      if Enum.any?(reviews, &Analytics.convergence_review?/1),
+        do: Analytics.phase_outcome_entries(events),
+        else: []
+
+    Enum.map(reviews, &build_pair(&1, run_starts, signals, outcomes))
   end
 
   @doc """
@@ -100,7 +101,7 @@ defmodule SymphonyElixir.MaestroEval do
     # Maestro Verdict Eval Report
 
     Corpus of #{summary.overall.total} maestro review pair(s); ground truth prefers the thread
-    outcome signal on the reviewed artifact and falls back to the state of the
+    phase/thread outcome signal and falls back to the state of the
     first subsequent `run_started` dispatch for the reviewed issue.
 
     ## Overall agreement
@@ -165,11 +166,16 @@ defmodule SymphonyElixir.MaestroEval do
     end
   end
 
-  defp build_pair(review, run_starts, signals) do
+  defp build_pair(review, run_starts, signals, outcomes) do
     reviewed_at = parse_datetime(Map.get(review, "occurred_at") || Map.get(review, "recorded_at"))
     verdict = next_run_start(review, reviewed_at, run_starts)
     verdict_state = verdict && verdict.state
-    signal = thread_signal(review, reviewed_at, signals)
+
+    signal =
+      if Analytics.convergence_review?(review),
+        do: convergence_signal(review, reviewed_at, outcomes),
+        else: thread_signal(review, reviewed_at, signals)
+
     {agreement, verdict_source, signal_event_id} = resolve_verdict(review, signal, verdict_state)
 
     %{
@@ -188,11 +194,9 @@ defmodule SymphonyElixir.MaestroEval do
     }
   end
 
-  @signal_event_types ["phase_published", "phase_approved", "phase_reworked", "phase_rollback"]
-
-  defp signal_candidates(events) do
+  defp signal_candidates(events, event_types) do
     events
-    |> Enum.filter(&(Map.get(&1, "event_type") in @signal_event_types))
+    |> Enum.filter(&(Map.get(&1, "event_type") in event_types))
     |> Enum.flat_map(fn event ->
       case parse_datetime(Map.get(event, "occurred_at") || Map.get(event, "recorded_at")) do
         nil -> []
@@ -218,11 +222,29 @@ defmodule SymphonyElixir.MaestroEval do
     end
   end
 
+  defp convergence_signal(_review, nil, _outcomes), do: nil
+
+  defp convergence_signal(review, reviewed_at, outcomes) do
+    issue_id = Map.get(review, "issue_id")
+
+    outcomes
+    |> Enum.filter(fn outcome ->
+      not is_nil(issue_id) and
+        outcome.issue_id == issue_id and
+        DateTime.compare(outcome.occurred_at, reviewed_at) == :gt
+    end)
+    |> Enum.min_by(& &1.occurred_at, DateTime, fn -> nil end)
+    |> case do
+      nil ->
+        nil
+
+      outcome ->
+        %{verdict: :phase_outcome, target_phase: outcome.target_phase, event_id: outcome.event_id}
+    end
+  end
+
   defp signal_matches?(event, review) do
     case Map.get(event, "event_type") do
-      "phase_published" ->
-        Map.get(review, "recommendation") in ["continue_implementation", "rework_design"] and same_issue?(event, review)
-
       "phase_approved" ->
         same_artifact?(event, review)
 
@@ -232,11 +254,6 @@ defmodule SymphonyElixir.MaestroEval do
       "phase_rollback" ->
         same_issue_phase?(event, "from_phase", review)
     end
-  end
-
-  defp same_issue?(event, review) do
-    issue_id = Map.get(review, "issue_id")
-    not is_nil(issue_id) and Map.get(event, "issue_id") == issue_id
   end
 
   defp same_artifact?(event, review) do
@@ -254,7 +271,6 @@ defmodule SymphonyElixir.MaestroEval do
       Map.get(event, "issue_id") == issue_id and Map.get(event, phase_key) == phase
   end
 
-  defp signal_verdict(%{"event_type" => "phase_published"}), do: :phase_outcome
   defp signal_verdict(%{"event_type" => "phase_approved"}), do: :approved_signal
   defp signal_verdict(_event), do: :rework_signal
 

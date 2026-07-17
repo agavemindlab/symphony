@@ -254,11 +254,15 @@ Symphony only starts the agent when the issue is in an active state (`Todo`, `In
    - Gather the auto-rework signal separately from human feedback. It qualifies only when the issue is `Rework`, the Maestro-authored reply matches the current reviewed artifact/head, contains both `建议回复方式: request changes` and `🤖 auto: 已自动将 issue 置为 Rework`, and its `建议回复` starts with `/rework <phase>`. All other Maestro replies are advisory. An awaiting Implementation artifact with `Review verdict: ESCALATED` can never qualify, even if a legacy reply carries that marker.
    - For an awaiting Implementation artifact with `Review verdict: ESCALATED`,
      select the newest Maestro judgment card matching the current Implementation
-     artifact id and PR Head. On demand, query Linear `Issue.history` for state
+     artifact id and PR Head, retaining the card author's actor id. On demand,
+     query Linear `Issue.history` for state
      changes after that card, including `createdAt`, `fromState`, `toState`,
      `actor { id name app }`, and `botActor { id name type subType }`. A state
      action is human only when the newest row that produced the current state
-     has an actor, `actor.app == false`, and has no `botActor`.
+     has an actor, `actor.app == false`, has no `botActor`, and its actor id
+     differs from the Maestro card author's actor id. This last check prevents
+     a Maestro instance using a user-actor token from authorizing its own card;
+     normal Symphony is not dispatched while the issue remains in `Human Review`.
      Missing or ambiguous provenance fails closed. Do not add this
      query to ordinary routing or engine precomputation.
    - When the awaiting-review phase is Implementation, the **PR is also a feedback channel** — but only for **human** reviewers. Humans often leave change requests as GitHub PR review comments instead of repeating them on Linear; gather new human PR review comments / inline threads / review states and treat them as feedback targeting Implementation. Bot / automated reviews (e.g. the configured `AUTOMATED_REVIEWER`) are **not** human intent: a bot approval never counts as a human approval, and a bot's comments are addressed by the Implementation PR feedback sweep, not by this intent check. Identify the author of each PR review/comment and drop bot ones before judging intent.
@@ -287,7 +291,8 @@ Symphony only starts the agent when the issue is in an active state (`Todo`, `In
      in the workpad.
 
    A stale artifact/head, mismatched card/status, unreadable history, missing
-   action, `actor.app == true`, or any `botActor` returns the issue to
+   action/card-author identity, `actor.app == true`, any `botActor`, or a state
+   actor matching the Maestro card author returns the issue to
    `Human Review` and stops. Never treat a Maestro or integration state write as
    human approval. Never treat `ESCALATED` as approval or open Deployment.
 

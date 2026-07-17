@@ -44,7 +44,9 @@ the reviewer subagent must collect evidence itself from the issue key.
    `ask clarification`), `建议 target phase`, `建议 issue status`,
    `执行状态: awaiting human action`, `判断理由`, and `下一轮建议方向`. A `rework design`
    card also includes `失效的 Design assumption`, `建议修改的机制或边界`,
-   `下一轮 proof / acceptance criteria`, and `不受影响的既有约束`.
+   `下一轮 proof / acceptance criteria`, and `不受影响的既有约束`. An
+   `ask clarification` card also includes one `待人工回答的问题` and its
+   `回答判定标准`.
 
 ## Acting for the Human
 

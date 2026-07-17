@@ -195,6 +195,45 @@ defmodule SymphonyElixir.MaestroEvalTest do
     assert %{agreement: :pending, verdict_state: nil, verdict_source: nil, signal_event_id: nil} = pending
   end
 
+  test "convergence pairs ignore ordinary and malformed signals before the next valid phase outcome" do
+    events = [
+      review_event(%{
+        "event_id" => "continue",
+        "issue_id" => "i1",
+        "phase" => "Implementation",
+        "recommendation" => "continue_implementation",
+        "artifact_comment_id" => "a1"
+      }),
+      phase_event("phase_approved", %{
+        "event_id" => "approved-a1",
+        "issue_id" => "i1",
+        "artifact_comment_id" => "a1",
+        "occurred_at" => "2026-06-15T10:05:00Z"
+      }),
+      phase_event("phase_reworked", %{
+        "event_id" => "reworked-a1",
+        "issue_id" => "i1",
+        "artifact_comment_id" => "a1",
+        "occurred_at" => "2026-06-15T10:06:00Z"
+      }),
+      phase_event("phase_published", %{
+        "event_id" => "malformed",
+        "issue_id" => "i1",
+        "phase" => nil,
+        "occurred_at" => "2026-06-15T10:07:00Z"
+      }),
+      phase_event("phase_published", %{
+        "event_id" => "implementation-round",
+        "issue_id" => "i1",
+        "phase" => "Implementation",
+        "occurred_at" => "2026-06-15T10:08:00Z"
+      })
+    ]
+
+    assert [%{agreement: :agreed, signal_event_id: "implementation-round", verdict_phase: "Implementation"}] =
+             MaestroEval.pairs(events)
+  end
+
   test "thread signals take precedence over the dispatch join" do
     events = [
       review_event(%{
@@ -290,15 +329,31 @@ defmodule SymphonyElixir.MaestroEvalTest do
         "occurred_at" => nil,
         "recommendation" => "unknown"
       }),
+      review_event(%{
+        "event_id" => "convergence-no-issue",
+        "issue_id" => nil,
+        "phase" => "Implementation",
+        "recommendation" => "continue_implementation"
+      }),
+      review_event(%{
+        "event_id" => "convergence-bad-ts",
+        "issue_id" => "issue-d",
+        "phase" => "Implementation",
+        "occurred_at" => "garbage",
+        "recommendation" => "continue_implementation"
+      }),
+      phase_event("phase_published", %{"issue_id" => "issue-d", "phase" => "Implementation"}),
       run_started_event(%{"issue_id" => "issue-b"}),
       run_started_event(%{"issue_id" => "issue-c"})
     ]
 
-    assert [no_issue, bad_ts, no_ts] = MaestroEval.pairs(events)
+    assert [no_issue, bad_ts, no_ts, convergence_no_issue, convergence_bad_ts] = MaestroEval.pairs(events)
 
     assert %{agreement: :pending, verdict_state: nil, verdict_at: nil} = no_issue
     assert %{agreement: :pending, reviewed_at: nil, verdict_state: nil, verdict_at: nil} = bad_ts
     assert %{agreement: :excluded, reviewed_at: nil, verdict_state: nil} = no_ts
+    assert %{agreement: :pending, reviewed_at: "2026-06-15T10:00:00Z", verdict_source: nil} = convergence_no_issue
+    assert %{agreement: :pending, reviewed_at: nil, verdict_source: nil} = convergence_bad_ts
   end
 
   test "summarize computes totals and agreement rates overall, by phase, and by recommendation" do

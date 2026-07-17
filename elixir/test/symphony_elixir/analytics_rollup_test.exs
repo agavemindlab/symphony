@@ -136,7 +136,7 @@ defmodule SymphonyElixir.AnalyticsRollupTest do
            }
   end
 
-  test "rollup joins maestro reviews with the next run state via Analytics.maestro_verdict/2" do
+  test "rollup joins ordinary maestro reviews with the next run state" do
     events = [
       event("maestro_review", "2026-06-01T10:00:30Z", %{
         "issue_id" => "issue-1",
@@ -156,6 +156,35 @@ defmodule SymphonyElixir.AnalyticsRollupTest do
 
     assert [%{date: "2026-06-01", runs_started: 2, maestro_reviews: 4, maestro_agreed: 1, maestro_overridden: 1}] = rollup.per_day
     assert %{maestro_reviews: 4, maestro_agreed: 1, maestro_overridden: 1} = rollup.totals
+  end
+
+  test "rollup scores convergence reviews from the next valid routed phase outcome" do
+    events = [
+      event("maestro_review", "2026-07-15T10:00:00Z", %{
+        "issue_id" => "issue-1",
+        "recommendation" => "continue_implementation",
+        "phase" => "Implementation"
+      }),
+      event("run_started", "2026-07-15T10:05:00Z", %{"issue_id" => "issue-1", "state" => "In Progress"}),
+      event("phase_published", "2026-07-15T10:06:00Z", %{"issue_id" => "issue-1"}),
+      event("phase_published", "2026-07-15T10:10:00Z", %{"issue_id" => "issue-1", "phase" => "Implementation"}),
+      event("maestro_review", "2026-07-15T11:00:00Z", %{
+        "issue_id" => "issue-2",
+        "recommendation" => "rework_design",
+        "phase" => "Implementation"
+      }),
+      event("run_started", "2026-07-15T11:05:00Z", %{"issue_id" => "issue-2", "state" => "Rework"}),
+      event("phase_rollback", "2026-07-15T11:10:00Z", %{
+        "issue_id" => "issue-2",
+        "from_phase" => "Implementation",
+        "target_phase" => "Design"
+      })
+    ]
+
+    rollup = AnalyticsRollup.rollup(events)
+
+    assert [%{maestro_reviews: 2, maestro_agreed: 2, maestro_overridden: 0}] = rollup.per_day
+    assert %{maestro_reviews: 2, maestro_agreed: 2, maestro_overridden: 0} = rollup.totals
   end
 
   test "north_star computes cycle, rework rate, and cost per issue with n/a safety" do

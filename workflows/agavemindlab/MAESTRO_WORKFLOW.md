@@ -143,7 +143,8 @@ and Head, and includes `置信度：<N>/10` when available. Ordinary replies inc
   `执行状态: awaiting human action`, evidence-based `判断理由`, and `下一轮建议方向`.
   `rework design` also requires `失效的 Design assumption`,
   `建议修改的机制或边界`, `下一轮 proof / acceptance criteria`, and
-  `不受影响的既有约束`. The card contains no `/rework ...` draft,
+  `不受影响的既有约束`; `ask clarification` requires one
+  `待人工回答的问题` and its `回答判定标准`. The card contains no `/rework ...` draft,
   `建议回复方式: request changes`, or auto-Rework marker. Never change the issue
   state for this branch: leave it in `Human Review`, remove
   `symphony:maestro`, and wait for a newer human action.
