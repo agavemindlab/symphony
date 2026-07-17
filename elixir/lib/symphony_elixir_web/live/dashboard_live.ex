@@ -225,7 +225,7 @@ defmodule SymphonyElixirWeb.DashboardLive do
                   <tr :for={entry <- merged_rows(@payload, @peer_payloads, :running)}>
                     <td>
                       <div class="issue-stack">
-                        <.issue_identifier identifier={entry.issue_identifier} url={entry.issue_url} />
+                        <.issue_identifier identifier={entry.issue_identifier} title={entry.issue_title} url={entry.issue_url} />
                         <a class="issue-link" href={json_details_href(entry)}>JSON details</a>
                       </div>
                     </td>
@@ -293,7 +293,7 @@ defmodule SymphonyElixirWeb.DashboardLive do
                 <tr :for={entry <- merged_rows(@payload, @peer_payloads, :blocked)}>
                   <td>
                     <div class="issue-stack">
-                      <.issue_identifier identifier={entry.issue_identifier} url={entry.issue_url} />
+                      <.issue_identifier identifier={entry.issue_identifier} title={entry.issue_title} url={entry.issue_url} />
                       <a class="issue-link" href={json_details_href(entry)}>JSON details</a>
                     </div>
                   </td>
@@ -351,7 +351,7 @@ defmodule SymphonyElixirWeb.DashboardLive do
                 <tr :for={entry <- merged_rows(@payload, @peer_payloads, :retrying)}>
                   <td>
                     <div class="issue-stack">
-                      <.issue_identifier identifier={entry.issue_identifier} url={entry.issue_url} />
+                      <.issue_identifier identifier={entry.issue_identifier} title={entry.issue_title} url={entry.issue_url} />
                       <a class="issue-link" href={json_details_href(entry)}>JSON details</a>
                     </div>
                   </td>
@@ -1013,6 +1013,7 @@ defmodule SymphonyElixirWeb.DashboardLive do
   defp number_text(_value), do: "n/a"
 
   attr(:identifier, :string, required: true)
+  attr(:title, :string, default: nil)
   attr(:url, :string, default: nil)
 
   defp issue_identifier(assigns) do
@@ -1030,6 +1031,7 @@ defmodule SymphonyElixirWeb.DashboardLive do
     <% else %>
       <span class="issue-id"><%= @identifier %></span>
     <% end %>
+    <span :if={is_binary(@title) and String.trim(@title) != ""} class="issue-title"><%= @title %></span>
     """
   end
 

@@ -132,6 +132,7 @@ defmodule SymphonyElixirWeb.Presenter do
     %{
       issue_id: entry.issue_id,
       issue_identifier: entry.identifier,
+      issue_title: Map.get(entry, :title),
       issue_url: Map.get(entry, :issue_url),
       state: entry.state,
       worker_host: Map.get(entry, :worker_host),
@@ -154,6 +155,7 @@ defmodule SymphonyElixirWeb.Presenter do
     %{
       issue_id: entry.issue_id,
       issue_identifier: entry.identifier,
+      issue_title: Map.get(entry, :title),
       issue_url: Map.get(entry, :issue_url),
       attempt: entry.attempt,
       due_at: due_at_iso8601(entry.due_in_ms),
@@ -167,6 +169,7 @@ defmodule SymphonyElixirWeb.Presenter do
     %{
       issue_id: entry.issue_id,
       issue_identifier: entry.identifier,
+      issue_title: Map.get(entry, :title),
       issue_url: Map.get(entry, :issue_url),
       state: entry.state,
       error: entry.error,

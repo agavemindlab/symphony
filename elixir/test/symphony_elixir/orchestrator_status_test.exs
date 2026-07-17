@@ -21,6 +21,39 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
     send(pid, :stop)
   end
 
+  test "blocked snapshot and API tolerate nil issue metadata" do
+    issue_id = "issue-blocked-without-metadata"
+    orchestrator_name = Module.concat(__MODULE__, :BlockedWithoutMetadataOrchestrator)
+    {:ok, pid} = Orchestrator.start_link(name: orchestrator_name)
+
+    on_exit(fn ->
+      if Process.alive?(pid) do
+        Process.exit(pid, :normal)
+      end
+    end)
+
+    initial_state = :sys.get_state(pid)
+
+    :sys.replace_state(pid, fn _ ->
+      Map.put(initial_state, :blocked, %{
+        issue_id => %{
+          identifier: "MT-BLOCKED-NIL",
+          issue: nil,
+          error: "waiting for operator input"
+        }
+      })
+    end)
+
+    assert %{blocked: [%{identifier: "MT-BLOCKED-NIL", title: nil}]} =
+             Orchestrator.snapshot(orchestrator_name, 1_000)
+
+    assert %{blocked: [%{issue_identifier: "MT-BLOCKED-NIL", issue_title: nil}]} =
+             SymphonyElixirWeb.Presenter.state_payload(orchestrator_name, 1_000)
+
+    assert {:ok, %{status: "blocked"}} =
+             SymphonyElixirWeb.Presenter.issue_payload("MT-BLOCKED-NIL", orchestrator_name, 1_000)
+  end
+
   test "orchestrator snapshot reflects last codex update and session id" do
     issue_id = "issue-snapshot"
 
@@ -91,6 +124,7 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
     snapshot = GenServer.call(pid, :snapshot)
     assert %{running: [snapshot_entry]} = snapshot
     assert snapshot_entry.issue_id == issue_id
+    assert snapshot_entry.title == "Snapshot test"
     assert snapshot_entry.issue_url == "https://example.org/issues/MT-188"
     assert snapshot_entry.project == %{id: "project-id", slug_id: "project-slug", name: "Project Name"}
     assert snapshot_entry.session_id == "thread-live-turn-live"
@@ -1010,6 +1044,7 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
       timer_ref: nil,
       due_at_ms: System.monotonic_time(:millisecond) + 5_000,
       identifier: "MT-500",
+      title: "Retry snapshot test",
       issue_url: "https://example.org/issues/MT-500",
       error: "agent exited: :boom"
     }
@@ -1027,6 +1062,7 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
                attempt: 2,
                due_in_ms: due_in_ms,
                identifier: "MT-500",
+               title: "Retry snapshot test",
                issue_url: "https://example.org/issues/MT-500",
                error: "agent exited: :boom"
              }
@@ -1223,6 +1259,7 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
       issue: %Issue{
         id: issue_id,
         identifier: "MT-STALL",
+        title: "Stalled issue title",
         state: "In Progress",
         url: "https://example.org/issues/MT-STALL"
       },
@@ -1253,6 +1290,7 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
              attempt: 1,
              due_at_ms: due_at_ms,
              identifier: "MT-STALL",
+             title: "Stalled issue title",
              issue_url: "https://example.org/issues/MT-STALL",
              error: "stalled for " <> _
            } = state.retry_attempts[issue_id]
@@ -1376,6 +1414,7 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
       issue: %Issue{
         id: issue_id,
         identifier: "MT-MCP",
+        title: "Blocked issue title",
         state: "In Progress",
         url: "https://example.org/issues/MT-MCP"
       },
@@ -1418,6 +1457,7 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
              blocked: [
                %{
                  identifier: "MT-MCP",
+                 title: "Blocked issue title",
                  issue_url: "https://example.org/issues/MT-MCP",
                  error: "codex MCP elicitation requires operator input"
                }
