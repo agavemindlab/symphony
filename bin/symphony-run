@@ -70,6 +70,7 @@ local_env="$workflow_dir/project.env.local"
 
 caller_profile="${SYMPHONY_PROFILE:-}"
 
+unset LINEAR_API_KEY LINEAR_CLIENT_ID LINEAR_CLIENT_SECRET
 set -a
 [ ! -f "$defaults_env" ] || source "$defaults_env"
 source "$project_env"

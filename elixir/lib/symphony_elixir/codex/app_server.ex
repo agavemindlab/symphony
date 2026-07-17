@@ -220,6 +220,7 @@ defmodule SymphonyElixir.Codex.AppServer do
   defp launch_command(issue) do
     [
       "set -e",
+      "unset LINEAR_API_KEY LINEAR_CLIENT_ID LINEAR_CLIENT_SECRET",
       project_env_source_prefix(issue),
       "unset LINEAR_API_KEY LINEAR_CLIENT_ID LINEAR_CLIENT_SECRET",
       "exec #{Config.settings!().codex.command}"

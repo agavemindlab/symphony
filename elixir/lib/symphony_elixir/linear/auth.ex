@@ -8,7 +8,9 @@ defmodule SymphonyElixir.Linear.Auth do
   @token_endpoint "https://api.linear.app/oauth/token"
   @call_timeout 50_000
 
-  @type authorization :: %{mode: :api_key | :oauth, token: String.t()}
+  @type authorization ::
+          %{mode: :api_key, token: String.t()}
+          | %{mode: :oauth, token: String.t(), version: reference()}
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(_opts), do: GenServer.start_link(__MODULE__, nil, name: __MODULE__)
@@ -24,9 +26,9 @@ defmodule SymphonyElixir.Linear.Auth do
   @spec authorization(keyword()) :: {:ok, authorization()} | {:error, term()}
   def authorization(opts \\ []), do: GenServer.call(__MODULE__, {:authorization, opts}, @call_timeout)
 
-  @spec refresh(String.t(), keyword()) :: {:ok, authorization()} | {:error, term()}
-  def refresh(failed_token, opts \\ []) when is_binary(failed_token) do
-    GenServer.call(__MODULE__, {:refresh, failed_token, opts}, @call_timeout)
+  @spec refresh(reference(), keyword()) :: {:ok, authorization()} | {:error, term()}
+  def refresh(failed_version, opts \\ []) when is_reference(failed_version) do
+    GenServer.call(__MODULE__, {:refresh, failed_version, opts}, @call_timeout)
   end
 
   @doc false
@@ -37,45 +39,78 @@ defmodule SymphonyElixir.Linear.Auth do
   def init(_opts), do: {:ok, nil}
 
   @impl true
-  def handle_call({:authorization, opts}, _from, token) do
+  def handle_call({:authorization, opts}, _from, state) do
     case Config.linear_auth() do
       {:ok, {:api_key, api_key}} ->
-        {:reply, {:ok, %{mode: :api_key, token: api_key}}, token}
-
-      {:ok, {:client_credentials, _client_id, _client_secret}} when is_binary(token) ->
-        {:reply, {:ok, %{mode: :oauth, token: token}}, token}
+        {:reply, {:ok, %{mode: :api_key, token: api_key}}, nil}
 
       {:ok, {:client_credentials, client_id, client_secret}} ->
-        exchange_and_reply(client_id, client_secret, opts, token)
+        if credential_state?(state, client_id, client_secret) do
+          {:reply, {:ok, authorization_from_state(state)}, state}
+        else
+          exchange_and_reply(client_id, client_secret, opts, state)
+        end
 
       {:error, _reason} = error ->
-        {:reply, error, token}
+        {:reply, error, state}
     end
   end
 
-  def handle_call({:refresh, failed_token, opts}, _from, token) do
+  def handle_call({:refresh, failed_version, opts}, _from, state) do
     case Config.linear_auth() do
       {:ok, {:api_key, api_key}} ->
-        {:reply, {:ok, %{mode: :api_key, token: api_key}}, token}
-
-      {:ok, {:client_credentials, _client_id, _client_secret}} when is_binary(token) and token != failed_token ->
-        {:reply, {:ok, %{mode: :oauth, token: token}}, token}
+        {:reply, {:ok, %{mode: :api_key, token: api_key}}, nil}
 
       {:ok, {:client_credentials, client_id, client_secret}} ->
-        exchange_and_reply(client_id, client_secret, opts, token)
+        if credential_state?(state, client_id, client_secret) and state.version != failed_version do
+          {:reply, {:ok, authorization_from_state(state)}, state}
+        else
+          exchange_and_reply(client_id, client_secret, opts, state)
+        end
 
       {:error, _reason} = error ->
-        {:reply, error, token}
+        {:reply, error, state}
     end
   end
 
   def handle_call(:reset, _from, _token), do: {:reply, :ok, nil}
 
+  @impl true
+  def format_status(status) do
+    Map.new(status, fn
+      {:state, state} when is_map(state) -> {:state, :redacted}
+      {:message, {:authorization, _opts}} -> {:message, {:authorization, :redacted}}
+      {:message, {:refresh, _version, _opts}} -> {:message, {:refresh, :redacted, :redacted}}
+      entry -> entry
+    end)
+  end
+
   defp exchange_and_reply(client_id, client_secret, opts, current_token) do
     case exchange(client_id, client_secret, opts) do
-      {:ok, token} -> {:reply, {:ok, %{mode: :oauth, token: token}}, token}
-      {:error, _reason} = error -> {:reply, error, current_token}
+      {:ok, token} ->
+        state = %{
+          credentials_hash: credentials_hash(client_id, client_secret),
+          token: token,
+          version: make_ref()
+        }
+
+        {:reply, {:ok, authorization_from_state(state)}, state}
+
+      {:error, _reason} = error ->
+        {:reply, error, current_token}
     end
+  end
+
+  defp authorization_from_state(state) do
+    %{mode: :oauth, token: state.token, version: state.version}
+  end
+
+  defp credential_state?(state, client_id, client_secret) do
+    is_map(state) and state.credentials_hash == credentials_hash(client_id, client_secret)
+  end
+
+  defp credentials_hash(client_id, client_secret) do
+    :crypto.hash(:sha256, client_id <> <<0>> <> client_secret)
   end
 
   defp exchange(client_id, client_secret, opts) do

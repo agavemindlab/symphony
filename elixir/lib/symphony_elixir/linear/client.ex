@@ -608,7 +608,7 @@ defmodule SymphonyElixir.Linear.Client do
         {:ok, body}
 
       {:ok, %{status: 401}} when authorization.mode == :oauth and attempt == 0 ->
-        with {:ok, refreshed} <- Auth.refresh(authorization.token, auth_opts) do
+        with {:ok, refreshed} <- Auth.refresh(authorization.version, auth_opts) do
           do_graphql_request(payload, refreshed, request_fun, auth_opts, 1)
         end
 

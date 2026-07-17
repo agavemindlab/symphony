@@ -143,16 +143,35 @@ defmodule SymphonyElixir.SymphonyRunTest do
 
     assert main["LINEAR_CLIENT_ID"] == "main-id"
     assert maestro["LINEAR_CLIENT_ID"] == "maestro-id"
+    assert main["LINEAR_CLIENT_SECRET_PRESENT"] == "true"
+    assert maestro["LINEAR_CLIENT_SECRET_PRESENT"] == "true"
+    assert main["LINEAR_API_KEY"] == ""
+    assert maestro["LINEAR_API_KEY"] == ""
   end
 
-  test "rejects an incomplete client credential pair without printing its value" do
-    probe = "client-id-secret-probe"
+  test "clears inherited Linear auth before loading project configuration" do
+    capture =
+      run_launcher!("symphony",
+        project_env_extra: """
+        if [ -z "${INITIAL_PROJECT_ENV_LOADED:-}" ]; then
+          [ -z "${LINEAR_API_KEY:-}${LINEAR_CLIENT_ID:-}${LINEAR_CLIENT_SECRET:-}" ] || exit 67
+          INITIAL_PROJECT_ENV_LOADED=1
+        fi
+        """
+      )
 
-    assert {output, 1} =
-             run_launcher("symphony", profile_env: "LINEAR_CLIENT_ID=#{probe}\n")
+    assert capture["LINEAR_API_KEY"] == "test-token"
+  end
 
-    assert output =~ "LINEAR_CLIENT_SECRET is not set"
-    refute output =~ probe
+  test "rejects either incomplete client credential pair without printing its value" do
+    for {profile_env, missing_variable, probe} <- [
+          {"LINEAR_CLIENT_ID=client-id-secret-probe\n", "LINEAR_CLIENT_SECRET", "client-id-secret-probe"},
+          {"LINEAR_CLIENT_SECRET=client-secret-probe\n", "LINEAR_CLIENT_ID", "client-secret-probe"}
+        ] do
+      assert {output, 1} = run_launcher("symphony", profile_env: profile_env)
+      assert output =~ "#{missing_variable} is not set"
+      refute output =~ probe
+    end
   end
 
   test "Agavemindlab Linear project slugs use Linear slugId values" do
@@ -261,7 +280,10 @@ defmodule SymphonyElixir.SymphonyRunTest do
       {"SYMPHONY_PORT", nil},
       {"SYMPHONY_MAESTRO_PORT", nil},
       {"SYMPHONY_MAESTRO_WORKSPACE_ROOT", nil},
-      {"AUTOMATED_REVIEWER", nil}
+      {"AUTOMATED_REVIEWER", nil},
+      {"LINEAR_API_KEY", "inherited-api-key-probe"},
+      {"LINEAR_CLIENT_ID", "inherited-client-id-probe"},
+      {"LINEAR_CLIENT_SECRET", "inherited-client-secret-probe"}
     ]
 
     try do
@@ -336,7 +358,13 @@ defmodule SymphonyElixir.SymphonyRunTest do
 
     {
       printf 'AUTOMATED_REVIEWER=%s\\n' "${AUTOMATED_REVIEWER-}"
+      printf 'LINEAR_API_KEY=%s\\n' "${LINEAR_API_KEY-}"
       printf 'LINEAR_CLIENT_ID=%s\\n' "${LINEAR_CLIENT_ID-}"
+      if [ -n "${LINEAR_CLIENT_SECRET-}" ]; then
+        printf 'LINEAR_CLIENT_SECRET_PRESENT=true\\n'
+      else
+        printf 'LINEAR_CLIENT_SECRET_PRESENT=false\\n'
+      fi
       printf 'SYMPHONY_PROFILE=%s\\n' "${SYMPHONY_PROFILE-}"
       printf 'SYMPHONY_PROJECT_SLUGS=%s\\n' "${SYMPHONY_PROJECT_SLUGS-}"
       printf 'SYMPHONY_PROJECT_NAMES=%s\\n' "${SYMPHONY_PROJECT_NAMES-}"

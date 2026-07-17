@@ -45,7 +45,14 @@ defmodule SymphonyElixir.LinearAuthTest do
 
     System.delete_env("LINEAR_API_KEY")
     System.put_env("LINEAR_CLIENT_ID", "client-id-probe")
+    System.delete_env("LINEAR_CLIENT_ID")
     System.put_env("LINEAR_CLIENT_SECRET", "client-secret-probe")
+    write_workflow_file!(Workflow.workflow_file_path(), tracker_api_token: nil)
+
+    assert {:error, {:missing_linear_auth_variable, "LINEAR_CLIENT_ID"}} =
+             Auth.authorization(request_fun: fn _, _ -> flunk("exchange must not run") end)
+
+    System.put_env("LINEAR_CLIENT_ID", "client-id-probe")
     write_workflow_file!(Workflow.workflow_file_path(), tracker_api_token: nil)
     Auth.reset_for_test()
     :ok
@@ -116,17 +123,36 @@ defmodule SymphonyElixir.LinearAuthTest do
       {:ok, %{status: 200, body: %{"access_token" => "token-#{call}"}}}
     end
 
-    assert {:ok, %{token: "token-1"}} = Auth.authorization(request_fun: request_fun)
+    assert {:ok, %{token: "token-1", version: version}} = Auth.authorization(request_fun: request_fun)
 
     results =
       1..8
-      |> Task.async_stream(fn _ -> Auth.refresh("token-1", request_fun: request_fun) end,
+      |> Task.async_stream(fn _ -> Auth.refresh(version, request_fun: request_fun) end,
         max_concurrency: 8,
         ordered: false
       )
       |> Enum.map(fn {:ok, result} -> result end)
 
-    assert Enum.uniq(results) == [{:ok, %{mode: :oauth, token: "token-2"}}]
+    assert Enum.all?(results, &match?({:ok, %{mode: :oauth, token: "token-2"}}, &1))
+    assert results |> Enum.map(fn {:ok, authorization} -> authorization.version end) |> Enum.uniq() |> length() == 1
+    assert Agent.get(calls, & &1) == 2
+  end
+
+  test "exchanges again when the configured client credentials change" do
+    calls = Agent.start_link(fn -> 0 end) |> elem(1)
+
+    request_fun = fn _url, _opts ->
+      call = Agent.get_and_update(calls, &{&1 + 1, &1 + 1})
+      {:ok, %{status: 200, body: %{"access_token" => "token-#{call}"}}}
+    end
+
+    assert {:ok, %{token: "token-1"}} = Auth.authorization(request_fun: request_fun)
+
+    System.put_env("LINEAR_CLIENT_ID", "rotated-client-id")
+    System.put_env("LINEAR_CLIENT_SECRET", "rotated-client-secret")
+    write_workflow_file!(Workflow.workflow_file_path(), tracker_api_token: nil)
+
+    assert {:ok, %{token: "token-2"}} = Auth.authorization(request_fun: request_fun)
     assert Agent.get(calls, & &1) == 2
   end
 
@@ -245,7 +271,7 @@ defmodule SymphonyElixir.LinearAuthTest do
     assert :ok = Auth.prewarm(request_fun: fn _, _ -> flunk("exchange must not run") end)
 
     assert {:ok, %{mode: :api_key, token: "api-key-probe"}} =
-             Auth.refresh("stale-oauth-token", request_fun: fn _, _ -> flunk("exchange must not run") end)
+             Auth.refresh(make_ref(), request_fun: fn _, _ -> flunk("exchange must not run") end)
   end
 
   test "prewarm and refresh return safe configuration and request errors" do
@@ -254,7 +280,7 @@ defmodule SymphonyElixir.LinearAuthTest do
 
     expected = {:error, {:missing_linear_auth_variable, "LINEAR_CLIENT_SECRET"}}
     assert Auth.prewarm() == expected
-    assert Auth.refresh("stale-token") == expected
+    assert Auth.refresh(make_ref()) == expected
 
     System.put_env("LINEAR_CLIENT_SECRET", "client-secret-probe")
     write_workflow_file!(Workflow.workflow_file_path(), tracker_api_token: nil)
@@ -267,5 +293,20 @@ defmodule SymphonyElixir.LinearAuthTest do
 
     assert {:error, :linear_oauth_token_request_failed} =
              Auth.authorization(request_fun: fn _, _ -> throw("client-secret-probe") end)
+  end
+
+  test "redacts cached and message tokens from unexpected GenServer crash reports" do
+    probe = "crash-report-access-token-probe"
+
+    assert {:ok, %{token: ^probe, version: version}} =
+             Auth.authorization(request_fun: fn _, _ -> {:ok, %{status: 200, body: %{"access_token" => probe}}} end)
+
+    log =
+      capture_log(fn ->
+        catch_exit(Auth.refresh(version, :invalid_options))
+        Process.sleep(20)
+      end)
+
+    refute log =~ probe
   end
 end

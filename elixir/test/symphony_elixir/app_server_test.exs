@@ -239,6 +239,10 @@ defmodule SymphonyElixir.AppServerTest do
       """)
 
       File.write!(Path.join(workflow_dir, "project-for-linear-project.sh"), """
+      if [ -n "${LINEAR_API_KEY:-}${LINEAR_CLIENT_ID:-}${LINEAR_CLIENT_SECRET:-}" ]; then
+        echo "Linear auth reached project routing hook" >&2
+        exit 67
+      fi
       case "${SYMPHONY_LINEAR_PROJECT_SLUG:-}" in
         grotto-slug) SYMPHONY_PROJECT_DIR="$SYMPHONY_WORKFLOW_DIR/../grotto" ;;
         *) echo "unknown project: ${SYMPHONY_LINEAR_PROJECT_SLUG:-}" >&2; exit 66 ;;
