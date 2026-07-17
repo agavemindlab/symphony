@@ -14,6 +14,7 @@ defmodule SymphonyElixir.Workspace do
   @remote_workspace_marker_write "__SYMPHONY_WORKSPACE_MARKER_WRITE__"
   @workspace_identity_marker ".symphony/workspace-identity.json"
   @workspace_identity_version 1
+  @workspace_identity_max_bytes 65_536
 
   @type worker_host :: String.t() | nil
 
@@ -30,8 +31,8 @@ defmodule SymphonyElixir.Workspace do
            {:ok, workspace} <- workspace_path_for_issue(safe_id, worker_host),
            :ok <- validate_workspace_path(workspace, worker_host),
            {:ok, workspace, created?} <- ensure_workspace(workspace, worker_host, expected_identity),
-           :ok <- maybe_run_after_create_hook(workspace, issue_context, created?, worker_host, project_env),
-           :ok <- maybe_write_workspace_identity_marker(workspace, expected_identity, created?, worker_host) do
+           :ok <-
+             initialize_workspace(workspace, issue_context, expected_identity, created?, worker_host, project_env) do
         {:ok, workspace}
       end
     rescue
@@ -98,6 +99,10 @@ defmodule SymphonyElixir.Workspace do
 
   defp handle_remote_workspace_identity_status(:create, _inspection, workspace, _expected_identity, worker_host) do
     create_remote_workspace(workspace, worker_host)
+  end
+
+  defp handle_remote_workspace_identity_status({:reject, reason}, _inspection, _workspace, _expected_identity, _worker_host) do
+    {:error, {:workspace_symlink_escape, reason}}
   end
 
   defp handle_remote_workspace_identity_status({:quarantine, _reason}, _inspection, workspace, _expected_identity, worker_host) do
@@ -357,9 +362,9 @@ defmodule SymphonyElixir.Workspace do
   end
 
   defp workspace_path_for_issue(safe_id, nil) when is_binary(safe_id) do
-    Config.settings!().workspace.root
-    |> Path.join(safe_id)
-    |> PathSafety.canonicalize()
+    with {:ok, canonical_root} <- PathSafety.canonicalize(Config.settings!().workspace.root) do
+      {:ok, Path.join(canonical_root, safe_id)}
+    end
   end
 
   defp workspace_path_for_issue(safe_id, worker_host) when is_binary(safe_id) and is_binary(worker_host) do
@@ -370,32 +375,27 @@ defmodule SymphonyElixir.Workspace do
     String.replace(identifier || "issue", ~r/[^a-zA-Z0-9._-]/, "_")
   end
 
-  defp maybe_run_after_create_hook(workspace, issue_context, created?, worker_host, project_env) do
-    hooks = Config.settings!().hooks
+  defp initialize_workspace(_workspace, _issue_context, _expected_identity, false, _worker_host, _project_env), do: :ok
 
-    case created? do
-      true ->
-        case hooks.after_create do
-          nil ->
-            :ok
+  defp initialize_workspace(workspace, issue_context, expected_identity, true, worker_host, project_env) do
+    result =
+      with :ok <- maybe_run_after_create_hook(workspace, issue_context, worker_host, project_env) do
+        write_workspace_identity_marker(workspace, expected_identity, worker_host)
+      end
 
-          command ->
-            run_after_create_hook(command, workspace, issue_context, worker_host, project_env)
-        end
-
-      false ->
-        :ok
-    end
+    if result != :ok, do: cleanup_failed_created_workspace(workspace, worker_host, issue_context)
+    result
   end
 
-  defp run_after_create_hook(command, workspace, issue_context, worker_host, project_env) do
-    case run_hook(command, workspace, issue_context, "after_create", worker_host, project_env) do
-      :ok ->
+  defp maybe_run_after_create_hook(workspace, issue_context, worker_host, project_env) do
+    hooks = Config.settings!().hooks
+
+    case hooks.after_create do
+      nil ->
         :ok
 
-      {:error, _reason} = error ->
-        cleanup_failed_created_workspace(workspace, worker_host, issue_context)
-        error
+      command ->
+        run_hook(command, workspace, issue_context, "after_create", worker_host, project_env)
     end
   end
 
@@ -677,7 +677,8 @@ defmodule SymphonyElixir.Workspace do
 
   defp remote_workspace_identity_status(%{kind: :missing}, _expected_identity), do: :create
   defp remote_workspace_identity_status(%{kind: :other}, _expected_identity), do: :create
-  defp remote_workspace_identity_status(%{kind: :escape}, _expected_identity), do: {:quarantine, :symlink_escape}
+  defp remote_workspace_identity_status(%{kind: :link}, _expected_identity), do: {:quarantine, :workspace_symlink}
+  defp remote_workspace_identity_status(%{kind: :escape}, _expected_identity), do: {:reject, :intermediate_symlink}
   defp remote_workspace_identity_status(%{kind: :unsafe_marker}, _expected_identity), do: {:quarantine, :unsafe_marker}
 
   defp remote_workspace_identity_status(%{kind: :dir} = inspection, expected_identity) do
@@ -705,8 +706,10 @@ defmodule SymphonyElixir.Workspace do
 
   defp read_workspace_identity_marker(workspace, nil) do
     with {:ok, marker_path} <- safe_workspace_identity_marker_path(workspace) do
-      case File.read(marker_path) do
-        {:ok, content} -> Jason.decode(content)
+      case File.open(marker_path, [:read, :binary], &IO.binread(&1, @workspace_identity_max_bytes + 1)) do
+        {:ok, :eof} -> Jason.decode("")
+        {:ok, content} when byte_size(content) <= @workspace_identity_max_bytes -> Jason.decode(content)
+        {:ok, _content} -> {:error, :marker_too_large}
         {:error, :enoent} -> {:error, :missing_marker}
         {:error, reason} -> {:error, reason}
       end
@@ -776,32 +779,46 @@ defmodule SymphonyElixir.Workspace do
         "mkdir -p \"$root\"",
         "root_canonical=\"$(cd \"$root\" && pwd -P)\"",
         "if [ -L \"$workspace\" ]; then",
-        "  printf '%s\\t%s\\n' '#{@remote_workspace_inspect_marker}' 'escape'",
+        "  printf '%s\\t%s\\n' '#{@remote_workspace_inspect_marker}' 'link'",
         "elif [ -d \"$workspace\" ]; then",
         "  workspace_canonical=\"$(cd \"$workspace\" && pwd -P)\"",
         "  case \"$workspace_canonical/\" in",
         "    \"$root_canonical\"/*) ;;",
         "    *)",
         "      printf '%s\\t%s\\n' '#{@remote_workspace_inspect_marker}' 'escape'",
-        "      printf '%s\\t%s\\n' '#{@remote_workspace_path_marker}' \"$workspace_canonical\"",
+        "      printf '%s\\t' '#{@remote_workspace_path_marker}'",
+        "      printf '%s' \"$workspace_canonical\" | base64 | tr -d '\\n'",
+        "      printf '\\n'",
         "      exit 0",
         "      ;;",
         "  esac",
-        "  printf '%s\\t%s\\n' '#{@remote_workspace_inspect_marker}' 'dir'",
-        "  cd \"$workspace\"",
-        "  printf '%s\\t%s\\n' '#{@remote_workspace_path_marker}' \"$(pwd -P)\"",
         "  marker_dir=\"$workspace/.symphony\"",
         "  marker=\"$workspace/#{@workspace_identity_marker}\"",
+        "  unsafe=0",
         "  if [ -L \"$marker_dir\" ] || [ -L \"$marker\" ] || { [ -e \"$marker\" ] && [ ! -f \"$marker\" ]; }; then",
-        "    printf '%s\\t%s\\n' '#{@remote_workspace_inspect_marker}' 'unsafe_marker'",
-        "  elif [ -f \"$marker\" ]; then",
-        "    printf '%s\\t' '#{@remote_workspace_identity_marker}'",
-        "    cat \"$marker\"",
-        "    printf '\\n'",
+        "    unsafe=1",
+        "  elif [ -f \"$marker\" ] && [ \"$(wc -c < \"$marker\" | tr -d '[:space:]')\" -gt #{@workspace_identity_max_bytes} ]; then",
+        "    unsafe=1",
         "  fi",
         "  remote_url=\"$(git -C \"$workspace\" remote get-url upstream 2>/dev/null || git -C \"$workspace\" remote get-url origin 2>/dev/null || true)\"",
-        "  if [ -n \"$remote_url\" ]; then",
-        "    printf '%s\\t%s\\n' '#{@remote_workspace_remote_marker}' \"$remote_url\"",
+        "  if [ \"${#remote_url}\" -gt 4096 ]; then unsafe=1; fi",
+        "  if [ \"$unsafe\" -eq 1 ]; then",
+        "    printf '%s\\t%s\\n' '#{@remote_workspace_inspect_marker}' 'unsafe_marker'",
+        "  else",
+        "    printf '%s\\t%s\\n' '#{@remote_workspace_inspect_marker}' 'dir'",
+        "    printf '%s\\t' '#{@remote_workspace_path_marker}'",
+        "    printf '%s' \"$workspace_canonical\" | base64 | tr -d '\\n'",
+        "    printf '\\n'",
+        "    if [ -f \"$marker\" ]; then",
+        "      printf '%s\\t' '#{@remote_workspace_identity_marker}'",
+        "      base64 < \"$marker\" | tr -d '\\n'",
+        "      printf '\\n'",
+        "    fi",
+        "    if [ -n \"$remote_url\" ]; then",
+        "      printf '%s\\t' '#{@remote_workspace_remote_marker}'",
+        "      printf '%s' \"$remote_url\" | base64 | tr -d '\\n'",
+        "      printf '\\n'",
+        "    fi",
         "  fi",
         "elif [ -e \"$workspace\" ]; then",
         "  printf '%s\\t%s\\n' '#{@remote_workspace_inspect_marker}' 'other'",
@@ -819,31 +836,51 @@ defmodule SymphonyElixir.Workspace do
   end
 
   defp parse_remote_workspace_inspection(output) do
-    output
-    |> String.split("\n", trim: true)
-    |> Enum.reduce(%{}, &put_remote_workspace_inspection_line/2)
-    |> case do
-      %{kind: kind} = inspection when kind in [:dir, :other, :missing, :escape, :unsafe_marker] -> {:ok, inspection}
-      _inspection -> {:error, {:workspace_inspect_failed, :invalid_output, output}}
+    result =
+      output
+      |> IO.iodata_to_binary()
+      |> String.split("\n", trim: true)
+      |> Enum.reduce_while({:ok, %{}}, &put_remote_workspace_inspection_line/2)
+
+    case result do
+      {:ok, %{kind: kind} = inspection} when kind in [:dir, :other, :missing, :link, :escape, :unsafe_marker] ->
+        {:ok, inspection}
+
+      _result ->
+        {:error, {:workspace_inspect_failed, :invalid_output, output}}
     end
   end
 
-  defp put_remote_workspace_inspection_line(line, acc) do
+  defp put_remote_workspace_inspection_line(line, {:ok, acc}) do
     case String.split(line, "\t", parts: 2) do
       [@remote_workspace_inspect_marker, kind] -> put_remote_workspace_kind(acc, kind)
-      [@remote_workspace_path_marker, path] -> Map.put(acc, :path, path)
-      [@remote_workspace_identity_marker, marker] -> Map.put(acc, :marker, marker)
-      [@remote_workspace_remote_marker, remote] -> Map.put(acc, :remote, String.trim(remote))
-      _ -> acc
+      [@remote_workspace_path_marker, encoded] -> put_remote_workspace_field(acc, :path, encoded)
+      [@remote_workspace_identity_marker, encoded] -> put_remote_workspace_field(acc, :marker, encoded)
+      [@remote_workspace_remote_marker, encoded] -> put_remote_workspace_field(acc, :remote, encoded)
+      _ -> {:cont, {:ok, acc}}
     end
   end
 
-  defp put_remote_workspace_kind(acc, "dir"), do: Map.put(acc, :kind, :dir)
-  defp put_remote_workspace_kind(acc, "other"), do: Map.put(acc, :kind, :other)
-  defp put_remote_workspace_kind(acc, "missing"), do: Map.put(acc, :kind, :missing)
-  defp put_remote_workspace_kind(acc, "escape"), do: Map.put(acc, :kind, :escape)
-  defp put_remote_workspace_kind(acc, "unsafe_marker"), do: Map.put(acc, :kind, :unsafe_marker)
-  defp put_remote_workspace_kind(acc, _kind), do: acc
+  defp put_remote_workspace_kind(acc, kind) when kind in ["dir", "other", "missing", "link", "escape", "unsafe_marker"] do
+    put_remote_workspace_value(acc, :kind, String.to_existing_atom(kind))
+  end
+
+  defp put_remote_workspace_kind(_acc, _kind), do: {:halt, {:error, :invalid_kind}}
+
+  defp put_remote_workspace_field(acc, key, encoded) do
+    case Base.decode64(encoded) do
+      {:ok, value} -> put_remote_workspace_value(acc, key, value)
+      :error -> {:halt, {:error, :invalid_base64}}
+    end
+  end
+
+  defp put_remote_workspace_value(acc, key, value) do
+    if Map.has_key?(acc, key) do
+      {:halt, {:error, {:duplicate_field, key}}}
+    else
+      {:cont, {:ok, Map.put(acc, key, value)}}
+    end
+  end
 
   defp quarantine_remote_workspace(workspace, worker_host) do
     script =
@@ -875,12 +912,7 @@ defmodule SymphonyElixir.Workspace do
     end
   end
 
-  defp maybe_write_workspace_identity_marker(_workspace, nil, _created?, _worker_host), do: :ok
-  defp maybe_write_workspace_identity_marker(_workspace, _expected_identity, false, _worker_host), do: :ok
-
-  defp maybe_write_workspace_identity_marker(workspace, expected_identity, true, worker_host) do
-    write_workspace_identity_marker(workspace, expected_identity, worker_host)
-  end
+  defp write_workspace_identity_marker(_workspace, nil, _worker_host), do: :ok
 
   defp write_workspace_identity_marker(workspace, expected_identity, nil) do
     marker_dir = Path.join(workspace, ".symphony")

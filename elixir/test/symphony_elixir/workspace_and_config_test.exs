@@ -222,6 +222,22 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
         assert File.read!(Path.join(quarantine, "repo.txt")) == "old\n"
         assert File.read!(Path.join(workspace, "repo.txt")) == "new\n"
         assert workspace_identity_marker(workspace)["symphony_repo"] == "symphony"
+
+        oversized = Path.join(workspace_root, "MT-IDENTITY-OVERSIZED")
+        oversized_marker = Path.join(oversized, ".symphony/workspace-identity.json")
+        File.mkdir_p!(Path.dirname(oversized_marker))
+        File.write!(oversized_marker, String.duplicate("x", 65_537))
+
+        oversized_issue = %{
+          issue
+          | id: "issue-identity-oversized",
+            identifier: "MT-IDENTITY-OVERSIZED",
+            title: "Oversized identity"
+        }
+
+        assert {:ok, _workspace} = Workspace.create_for_issue(oversized_issue)
+        assert [_quarantine] = Path.wildcard(Path.join(workspace_root, "MT-IDENTITY-OVERSIZED.quarantine.*"))
+        assert workspace_identity_marker(oversized)["symphony_repo"] == "symphony"
       after
         File.rm_rf(workspace_root)
       end
@@ -295,6 +311,19 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
         assert {:error, :unsafe_marker_path} = Workspace.create_for_issue(issue)
         assert File.read!(Path.join(sibling, "sentinel")) == "keep\n"
         refute File.exists?(Path.join(sibling, ".symphony/workspace-identity.json"))
+        refute File.exists?(Path.join(workspace_root, "MT-POST-HOOK-SYMLINK"))
+
+        write_workflow_file!(Workflow.workflow_file_path(),
+          workspace_root: workspace_root,
+          hook_after_create: "echo new > repo.txt"
+        )
+
+        assert {:ok, workspace} = Workspace.create_for_issue(issue)
+        assert {:ok, canonical_root} = SymphonyElixir.PathSafety.canonicalize(workspace_root)
+        assert workspace == Path.join(canonical_root, "MT-POST-HOOK-SYMLINK")
+        assert File.read!(Path.join(workspace, "repo.txt")) == "new\n"
+        assert File.read!(Path.join(sibling, "sentinel")) == "keep\n"
+        assert Path.wildcard(Path.join(workspace_root, "sibling.quarantine.*")) == []
       after
         File.rm_rf(workspace_root)
       end
@@ -3110,7 +3139,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
         case "$*" in
           *"__SYMPHONY_WORKSPACE_INSPECT__"*)
             printf '%s\\t%s\\n' '__SYMPHONY_WORKSPACE_INSPECT__' 'dir'
-            printf '%s\\t%s\\n' '__SYMPHONY_WORKSPACE_MARKER__' '#{stale_marker}'
+            printf '%s\\t%s\\n' '__SYMPHONY_WORKSPACE_MARKER__' '#{Base.encode64(stale_marker)}'
             ;;
           *"__SYMPHONY_WORKSPACE__"*)
             printf '%s\\t%s\\t%s\\n' '__SYMPHONY_WORKSPACE__' '1' '#{workspace_path}'
@@ -3156,12 +3185,25 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
   test "remote unsafe workspace identity marker quarantines before after_create hook" do
     trace = run_remote_marker_case!("MT-SSH-UNSAFE-MARKER", "unsafe_marker", nil)
     assert trace =~ "[ -L"
+    assert trace =~ "wc -c"
+    assert trace =~ "65536"
     assert trace_index(trace, "[ -L") < trace_index(trace, ".symphony/workspace-identity.json")
     assert trace_index(trace, ".quarantine.") < trace_index(trace, "echo after-create")
   end
 
+  test "remote final workspace symlink is quarantined" do
+    trace = run_remote_marker_case!("MT-SSH-WORKSPACE-LINK", "link", nil)
+    assert trace_index(trace, ".quarantine.") < trace_index(trace, "echo after-create")
+  end
+
   test "remote malformed workspace identity marker is quarantined" do
-    trace = run_remote_marker_case!("MT-SSH-MALFORMED-MARKER", "dir", "{partial")
+    trace =
+      run_remote_marker_case!(
+        "MT-SSH-MALFORMED-MARKER",
+        "dir",
+        "{partial\n__SYMPHONY_WORKSPACE_INSPECT__\tmissing"
+      )
+
     assert trace =~ "__SYMPHONY_WORKSPACE_MARKER__"
     assert trace_index(trace, ".quarantine.") < trace_index(trace, "echo after-create")
   end
@@ -3219,7 +3261,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert trace_index(trace, "echo after-create") < trace_index(trace, "__SYMPHONY_WORKSPACE_MARKER_WRITE__")
   end
 
-  test "remote workspace symlink escape quarantines before marker read or hook" do
+  test "remote workspace intermediate symlink escape fails closed before marker read or hook" do
     test_root =
       Path.join(
         System.tmp_dir!(),
@@ -3253,7 +3295,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
         case "$*" in
           *"__SYMPHONY_WORKSPACE_INSPECT__"*)
             printf '%s\\t%s\\n' '__SYMPHONY_WORKSPACE_INSPECT__' 'escape'
-            printf '%s\\t%s\\n' '__SYMPHONY_WORKSPACE_PATH__' '/outside/old-repo'
+            printf '%s\\t%s\\n' '__SYMPHONY_WORKSPACE_PATH__' '#{Base.encode64("/outside/old-repo")}'
             ;;
           *"__SYMPHONY_WORKSPACE__"*)
             printf '%s\\t%s\\t%s\\n' '__SYMPHONY_WORKSPACE__' '1' '#{workspace_path}'
@@ -3279,15 +3321,15 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
           project: %{id: "remote-project-id", slug_id: "remote-project", name: "Remote Project"}
         }
 
-        assert {:ok, ^workspace_path} = Workspace.create_for_issue(issue, "worker-escape")
+        assert {:error, {:workspace_symlink_escape, :intermediate_symlink}} =
+                 Workspace.create_for_issue(issue, "worker-escape")
 
         trace = File.read!(trace_file)
         assert trace =~ "__SYMPHONY_WORKSPACE_INSPECT__"
         assert trace =~ "pwd -P"
-        assert trace =~ ".quarantine."
-        assert trace =~ "echo after-create"
+        refute trace =~ ".quarantine."
+        refute trace =~ "echo after-create"
         assert trace_index(trace, "pwd -P") < trace_index(trace, ".symphony/workspace-identity.json")
-        assert trace_index(trace, ".quarantine.") < trace_index(trace, "echo after-create")
       after
         File.rm_rf(test_root)
       end
@@ -3495,7 +3537,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     case "$*" in
       *"__SYMPHONY_WORKSPACE_INSPECT__"*)
         printf '%s\\t%s\\n' '__SYMPHONY_WORKSPACE_INSPECT__' 'dir'
-        printf '%s\\t%s\\n' '__SYMPHONY_WORKSPACE_PATH__' '#{workspace_path}'
+        printf '%s\\t%s\\n' '__SYMPHONY_WORKSPACE_PATH__' '#{Base.encode64(workspace_path)}'
         printf 'REMOTE_OUTPUT:<none>\\n' >> "$trace_file"
         ;;
       *"__SYMPHONY_WORKSPACE__"*)
@@ -3516,8 +3558,8 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     case "$*" in
       *"__SYMPHONY_WORKSPACE_INSPECT__"*)
         printf '%s\\t%s\\n' '__SYMPHONY_WORKSPACE_INSPECT__' 'dir'
-        printf '%s\\t%s\\n' '__SYMPHONY_WORKSPACE_PATH__' '#{workspace_path}'
-        printf '%s\\t%s\\n' '__SYMPHONY_WORKSPACE_REMOTE__' '#{remote_url}'
+        printf '%s\\t%s\\n' '__SYMPHONY_WORKSPACE_PATH__' '#{Base.encode64(workspace_path)}'
+        printf '%s\\t%s\\n' '__SYMPHONY_WORKSPACE_REMOTE__' '#{Base.encode64(remote_url)}'
         printf 'REMOTE_OUTPUT:%s\\n' '#{remote_url}' >> "$trace_file"
         ;;
       *"__SYMPHONY_WORKSPACE__"*)
@@ -3541,7 +3583,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
         trace_file = Path.join(test_root, "ssh.trace")
         fake_ssh = Path.join(test_root, "ssh")
         workspace_path = "/remote/home/.symphony-remote-workspaces/#{identifier}"
-        marker_output = if marker, do: "printf '%s\\t%s\\n' '__SYMPHONY_WORKSPACE_MARKER__' '#{marker}'", else: ""
+        marker_output = if marker, do: "printf '%s\\t%s\\n' '__SYMPHONY_WORKSPACE_MARKER__' '#{Base.encode64(marker)}'", else: ""
 
         File.mkdir_p!(test_root)
         System.put_env("SYMP_TEST_SSH_TRACE", trace_file)

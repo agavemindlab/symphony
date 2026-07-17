@@ -227,6 +227,7 @@ defmodule SymphonyElixir.AppServerTest do
       SYMPHONY_PROJECT_SLUG="grotto-slug"
       SYMPHONY_REPO="grotto"
       SYMPHONY_BASE_BRANCH="main"
+      PROJECT_RUNTIME_VALUE="from-selected-project"
       """)
 
       File.write!(Path.join(workflow_dir, "project-for-linear-project.sh"), """
@@ -249,6 +250,7 @@ defmodule SymphonyElixir.AppServerTest do
         printf 'SYMPHONY_BASE_BRANCH=%s\\n' "${SYMPHONY_BASE_BRANCH:-}"
         printf 'SYMPHONY_PROJECT_DIR=%s\\n' "${SYMPHONY_PROJECT_DIR:-}"
         printf 'SYMPHONY_LINEAR_PROJECT_SLUG=%s\\n' "${SYMPHONY_LINEAR_PROJECT_SLUG:-}"
+        printf 'PROJECT_RUNTIME_VALUE=%s\\n' "${PROJECT_RUNTIME_VALUE:-}"
       } > "$trace_file"
 
       count=0
@@ -292,6 +294,7 @@ defmodule SymphonyElixir.AppServerTest do
                SYMPHONY_BASE_BRANCH=main
                SYMPHONY_PROJECT_DIR=#{project_dir}
                SYMPHONY_LINEAR_PROJECT_SLUG=grotto-slug
+               PROJECT_RUNTIME_VALUE=from-selected-project
                """
     after
       Workflow.set_workflow_file_path(original_workflow_path)

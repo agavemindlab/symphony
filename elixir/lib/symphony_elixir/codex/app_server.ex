@@ -243,7 +243,14 @@ defmodule SymphonyElixir.Codex.AppServer do
           |> Enum.sort_by(fn {name, _value} -> name end)
           |> Enum.map_join("\n", fn {name, value} -> env_export(name, value) end)
 
-        [project_env_unset(), exports]
+        selector =
+          if Map.get(env, "SYMPHONY_LINEAR_PROJECT_SLUG") in [nil, ""] do
+            ""
+          else
+            ~s(if [ -f "$SYMPHONY_WORKFLOW_DIR/project-for-linear-project.sh" ]; then . "$SYMPHONY_WORKFLOW_DIR/project-for-linear-project.sh"; fi)
+          end
+
+        [project_env_unset(), exports, selector]
         |> Enum.reject(&(&1 == ""))
         |> Enum.join("\n")
 
