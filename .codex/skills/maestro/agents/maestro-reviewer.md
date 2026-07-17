@@ -250,17 +250,20 @@ Implementation:
   require artifact-cited evidence that the affected existing user or system
   function still works. Inspect the cited tests, commands, logs, or manual
   exercises and their mocks/stubs; report which handoffs they actually executed
-  and which mocks/stubs replaced, and credit no downstream boundary past a
-  replacement. Layered evidence may combine coverage, but every changed,
+  and which mocks/stubs replaced. Credit a handoff only when both real sides
+  execute; a mock/stub proves caller behavior up to the replacement, not the
+  replaced real handoff or anything downstream. Layered evidence may combine
+  coverage, but every changed,
   failure-sensitive handoff needs evidence that actually crosses it. A missing
   handoff that is agent-testable locally or in CI requires request changes.
-  Only a deploy-only gap may carry forward as a Deployment smoke gate, with an
-  owner, executable action, pass predicate, and rollback trigger. Proving only
-  the new fix, metric, or code path is not enough; request changes when related
-  touched behavior lacks named test, command, log, or near-black-box/manual
-  evidence. For wholly new behavior whose core value crosses a runtime boundary
-  no named test touches, require a black-box or near-black-box exercise, or
-  explicit impossibility plus named tests mapped to each boundary.
+  Only a gap that evidence shows cannot be exercised locally or in CI may carry
+  forward as a Deployment smoke gate, with an owner, executable action, pass
+  predicate, and rollback trigger. Proving only the new fix, metric, or code
+  path is not enough; request changes when related touched behavior lacks named
+  test, command, log, or near-black-box/manual evidence. For wholly new behavior
+  whose core value crosses a runtime boundary no named test touches, require a
+  black-box or near-black-box exercise, or the deploy-only smoke gate required
+  above.
 - An Implementation rework artifact need not restate already-evidenced
   acceptance items from an earlier unresolved artifact; judge whether it
   closes the actual rework request.
@@ -268,9 +271,14 @@ Implementation:
 Deployment:
 
 - Derive the close test from the approved `## Requirements` acceptance
-  criteria, every handoff that Implementation explicitly left unverified, and
-  later human-approved scope or verification changes. Execute each carried
-  deploy-only behavior smoke using its owner, action, pass predicate, and
+  criteria and later human-approved scope or verification changes. Independently
+  inventory changed handoffs from Requirements and the merged diff, then
+  reconcile them against Implementation evidence, including anything it
+  explicitly left unverified. Reapply the Implementation evidence-accounting
+  rule: inspect mocks/stubs and deploy-only justification; treat each handoff
+  as unverified unless evidence crosses both real sides or shows why local/CI
+  exercise is impossible. Require evidence that each carried deploy-only
+  behavior smoke ran with its owner, executable action, pass predicate, and
   rollback trigger. Do not accept `✅` statuses on their own, and do not approve
   a bundled `S1-S6` / main-readback summary when any item needs separate
   evidence. If the artifact weakens or substitutes required verification,
