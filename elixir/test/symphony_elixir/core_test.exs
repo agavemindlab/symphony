@@ -458,6 +458,25 @@ defmodule SymphonyElixir.CoreTest do
   end
 
   @tag :prompt_contract
+  test "merging routes legacy implementation artifacts through contract repair" do
+    workflow = shared_workflow_prompt() |> String.replace(~r/\s+/, " ")
+
+    assert workflow =~
+             "Evaluate in this order: no Implementation artifact → `Human Review`; artifact not for the current PR Head → `Rework`; for a current-Head artifact, `CLEAN` → Deployment, `ESCALATED` → `Human Review`, and absent or malformed verdict → Implementation"
+
+    assert workflow =~
+             "first move the issue to `In Progress` before re-reviewing or publishing the replacement artifact"
+
+    assert workflow =~ "same session"
+    assert workflow =~ "resolve the legacy artifact"
+    assert workflow =~ "publish a replacement artifact with the current verdict contract"
+    assert workflow =~ "workflow metadata/contract repair"
+    assert workflow =~ "does not imply a product or code-scope change"
+    assert workflow =~ "must not merge or enter Deployment"
+    assert workflow =~ "fresh human move to `Merging`"
+  end
+
+  @tag :prompt_contract
   test "shared symphony-pr contract targets upstream repo when upstream exists" do
     repo_root = Path.expand("..", File.cwd!())
     workflow = File.read!(Path.join(repo_root, "workflows/agavemindlab/WORKFLOW.md"))

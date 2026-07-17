@@ -239,12 +239,22 @@ Symphony only starts the agent when the issue is in an active state (`Todo`, `In
 
 3. Route by Linear state:
    - `Todo` → move to `In Progress`, then continue as `In Progress`.
-   - `Merging` → require the latest Symphony-authored `## Implementation`
-     artifact to have `Review verdict: CLEAN` for the current PR Head. An
-     absent, malformed, `ESCALATED`, or stale-Head verdict cannot deploy:
-     return the issue to `Human Review` (or `Rework` for a changed Head) and
-     stop. Otherwise write `✅ 已批准，进入 Deployment（[timestamp]）`, target
-     Deployment, and go to step 6.
+   - `Merging` → route the latest Symphony-authored `## Implementation`
+     artifact by verdict and PR Head. Evaluate in this order: no Implementation
+     artifact → `Human Review`; artifact not for the current PR Head → `Rework`;
+     for a current-Head artifact, `CLEAN` → Deployment, `ESCALATED` →
+     `Human Review`, and absent or malformed verdict → Implementation. The last
+     case is a legacy-artifact compatibility repair: first move the issue to
+     `In Progress` before re-reviewing or publishing the replacement artifact.
+     Then, in the same session, target Implementation, re-review the current
+     Head, resolve the legacy artifact, publish a replacement artifact with the
+     current verdict contract, and return it to `Human Review`. State that this
+     is workflow metadata/contract repair and does not imply a product or
+     code-scope change. The repair session must not merge or enter Deployment;
+     only a fresh human move to `Merging` may do so. For `CLEAN`, write
+     `✅ 已批准，进入 Deployment（[timestamp]）`, target Deployment, and go to
+     step 6; otherwise move to the stated state and stop unless running the
+     compatibility repair.
    - `In Progress`, `Rework` → determine the target phase via steps 4–5.
 
 4. Gather the signals. When the `## 引擎预计算的路由事实` block above is available, treat its artifact states, awaiting phase, and new-comment lists as verified mechanics — do not re-derive them from scratch; fetch full comment bodies only where an excerpt is insufficient. When it is marked unavailable, derive them yourself as below:
