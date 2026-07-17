@@ -171,20 +171,27 @@ defmodule SymphonyElixir.Workflow do
         "set -eu",
         unset_project_env_exports(),
         Enum.map_join(base_env, "\n", fn {key, value} -> env_export(key, value) end),
-        ~s(. "$SYMPHONY_WORKFLOW_DIR/project-for-linear-project.sh"),
+        ~s(. "$SYMPHONY_WORKFLOW_DIR/project-for-linear-project.sh" >/dev/null),
         project_env_prints()
       ]
       |> Enum.reject(&(&1 == ""))
       |> Enum.join("\n")
 
-    case System.cmd("sh", ["-lc", script], cd: workflow_dir, stderr_to_stdout: true) do
-      {output, 0} ->
+    task = Task.async(fn -> System.cmd("sh", ["-lc", script], cd: workflow_dir, stderr_to_stdout: true) end)
+    timeout_ms = SymphonyElixir.Config.settings!().hooks.timeout_ms
+
+    case Task.yield(task, timeout_ms) do
+      {:ok, {output, 0}} ->
         with {:ok, env} <- parse_project_env_output(output) do
           {:ok, %{workflow_file: workflow_file, workflow_dir: workflow_dir, env: Map.merge(base_env, env)}}
         end
 
-      {output, status} ->
+      {:ok, {output, status}} ->
         {:error, {:project_env_resolve_failed, status, output}}
+
+      nil ->
+        Task.shutdown(task, :brutal_kill)
+        {:error, {:project_env_resolve_timeout, timeout_ms}}
     end
   end
 
@@ -245,29 +252,54 @@ defmodule SymphonyElixir.Workflow do
 
   defp project_env_prints do
     Enum.map_join(@project_env_keys, "\n", fn key ->
-      ~s(printf '%s\\t%s\\t%s\\n' '#{@project_env_marker}' '#{key}' "${#{key}:-}")
+      """
+      printf '%s\\t%s\\t' '#{@project_env_marker}' '#{key}'
+      printf '%s' "${#{key}:-}" | base64 | tr -d '\\n'
+      printf '\\n'
+      """
     end)
   end
 
   defp parse_project_env_output(output) do
-    output
-    |> String.split("\n", trim: true)
-    |> Enum.reduce_while({:ok, %{}}, &parse_project_env_line/2)
+    result =
+      output
+      |> String.split("\n", trim: true)
+      |> Enum.reduce_while({:ok, %{}}, &parse_project_env_line/2)
+
+    case result do
+      {:ok, env} when map_size(env) == length(@project_env_keys) -> {:ok, env}
+      {:ok, _env} -> {:error, :incomplete_project_env_output}
+      {:error, _reason} = error -> error
+    end
   end
 
   defp parse_project_env_line(line, {:ok, env}) do
     case String.split(line, "\t", parts: 3) do
-      [@project_env_marker, key, value] -> put_project_env_line(env, key, value)
+      [@project_env_marker, key, encoded] -> put_project_env_line(env, key, encoded)
       _ -> {:cont, {:ok, env}}
     end
   end
 
-  defp put_project_env_line(env, key, value) do
-    if safe_env_value?(value) do
-      {:cont, {:ok, Map.put(env, key, value)}}
-    else
-      {:halt, {:error, {:invalid_project_env_value, key}}}
+  defp put_project_env_line(env, key, encoded) do
+    cond do
+      key not in @project_env_keys ->
+        {:halt, {:error, {:invalid_project_env_key, key}}}
+
+      Map.has_key?(env, key) ->
+        {:halt, {:error, {:duplicate_project_env_key, key}}}
+
+      true ->
+        case Base.decode64(encoded) do
+          {:ok, value} -> put_project_env_value(env, key, value)
+          :error -> {:halt, {:error, {:invalid_project_env_value, key}}}
+        end
     end
+  end
+
+  defp put_project_env_value(env, key, value) do
+    if safe_env_value?(value),
+      do: {:cont, {:ok, Map.put(env, key, value)}},
+      else: {:halt, {:error, {:invalid_project_env_value, key}}}
   end
 
   defp safe_env_value?(value) when is_binary(value) do

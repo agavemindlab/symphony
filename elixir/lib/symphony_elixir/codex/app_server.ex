@@ -39,9 +39,10 @@ defmodule SymphonyElixir.Codex.AppServer do
   def start_session(workspace, opts \\ []) do
     worker_host = Keyword.get(opts, :worker_host)
     issue = Keyword.get(opts, :issue)
+    project_env = Keyword.get(opts, :project_env)
 
     with {:ok, expanded_workspace} <- validate_workspace_cwd(workspace, worker_host),
-         {:ok, port} <- start_port(expanded_workspace, worker_host, issue) do
+         {:ok, port} <- start_port(expanded_workspace, worker_host, issue, project_env) do
       metadata = port_metadata(port, worker_host)
 
       with {:ok, session_policies} <- session_policies(expanded_workspace, worker_host),
@@ -186,13 +187,13 @@ defmodule SymphonyElixir.Codex.AppServer do
     end
   end
 
-  defp start_port(workspace, nil, issue) do
+  defp start_port(workspace, nil, issue, project_env) do
     executable = System.find_executable("bash")
 
     if is_nil(executable) do
       {:error, :bash_not_found}
     else
-      command = launch_command(issue)
+      command = launch_command(issue, project_env)
 
       port =
         Port.open(
@@ -211,48 +212,34 @@ defmodule SymphonyElixir.Codex.AppServer do
     end
   end
 
-  defp start_port(workspace, worker_host, issue) when is_binary(worker_host) do
-    remote_command = remote_launch_command(workspace, issue)
+  defp start_port(workspace, worker_host, issue, project_env) when is_binary(worker_host) do
+    remote_command = remote_launch_command(workspace, issue, project_env)
     SSH.start_port(worker_host, remote_command, line: @port_line_bytes)
   end
 
-  defp launch_command(issue) do
+  defp launch_command(issue, project_env) do
     [
       "set -e",
-      project_env_source_prefix(issue),
+      project_env_source_prefix(issue, project_env),
       "exec #{Config.settings!().codex.command}"
     ]
     |> Enum.reject(&(&1 == ""))
     |> Enum.join("\n")
   end
 
-  defp remote_launch_command(workspace, issue) when is_binary(workspace) do
+  defp remote_launch_command(workspace, issue, project_env) when is_binary(workspace) do
     [
       "set -e",
       "cd #{shell_escape(workspace)}",
-      launch_command(issue)
+      launch_command(issue, project_env)
     ]
     |> Enum.join("\n")
   end
 
-  defp project_env_source_prefix(issue) do
+  defp project_env_source_prefix(issue, nil) do
     case Workflow.resolve_project_env(issue) do
-      {:ok, %{env: env}} ->
-        exports =
-          env
-          |> Enum.sort_by(fn {name, _value} -> name end)
-          |> Enum.map_join("\n", fn {name, value} -> env_export(name, value) end)
-
-        selector =
-          if Map.get(env, "SYMPHONY_LINEAR_PROJECT_SLUG") in [nil, ""] do
-            ""
-          else
-            ~s(if [ -f "$SYMPHONY_WORKFLOW_DIR/project-for-linear-project.sh" ]; then . "$SYMPHONY_WORKFLOW_DIR/project-for-linear-project.sh"; fi)
-          end
-
-        [project_env_unset(), exports, selector]
-        |> Enum.reject(&(&1 == ""))
-        |> Enum.join("\n")
+      {:ok, project_env} ->
+        project_env_source_prefix(issue, project_env)
 
       {:error, reason} ->
         [
@@ -261,6 +248,24 @@ defmodule SymphonyElixir.Codex.AppServer do
         ]
         |> Enum.join("\n")
     end
+  end
+
+  defp project_env_source_prefix(_issue, %{env: env}) do
+    exports =
+      env
+      |> Enum.sort_by(fn {name, _value} -> name end)
+      |> Enum.map_join("\n", fn {name, value} -> env_export(name, value) end)
+
+    selector =
+      if Map.get(env, "SYMPHONY_LINEAR_PROJECT_SLUG") in [nil, ""] do
+        ""
+      else
+        ~s(if [ -f "$SYMPHONY_WORKFLOW_DIR/project-for-linear-project.sh" ]; then . "$SYMPHONY_WORKFLOW_DIR/project-for-linear-project.sh"; fi)
+      end
+
+    [project_env_unset(), exports, selector, exports]
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.join("\n")
   end
 
   defp project_env_unset do

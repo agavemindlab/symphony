@@ -334,6 +334,13 @@ defmodule SymphonyElixir.Workspace do
   @spec run_before_run_hook(Path.t(), map() | String.t() | nil, worker_host()) ::
           :ok | {:error, term()}
   def run_before_run_hook(workspace, issue_or_identifier, worker_host \\ nil) when is_binary(workspace) do
+    run_before_run_hook(workspace, issue_or_identifier, worker_host, nil)
+  end
+
+  @doc false
+  @spec run_before_run_hook(Path.t(), map() | String.t() | nil, worker_host(), Workflow.resolved_project_env() | nil) ::
+          :ok | {:error, term()}
+  def run_before_run_hook(workspace, issue_or_identifier, worker_host, project_env) when is_binary(workspace) do
     issue_context = issue_context(issue_or_identifier)
     hooks = Config.settings!().hooks
 
@@ -342,7 +349,37 @@ defmodule SymphonyElixir.Workspace do
         :ok
 
       command ->
-        run_hook(command, workspace, issue_context, "before_run", worker_host)
+        run_hook(command, workspace, issue_context, "before_run", worker_host, project_env)
+    end
+  end
+
+  @doc false
+  @spec validate_identity(Path.t(), map() | String.t() | nil, Workflow.resolved_project_env(), worker_host()) ::
+          :ok | {:error, term()}
+  def validate_identity(workspace, issue_or_identifier, project_env, worker_host \\ nil) when is_binary(workspace) do
+    issue_context = issue_context(issue_or_identifier)
+
+    with {:ok, expected_identity} <- expected_workspace_identity(issue_context, project_env),
+         :ok <- validate_workspace_path(workspace, worker_host) do
+      validate_current_identity(workspace, expected_identity, worker_host)
+    end
+  end
+
+  defp validate_current_identity(_workspace, nil, _worker_host), do: :ok
+
+  defp validate_current_identity(workspace, expected_identity, nil) do
+    case existing_workspace_identity_status(workspace, expected_identity, nil) do
+      :reuse -> :ok
+      status -> {:error, {:workspace_identity_changed, status}}
+    end
+  end
+
+  defp validate_current_identity(workspace, expected_identity, worker_host) when is_binary(worker_host) do
+    with {:ok, inspection} <- inspect_remote_workspace(workspace, worker_host) do
+      case remote_workspace_identity_status(inspection, expected_identity) do
+        :reuse -> :ok
+        status -> {:error, {:workspace_identity_changed, status}}
+      end
     end
   end
 
@@ -795,7 +832,8 @@ defmodule SymphonyElixir.Workspace do
         "  marker_dir=\"$workspace/.symphony\"",
         "  marker=\"$workspace/#{@workspace_identity_marker}\"",
         "  unsafe=0",
-        "  if [ -L \"$marker_dir\" ] || [ -L \"$marker\" ] || { [ -e \"$marker\" ] && [ ! -f \"$marker\" ]; }; then",
+        "  if [ -L \"$marker_dir\" ] || { [ -e \"$marker_dir\" ] && [ ! -d \"$marker_dir\" ]; } ||",
+        "     [ -L \"$marker\" ] || { [ -e \"$marker\" ] && [ ! -f \"$marker\" ]; }; then",
         "    unsafe=1",
         "  elif [ -f \"$marker\" ] && [ \"$(wc -c < \"$marker\" | tr -d '[:space:]')\" -gt #{@workspace_identity_max_bytes} ]; then",
         "    unsafe=1",
@@ -940,6 +978,8 @@ defmodule SymphonyElixir.Workspace do
         "marker_dir=\"$workspace/.symphony\"",
         "marker=\"$workspace/#{@workspace_identity_marker}\"",
         "[ ! -L \"$marker_dir\" ] && [ ! -L \"$marker\" ]",
+        "{ [ ! -e \"$marker_dir\" ] || [ -d \"$marker_dir\" ]; }",
+        "{ [ ! -e \"$marker\" ] || [ -f \"$marker\" ]; }",
         "mkdir -p \"$marker_dir\"",
         "marker_dir_canonical=\"$(cd \"$marker_dir\" && pwd -P)\"",
         "case \"$marker_dir_canonical/\" in \"$workspace_canonical\"/*) ;; *) exit 65 ;; esac",
@@ -1135,8 +1175,8 @@ defmodule SymphonyElixir.Workspace do
 
     with :ok <- reject_symlink(workspace),
          :ok <- validate_workspace_path(workspace, nil),
-         :ok <- reject_symlink(marker_dir),
-         :ok <- reject_symlink(marker_path),
+         :ok <- validate_marker_dir(marker_dir),
+         :ok <- validate_marker_file(marker_path),
          {:ok, canonical_workspace} <- PathSafety.canonicalize(workspace),
          {:ok, canonical_marker} <- PathSafety.canonicalize(marker_path),
          true <- String.starts_with?(canonical_marker, canonical_workspace <> "/") do
@@ -1152,6 +1192,24 @@ defmodule SymphonyElixir.Workspace do
       {:ok, %File.Stat{type: :symlink}} -> {:error, :unsafe_marker_path}
       {:ok, _stat} -> :ok
       {:error, :enoent} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp validate_marker_dir(path) do
+    case File.lstat(path) do
+      {:ok, %File.Stat{type: :directory}} -> :ok
+      {:error, :enoent} -> :ok
+      {:ok, _stat} -> {:error, :unsafe_marker_path}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp validate_marker_file(path) do
+    case File.lstat(path) do
+      {:ok, %File.Stat{type: :regular}} -> :ok
+      {:error, :enoent} -> :ok
+      {:ok, _stat} -> {:error, :unsafe_marker_path}
       {:error, reason} -> {:error, reason}
     end
   end

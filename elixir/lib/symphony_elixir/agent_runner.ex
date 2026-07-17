@@ -5,7 +5,7 @@ defmodule SymphonyElixir.AgentRunner do
 
   require Logger
   alias SymphonyElixir.Codex.AppServer
-  alias SymphonyElixir.{Config, Linear.Issue, PromptBuilder, SSH, Tracker, Workspace}
+  alias SymphonyElixir.{Config, Linear.Issue, PromptBuilder, SSH, Tracker, Workflow, Workspace}
 
   @stop_after_turn_marker Path.join([".symphony", "stop-after-turn"])
 
@@ -44,8 +44,10 @@ defmodule SymphonyElixir.AgentRunner do
         send_worker_runtime_info(codex_update_recipient, issue, worker_host, workspace)
 
         try do
-          with :ok <- Workspace.run_before_run_hook(workspace, issue, worker_host) do
-            run_codex_turns(workspace, issue, codex_update_recipient, opts, worker_host)
+          with {:ok, project_env} <- Workflow.resolve_project_env(issue),
+               :ok <- Workspace.validate_identity(workspace, issue, project_env, worker_host),
+               :ok <- Workspace.run_before_run_hook(workspace, issue, worker_host, project_env) do
+            run_codex_turns(workspace, issue, codex_update_recipient, opts, worker_host, project_env)
           end
         after
           Workspace.run_after_run_hook(workspace, issue, worker_host)
@@ -86,12 +88,13 @@ defmodule SymphonyElixir.AgentRunner do
 
   defp send_worker_runtime_info(_recipient, _issue, _worker_host, _workspace), do: :ok
 
-  defp run_codex_turns(workspace, issue, codex_update_recipient, opts, worker_host) do
+  defp run_codex_turns(workspace, issue, codex_update_recipient, opts, worker_host, project_env) do
     max_turns = Keyword.get(opts, :max_turns, Config.settings!().agent.max_turns)
     issue_state_fetcher = Keyword.get(opts, :issue_state_fetcher, &Tracker.fetch_issue_states_by_ids/1)
     clear_stop_after_turn_marker(workspace, worker_host)
 
-    with {:ok, session} <- AppServer.start_session(workspace, worker_host: worker_host, issue: issue) do
+    with {:ok, session} <-
+           AppServer.start_session(workspace, worker_host: worker_host, issue: issue, project_env: project_env) do
       try do
         context = %{
           app_session: session,

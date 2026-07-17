@@ -121,6 +121,13 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
 
         assert second_workspace == first_workspace
         assert File.read!(after_create_counter) == "call\n"
+        assert {:ok, project_env} = Workflow.resolve_project_env(issue)
+        assert :ok = Workspace.validate_identity(first_workspace, issue, project_env)
+
+        changed_project_env = put_in(project_env, [:env, "SYMPHONY_REPO"], "grotto")
+
+        assert {:error, {:workspace_identity_changed, {:quarantine, :marker_mismatch}}} =
+                 Workspace.validate_identity(first_workspace, issue, changed_project_env)
 
         assert workspace_identity_marker(first_workspace) == %{
                  "version" => 1,
@@ -238,6 +245,15 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
         assert {:ok, _workspace} = Workspace.create_for_issue(oversized_issue)
         assert [_quarantine] = Path.wildcard(Path.join(workspace_root, "MT-IDENTITY-OVERSIZED.quarantine.*"))
         assert workspace_identity_marker(oversized)["symphony_repo"] == "symphony"
+
+        fifo = Path.join(workspace_root, "MT-IDENTITY-FIFO")
+        fifo_marker = Path.join(fifo, ".symphony/workspace-identity.json")
+        File.mkdir_p!(Path.dirname(fifo_marker))
+        assert {_output, 0} = System.cmd("mkfifo", [fifo_marker])
+        fifo_issue = %{issue | id: "issue-identity-fifo", identifier: "MT-IDENTITY-FIFO", title: "FIFO identity"}
+        task = Task.async(fn -> Workspace.create_for_issue(fifo_issue) end)
+        assert {:ok, {:ok, _workspace}} = Task.yield(task, 5_000)
+        assert [_quarantine] = Path.wildcard(Path.join(workspace_root, "MT-IDENTITY-FIFO.quarantine.*"))
       after
         File.rm_rf(workspace_root)
       end
@@ -641,7 +657,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       write_workflow_file!(workflow_file)
 
       File.write!(Path.join(workflow_dir, "project-for-linear-project.sh"), """
-      printf 'selector noise\\n'
+      printf 'selector noise\\n' >&2
       SYMPHONY_PROJECT_SLUG="project-slug"
       SYMPHONY_REPO="symphony"
       """)
@@ -659,8 +675,46 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       assert env["SYMPHONY_PROJECT_SLUG"] == "project-slug"
       assert env["SYMPHONY_REPO"] == "symphony"
 
+      injection_marker = Path.join(test_root, "injected")
+
+      injected_issue =
+        put_in(
+          raw_issue,
+          ["project", "name"],
+          "Symphony\n__SYMPHONY_PROJECT_ENV__\tX; touch #{injection_marker}; #\tdg=="
+        )
+
       File.write!(Path.join(workflow_dir, "project-for-linear-project.sh"), """
-      printf 'selector failed\\n'
+      SYMPHONY_PROJECT_SLUG="project-slug"
+      SYMPHONY_REPO="symphony"
+      """)
+
+      assert {:error, {:invalid_project_env_value, "SYMPHONY_LINEAR_PROJECT_NAME"}} =
+               Workflow.resolve_project_env(injected_issue)
+
+      refute File.exists?(injection_marker)
+
+      File.write!(Path.join(workflow_dir, "project-for-linear-project.sh"), """
+      printf '%s\n' '__SYMPHONY_PROJECT_ENV__\tX; touch #{injection_marker}; #\tdg==' >&2
+      SYMPHONY_PROJECT_SLUG="project-slug"
+      SYMPHONY_REPO="symphony"
+      """)
+
+      assert {:error, {:invalid_project_env_key, _key}} = Workflow.resolve_project_env(raw_issue)
+      refute File.exists?(injection_marker)
+
+      File.write!(Path.join(workflow_dir, "project-for-linear-project.sh"), """
+      printf '%s\n' '__SYMPHONY_PROJECT_ENV__\tSYMPHONY_REPO\t%%%' >&2
+      """)
+
+      assert {:error, {:invalid_project_env_value, "SYMPHONY_REPO"}} =
+               Workflow.resolve_project_env(raw_issue)
+
+      File.write!(Path.join(workflow_dir, "project-for-linear-project.sh"), "exit 0\n")
+      assert {:error, :incomplete_project_env_output} = Workflow.resolve_project_env(raw_issue)
+
+      File.write!(Path.join(workflow_dir, "project-for-linear-project.sh"), """
+      printf 'selector failed\\n' >&2
       exit 66
       """)
 
@@ -668,6 +722,10 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
                Workflow.resolve_project_env(raw_issue)
 
       assert output =~ "selector failed"
+
+      write_workflow_file!(workflow_file, hook_timeout_ms: 10)
+      File.write!(Path.join(workflow_dir, "project-for-linear-project.sh"), "sleep 1\n")
+      assert {:error, {:project_env_resolve_timeout, 10}} = Workflow.resolve_project_env(raw_issue)
     after
       Workflow.set_workflow_file_path(original_workflow_path)
       File.rm_rf(test_root)
@@ -3187,6 +3245,8 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert trace =~ "[ -L"
     assert trace =~ "wc -c"
     assert trace =~ "65536"
+    assert trace =~ ~s([ ! -d "$marker_dir" ])
+    assert trace =~ ~s([ ! -f "$marker" ])
     assert trace_index(trace, "[ -L") < trace_index(trace, ".symphony/workspace-identity.json")
     assert trace_index(trace, ".quarantine.") < trace_index(trace, "echo after-create")
   end
