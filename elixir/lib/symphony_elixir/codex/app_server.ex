@@ -12,21 +12,6 @@ defmodule SymphonyElixir.Codex.AppServer do
   @port_line_bytes 1_048_576
   @max_stream_log_bytes 1_000
   @non_interactive_tool_input_answer "This is a non-interactive session. Operator input is unavailable."
-  @project_env_keys [
-    "SYMPHONY_WORKFLOW_DIR",
-    "SYMPHONY_LINEAR_PROJECT_ID",
-    "SYMPHONY_LINEAR_PROJECT_SLUG",
-    "SYMPHONY_LINEAR_PROJECT_NAME",
-    "SYMPHONY_PROJECT_DIR",
-    "SYMPHONY_PROJECT_SLUG",
-    "SYMPHONY_REPO",
-    "SYMPHONY_BASE_BRANCH",
-    "SYMPHONY_PROFILE",
-    "SYMPHONY_ACCEPTANCE_USER_EMAIL_ENV",
-    "SYMPHONY_ACCEPTANCE_USER_CODE_ENV",
-    "SYMPHONY_ACCEPTANCE_USER_PURPOSE"
-  ]
-
   @type session :: %{
           port: port(),
           metadata: map(),
@@ -272,7 +257,7 @@ defmodule SymphonyElixir.Codex.AppServer do
   end
 
   defp project_env_unset do
-    "unset #{Enum.join(@project_env_keys, " ")}"
+    "unset #{Enum.join(Workflow.project_env_keys(), " ")}"
   end
 
   defp env_export(_name, nil), do: ""

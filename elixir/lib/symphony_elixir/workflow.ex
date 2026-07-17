@@ -48,6 +48,9 @@ defmodule SymphonyElixir.Workflow do
           env: %{String.t() => String.t()}
         }
 
+  @spec project_env_keys() :: [String.t()]
+  def project_env_keys, do: @project_env_keys
+
   @spec resolve_project_env(map() | String.t() | nil) :: {:ok, resolved_project_env()} | {:error, term()}
   def resolve_project_env(issue_or_context) do
     workflow_file = workflow_file_path()

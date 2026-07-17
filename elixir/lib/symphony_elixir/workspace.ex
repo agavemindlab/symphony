@@ -130,7 +130,11 @@ defmodule SymphonyElixir.Workspace do
         remote_shell_assign("root", Config.settings!().workspace.root),
         "mkdir -p \"$root\"",
         "root_canonical=\"$(cd \"$root\" && pwd -P)\"",
-        "if [ -d \"$workspace\" ]; then",
+        "if [ -L \"$workspace\" ]; then",
+        "  rm -f \"$workspace\"",
+        "  mkdir -p \"$workspace\"",
+        "  created=1",
+        "elif [ -d \"$workspace\" ]; then",
         "  workspace_canonical=\"$(cd \"$workspace\" && pwd -P)\"",
         "  case \"$workspace_canonical/\" in",
         "    \"$root_canonical\"/*) created=0 ;;",
@@ -674,10 +678,11 @@ defmodule SymphonyElixir.Workspace do
   defp remote_workspace_identity_status(%{kind: :missing}, _expected_identity), do: :create
   defp remote_workspace_identity_status(%{kind: :other}, _expected_identity), do: :create
   defp remote_workspace_identity_status(%{kind: :escape}, _expected_identity), do: {:quarantine, :symlink_escape}
+  defp remote_workspace_identity_status(%{kind: :unsafe_marker}, _expected_identity), do: {:quarantine, :unsafe_marker}
 
   defp remote_workspace_identity_status(%{kind: :dir} = inspection, expected_identity) do
     case Map.get(inspection, :marker) do
-      marker_json when is_binary(marker_json) and marker_json != "" ->
+      marker_json when is_binary(marker_json) ->
         case Jason.decode(marker_json) do
           {:ok, ^expected_identity} -> :reuse
           {:ok, _marker} -> {:quarantine, :marker_mismatch}
@@ -699,12 +704,12 @@ defmodule SymphonyElixir.Workspace do
   end
 
   defp read_workspace_identity_marker(workspace, nil) do
-    marker_path = Path.join(workspace, @workspace_identity_marker)
-
-    case File.read(marker_path) do
-      {:ok, content} -> Jason.decode(content)
-      {:error, :enoent} -> {:error, :missing_marker}
-      {:error, reason} -> {:error, reason}
+    with {:ok, marker_path} <- safe_workspace_identity_marker_path(workspace) do
+      case File.read(marker_path) do
+        {:ok, content} -> Jason.decode(content)
+        {:error, :enoent} -> {:error, :missing_marker}
+        {:error, reason} -> {:error, reason}
+      end
     end
   end
 
@@ -770,7 +775,9 @@ defmodule SymphonyElixir.Workspace do
         remote_shell_assign("root", Config.settings!().workspace.root),
         "mkdir -p \"$root\"",
         "root_canonical=\"$(cd \"$root\" && pwd -P)\"",
-        "if [ -d \"$workspace\" ]; then",
+        "if [ -L \"$workspace\" ]; then",
+        "  printf '%s\\t%s\\n' '#{@remote_workspace_inspect_marker}' 'escape'",
+        "elif [ -d \"$workspace\" ]; then",
         "  workspace_canonical=\"$(cd \"$workspace\" && pwd -P)\"",
         "  case \"$workspace_canonical/\" in",
         "    \"$root_canonical\"/*) ;;",
@@ -783,9 +790,13 @@ defmodule SymphonyElixir.Workspace do
         "  printf '%s\\t%s\\n' '#{@remote_workspace_inspect_marker}' 'dir'",
         "  cd \"$workspace\"",
         "  printf '%s\\t%s\\n' '#{@remote_workspace_path_marker}' \"$(pwd -P)\"",
-        "  if [ -f \"$workspace/#{@workspace_identity_marker}\" ]; then",
+        "  marker_dir=\"$workspace/.symphony\"",
+        "  marker=\"$workspace/#{@workspace_identity_marker}\"",
+        "  if [ -L \"$marker_dir\" ] || [ -L \"$marker\" ] || { [ -e \"$marker\" ] && [ ! -f \"$marker\" ]; }; then",
+        "    printf '%s\\t%s\\n' '#{@remote_workspace_inspect_marker}' 'unsafe_marker'",
+        "  elif [ -f \"$marker\" ]; then",
         "    printf '%s\\t' '#{@remote_workspace_identity_marker}'",
-        "    cat \"$workspace/#{@workspace_identity_marker}\"",
+        "    cat \"$marker\"",
         "    printf '\\n'",
         "  fi",
         "  remote_url=\"$(git -C \"$workspace\" remote get-url upstream 2>/dev/null || git -C \"$workspace\" remote get-url origin 2>/dev/null || true)\"",
@@ -812,7 +823,7 @@ defmodule SymphonyElixir.Workspace do
     |> String.split("\n", trim: true)
     |> Enum.reduce(%{}, &put_remote_workspace_inspection_line/2)
     |> case do
-      %{kind: kind} = inspection when kind in [:dir, :other, :missing, :escape] -> {:ok, inspection}
+      %{kind: kind} = inspection when kind in [:dir, :other, :missing, :escape, :unsafe_marker] -> {:ok, inspection}
       _inspection -> {:error, {:workspace_inspect_failed, :invalid_output, output}}
     end
   end
@@ -831,6 +842,7 @@ defmodule SymphonyElixir.Workspace do
   defp put_remote_workspace_kind(acc, "other"), do: Map.put(acc, :kind, :other)
   defp put_remote_workspace_kind(acc, "missing"), do: Map.put(acc, :kind, :missing)
   defp put_remote_workspace_kind(acc, "escape"), do: Map.put(acc, :kind, :escape)
+  defp put_remote_workspace_kind(acc, "unsafe_marker"), do: Map.put(acc, :kind, :unsafe_marker)
   defp put_remote_workspace_kind(acc, _kind), do: acc
 
   defp quarantine_remote_workspace(workspace, worker_host) do
@@ -838,7 +850,7 @@ defmodule SymphonyElixir.Workspace do
       [
         "set -eu",
         remote_shell_assign("workspace", workspace),
-        "if [ -e \"$workspace\" ]; then",
+        "if [ -e \"$workspace\" ] || [ -L \"$workspace\" ]; then",
         "  parent=\"$(dirname \"$workspace\")\"",
         "  base=\"$(basename \"$workspace\")\"",
         "  timestamp=\"$(date +%Y%m%d%H%M%S).$$\"",
@@ -871,11 +883,12 @@ defmodule SymphonyElixir.Workspace do
   end
 
   defp write_workspace_identity_marker(workspace, expected_identity, nil) do
-    marker_path = Path.join(workspace, @workspace_identity_marker)
+    marker_dir = Path.join(workspace, ".symphony")
 
-    case File.mkdir_p(Path.dirname(marker_path)) do
-      :ok -> File.write(marker_path, Jason.encode!(expected_identity))
-      {:error, reason} -> {:error, reason}
+    with {:ok, _marker_path} <- safe_workspace_identity_marker_path(workspace),
+         :ok <- File.mkdir_p(marker_dir),
+         {:ok, marker_path} <- safe_workspace_identity_marker_path(workspace) do
+      atomic_write(marker_path, Jason.encode!(expected_identity))
     end
   end
 
@@ -887,10 +900,24 @@ defmodule SymphonyElixir.Workspace do
         "set -eu",
         "printf '%s\\n' '#{@remote_workspace_marker_write}'",
         remote_shell_assign("workspace", workspace),
-        "mkdir -p \"$workspace/.symphony\"",
-        "tmp=\"$workspace/#{@workspace_identity_marker}.tmp.$$\"",
+        remote_shell_assign("root", Config.settings!().workspace.root),
+        "[ ! -L \"$workspace\" ]",
+        "root_canonical=\"$(cd \"$root\" && pwd -P)\"",
+        "workspace_canonical=\"$(cd \"$workspace\" && pwd -P)\"",
+        "case \"$workspace_canonical/\" in \"$root_canonical\"/*) ;; *) exit 65 ;; esac",
+        "marker_dir=\"$workspace/.symphony\"",
+        "marker=\"$workspace/#{@workspace_identity_marker}\"",
+        "[ ! -L \"$marker_dir\" ] && [ ! -L \"$marker\" ]",
+        "mkdir -p \"$marker_dir\"",
+        "marker_dir_canonical=\"$(cd \"$marker_dir\" && pwd -P)\"",
+        "case \"$marker_dir_canonical/\" in \"$workspace_canonical\"/*) ;; *) exit 65 ;; esac",
+        "tmp=\"$marker.tmp.$$\"",
+        "trap 'rm -f \"$tmp\"' EXIT",
+        "set -C",
         "printf '%s' #{shell_escape(marker_json)} > \"$tmp\"",
-        "mv \"$tmp\" \"$workspace/#{@workspace_identity_marker}\""
+        "set +C",
+        "mv \"$tmp\" \"$marker\"",
+        "trap - EXIT"
       ]
       |> Enum.join("\n")
 
@@ -1042,18 +1069,7 @@ defmodule SymphonyElixir.Workspace do
   end
 
   defp cleared_hook_env do
-    [
-      "SYMPHONY_WORKFLOW_DIR",
-      "SYMPHONY_PROJECT_DIR",
-      "SYMPHONY_PROJECT_SLUG",
-      "SYMPHONY_REPO",
-      "SYMPHONY_BASE_BRANCH",
-      "SYMPHONY_PROFILE",
-      "SYMPHONY_LINEAR_PROJECT_ID",
-      "SYMPHONY_LINEAR_PROJECT_SLUG",
-      "SYMPHONY_LINEAR_PROJECT_NAME"
-    ]
-    |> Enum.map(&{&1, nil})
+    Enum.map(Workflow.project_env_keys(), &{&1, nil})
   end
 
   defp remote_hook_env_exports(issue_context, project_env \\ nil) do
@@ -1076,9 +1092,49 @@ defmodule SymphonyElixir.Workspace do
 
     {:ok,
      """
-     unset SYMPHONY_PROJECT_DIR SYMPHONY_PROJECT_SLUG SYMPHONY_REPO SYMPHONY_BASE_BRANCH SYMPHONY_PROFILE SYMPHONY_LINEAR_PROJECT_ID SYMPHONY_LINEAR_PROJECT_SLUG SYMPHONY_LINEAR_PROJECT_NAME
+     unset #{Enum.join(Workflow.project_env_keys(), " ")}
      #{exports}
      """}
+  end
+
+  defp safe_workspace_identity_marker_path(workspace) do
+    marker_dir = Path.join(workspace, ".symphony")
+    marker_path = Path.join(workspace, @workspace_identity_marker)
+
+    with :ok <- reject_symlink(workspace),
+         :ok <- validate_workspace_path(workspace, nil),
+         :ok <- reject_symlink(marker_dir),
+         :ok <- reject_symlink(marker_path),
+         {:ok, canonical_workspace} <- PathSafety.canonicalize(workspace),
+         {:ok, canonical_marker} <- PathSafety.canonicalize(marker_path),
+         true <- String.starts_with?(canonical_marker, canonical_workspace <> "/") do
+      {:ok, marker_path}
+    else
+      false -> {:error, :unsafe_marker_path}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp reject_symlink(path) do
+    case File.lstat(path) do
+      {:ok, %File.Stat{type: :symlink}} -> {:error, :unsafe_marker_path}
+      {:ok, _stat} -> :ok
+      {:error, :enoent} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp atomic_write(path, content) do
+    tmp = "#{path}.tmp.#{System.unique_integer([:positive])}"
+
+    with {:ok, :ok} <- File.open(tmp, [:write, :exclusive], &IO.binwrite(&1, content)),
+         :ok <- File.rename(tmp, path) do
+      :ok
+    else
+      {:error, reason} ->
+        File.rm(tmp)
+        {:error, reason}
+    end
   end
 
   defp normalize_issue_project(%{id: _id, slug_id: _slug_id, name: _name} = project), do: project
