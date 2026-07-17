@@ -787,11 +787,19 @@ defmodule SymphonyElixir.CoreTest do
           "command, log, or near-black-box/manual evidence",
           "wholly new behavior",
           "runtime boundary no named test touches",
-          "explicit impossibility plus named",
-          "tests mapped to each boundary"
+          "the deploy-only smoke gate required above"
         ] do
-      assert reviewer =~ contract
+      assert normalized_reviewer =~ contract
     end
+
+    assert normalized_reviewer =~
+             ~r/Design:.*every changed, failure-sensitive handoff.*planned mocks\/stubs replace a real boundary.*Implementation:/
+
+    assert normalized_reviewer =~
+             ~r/Implementation:.*report which handoffs they actually executed and which mocks\/stubs replaced.*Credit a handoff only when both real sides execute; a mock\/stub proves caller behavior up to the replacement, not the replaced real handoff or anything downstream.*Layered evidence may combine coverage, but every changed, failure-sensitive handoff needs evidence that actually crosses it.*agent-testable locally or in CI requires request changes.*evidence shows cannot be exercised locally or in CI may carry forward as a Deployment smoke gate, with an owner, executable action, pass predicate, and rollback trigger.*Deployment:/
+
+    assert normalized_reviewer =~
+             ~r/Deployment:.*Independently inventory changed handoffs from Requirements and the merged diff, then reconcile them against Implementation evidence, including anything it explicitly left unverified.*Reapply the Implementation evidence-accounting rule: inspect mocks\/stubs and deploy-only justification; treat each handoff as unverified unless evidence crosses both real sides or shows why local\/CI exercise is impossible.*evidence that each carried deploy-only behavior smoke ran with its owner, executable action, pass predicate, and rollback trigger.*Health metrics and readback may support.*cannot replace that behavior exercise/
   end
 
   test "maestro reviewer blocks Done when required regression validation is missing" do
