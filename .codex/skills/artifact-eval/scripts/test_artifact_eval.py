@@ -2,6 +2,7 @@ import shutil
 import subprocess
 import sys
 import unittest
+from copy import deepcopy
 from pathlib import Path
 
 sys.dont_write_bytecode = True
@@ -153,6 +154,129 @@ index 0000000..b6fc4c6
         ]
         for token in forbidden:
             self.assertNotIn(token, source)
+
+    def test_discovery_fixture_requires_complete_read_only_history(self) -> None:
+        fixture = artifact_eval.read_json(
+            Path(__file__).resolve().parents[1] / "fixtures" / "design-discovery-cases.json",
+        )
+
+        cases = artifact_eval.validate_discovery_fixture(fixture)
+
+        self.assertEqual(len(cases), 2)
+        self.assertEqual(
+            {candidate["status"] for case in cases for candidate in case["linear_history"]},
+            {"Done", "Duplicate"},
+        )
+
+    def test_discovery_fixture_rejects_missing_evidence(self) -> None:
+        fixture = artifact_eval.read_json(
+            Path(__file__).resolve().parents[1] / "fixtures" / "design-discovery-cases.json",
+        )
+        broken = deepcopy(fixture)
+        broken["cases"][0]["linear_history"][0]["comments"] = []
+        broken["cases"][0]["linear_history"][1]["comments"] = []
+
+        with self.assertRaisesRegex(artifact_eval.CaseError, "comment evidence"):
+            artifact_eval.validate_discovery_fixture(broken)
+
+        invalid = deepcopy(fixture)
+        invalid["cases"][0]["linear_history"][0]["comments"] = [""]
+        with self.assertRaisesRegex(artifact_eval.CaseError, "comments evidence"):
+            artifact_eval.validate_discovery_fixture(invalid)
+
+        invalid_pr = deepcopy(fixture)
+        invalid_pr["cases"][0]["linear_history"][0]["prs"] = [True]
+        with self.assertRaisesRegex(artifact_eval.CaseError, "prs evidence"):
+            artifact_eval.validate_discovery_fixture(invalid_pr)
+
+        missing_pr = deepcopy(fixture)
+        for candidate in missing_pr["cases"][0]["linear_history"]:
+            candidate["prs"] = []
+        with self.assertRaisesRegex(artifact_eval.CaseError, "linked PR evidence"):
+            artifact_eval.validate_discovery_fixture(missing_pr)
+
+        missing_query = deepcopy(fixture)
+        missing_query["cases"][0]["linear_query"] = ""
+        with self.assertRaisesRegex(artifact_eval.CaseError, "linear_query"):
+            artifact_eval.validate_discovery_fixture(missing_query)
+
+    def test_discovery_fixture_rejects_missing_or_late_sentry_discovery(self) -> None:
+        fixture = artifact_eval.read_json(
+            Path(__file__).resolve().parents[1] / "fixtures" / "design-discovery-cases.json",
+        )
+        missing = deepcopy(fixture)
+        del missing["cases"][0]["sentry"]
+        with self.assertRaisesRegex(artifact_eval.CaseError, "target event detail"):
+            artifact_eval.validate_discovery_fixture(missing)
+
+        late = deepcopy(fixture)
+        late["cases"][0]["discovery_order"] = [
+            "linear_history",
+            "root_cause",
+            "approach",
+            "target_sentry_event",
+            "sentry_siblings",
+        ]
+        with self.assertRaisesRegex(artifact_eval.CaseError, "precede diagnosis"):
+            artifact_eval.validate_discovery_fixture(late)
+
+        invalid_identifier = deepcopy(fixture)
+        invalid_identifier["cases"][0]["linear_history"][0]["identifier"] = True
+        with self.assertRaisesRegex(artifact_eval.CaseError, "Done or Duplicate"):
+            artifact_eval.validate_discovery_fixture(invalid_identifier)
+
+        invalid_target = deepcopy(fixture)
+        invalid_target["cases"][0]["sentry"]["target_event"] = True
+        with self.assertRaisesRegex(artifact_eval.CaseError, "target event detail"):
+            artifact_eval.validate_discovery_fixture(invalid_target)
+
+        invalid_sibling = deepcopy(fixture)
+        invalid_sibling["cases"][0]["sentry"]["siblings"] = [True]
+        with self.assertRaisesRegex(artifact_eval.CaseError, "valid siblings"):
+            artifact_eval.validate_discovery_fixture(invalid_sibling)
+
+        for sibling_count in (1, artifact_eval.MAX_DISCOVERY_CANDIDATES):
+            boundary = deepcopy(fixture)
+            boundary["cases"][0]["sentry"]["siblings"] = [
+                f"sibling-{index}" for index in range(sibling_count)
+            ]
+            artifact_eval.validate_discovery_fixture(boundary)
+
+        for sibling_count in (0, artifact_eval.MAX_DISCOVERY_CANDIDATES + 1):
+            boundary = deepcopy(fixture)
+            boundary["cases"][0]["sentry"]["siblings"] = [
+                f"sibling-{index}" for index in range(sibling_count)
+            ]
+            with self.assertRaisesRegex(artifact_eval.CaseError, "valid siblings"):
+                artifact_eval.validate_discovery_fixture(boundary)
+
+    def test_discovery_fixture_rejects_mutation_or_unbounded_candidates(self) -> None:
+        fixture = artifact_eval.read_json(
+            Path(__file__).resolve().parents[1] / "fixtures" / "design-discovery-cases.json",
+        )
+        mutation = deepcopy(fixture)
+        mutation["cases"][0]["allowed_operations"] = ["read", "issueUpdate"]
+        with self.assertRaisesRegex(artifact_eval.CaseError, "read-only"):
+            artifact_eval.validate_discovery_fixture(mutation)
+
+        history_source = fixture["cases"][0]["linear_history"][0]
+        for history_count in (1, artifact_eval.MAX_DISCOVERY_CANDIDATES):
+            boundary = deepcopy(fixture)
+            boundary["cases"][0]["linear_history"] = [
+                deepcopy(history_source) for _ in range(history_count)
+            ]
+            artifact_eval.validate_discovery_fixture(boundary)
+
+        for history_count, error in (
+            (0, "requires Linear history"),
+            (artifact_eval.MAX_DISCOVERY_CANDIDATES + 1, "at most 5"),
+        ):
+            boundary = deepcopy(fixture)
+            boundary["cases"][0]["linear_history"] = [
+                deepcopy(history_source) for _ in range(history_count)
+            ]
+            with self.assertRaisesRegex(artifact_eval.CaseError, error):
+                artifact_eval.validate_discovery_fixture(boundary)
 
     def test_capture_skips_untracked_symlinks(self) -> None:
         target = self.tmp / "outside-secret.txt"
