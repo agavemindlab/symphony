@@ -62,7 +62,10 @@ ROUTING_EXCERPT_START = "## Phase Map"
 ROUTING_EXCERPT_END = "## Skill Interaction Protocol"
 TARGET_PHASE_LINE_RE = re.compile(CONTRACT_PREFIX + r"target[ _]?phase" + CONTRACT_FIELD_END, re.IGNORECASE)
 CONSUMED_DECISION_LINE_RE = re.compile(CONTRACT_PREFIX + r"consumed[ _]?decision" + CONTRACT_FIELD_END, re.IGNORECASE)
-CONSUMED_CONTEXT_LINE_RE = re.compile(r"consumed[ _]?context\s*[:：]\s*(.+)", re.IGNORECASE)
+CONSUMED_CONTEXT_LINE_RE = re.compile(
+    CONTRACT_PREFIX + r"consumed[ _]?context" + CONTRACT_FIELD_END,
+    re.IGNORECASE,
+)
 CONTRACT_FIELD_LABELS = {
     "收敛判断",
     "建议 target phase",
@@ -239,15 +242,13 @@ def _parse_enum_line(output: str, pattern: re.Pattern, allowed: tuple[str, ...])
 
 
 def parse_marker_list(output: str, pattern: re.Pattern) -> list[str]:
-    for line in reversed(output.splitlines()):
-        match = pattern.search(line)
-        if not match:
-            continue
-        value = match.group(1).strip().strip("`*_ ")
-        if value.lower() == "none":
-            return []
-        return [normalize_marker(marker) for marker in re.split(r"[,，]", value) if marker.strip().strip("`*_ ")]
-    return []
+    matches = [match for line in output.splitlines() if (match := pattern.match(line))]
+    if len(matches) != 1:
+        return []
+    value = matches[0].group(1).strip().strip("`*_ ")
+    if value.lower() == "none":
+        return []
+    return [normalize_marker(marker) for marker in re.split(r"[,，]", value) if marker.strip().strip("`*_ ")]
 
 
 def normalize_marker(marker: str) -> str:
@@ -271,6 +272,8 @@ def parse_reviewer_prediction(output: str) -> dict:
         prediction["card_target_phase"] = contract_field_content("建议 target phase", output)
         prediction["card_target_status"] = contract_field_content("建议 issue status", output)
         prediction["card_execution_state"] = contract_field_content("执行状态", output).lower().replace(" ", "_")
+        prediction["card_artifact_id"] = contract_field_content("Implementation artifact id", output)
+        prediction["card_pr_head"] = contract_field_content("PR Head", output)
     return prediction
 
 
@@ -336,7 +339,13 @@ def output_marker_present(marker: str, output: str) -> bool:
 def contract_field_content(expected: str | None, output: str) -> str:
     if not expected:
         return ""
+    contents = contract_field_contents(expected, output)
+    return contents[0] if len(contents) == 1 else ""
+
+
+def contract_field_contents(expected: str, output: str) -> list[str]:
     lines = output.splitlines()
+    contents = []
     for index, line in enumerate(lines):
         normalized = re.sub(r"^\s*(?:(?:[-*+]|#+|>)\s+)*", "", line).replace("**", "").replace("：", ":").strip().strip("`_ ")
         label, separator, value = normalized.partition(":")
@@ -355,8 +364,8 @@ def contract_field_content(expected: str | None, output: str) -> str:
             if candidate_label in CONTRACT_FIELD_LABELS:
                 break
             content.append(candidate)
-        return "\n".join(content).strip()
-    return ""
+        contents.append("\n".join(content).strip())
+    return contents
 
 
 _REPLAY_WORKDIR: list[str] = []
@@ -610,11 +619,14 @@ def card_contract_agreed(case: dict, prediction: dict) -> bool:
         "rework_design": ("Design", "Rework"),
         "ask_clarification": ("Implementation", "unchanged"),
     }.get(case.get("expected_decision"))
-    return expected is not None and (
+    artifact = (case.get("case_context") or {}).get("artifact") or {}
+    return expected is not None and artifact.get("id") and artifact.get("pr_head") and (
         prediction.get("card_decision") == case.get("expected_decision")
         and prediction.get("card_target_phase") == expected[0]
         and prediction.get("card_target_status") == expected[1]
         and prediction.get("card_execution_state") == "awaiting_human_action"
+        and prediction.get("card_artifact_id") == artifact["id"]
+        and prediction.get("card_pr_head") == artifact["pr_head"]
     )
 
 

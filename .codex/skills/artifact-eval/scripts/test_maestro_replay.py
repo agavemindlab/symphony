@@ -74,6 +74,37 @@ class ParseRecommendationTest(unittest.TestCase):
             ["marker-a", "marker-b"],
         )
 
+    def test_consumed_context_requires_one_standalone_contract_line(self) -> None:
+        self.assertEqual(
+            maestro_replay.parse_consumed_context("analysis CONSUMED_CONTEXT: marker-a"),
+            [],
+        )
+        self.assertEqual(
+            maestro_replay.parse_consumed_context("not CONSUMED_CONTEXT: marker-a"),
+            [],
+        )
+        self.assertEqual(
+            maestro_replay.parse_consumed_context(
+                "CONSUMED_CONTEXT: marker-a\nCONSUMED_CONTEXT: marker-b",
+            ),
+            [],
+        )
+
+    def test_parses_card_artifact_and_head_binding(self) -> None:
+        parsed = maestro_replay.parse_reviewer_prediction(
+            "收敛判断: continue implementation\n"
+            "建议 target phase: Implementation\n"
+            "建议 issue status: In Progress\n"
+            "执行状态: awaiting human action\n"
+            "Reviewed Implementation artifact id: impl-current\n"
+            "PR Head: head-current\n"
+            "RECOMMENDATION: continue implementation\n"
+            "CONSUMED_CONTEXT: none",
+        )
+
+        self.assertEqual(parsed["card_artifact_id"], "impl-current")
+        self.assertEqual(parsed["card_pr_head"], "head-current")
+
     def test_output_markers_require_contract_fields_not_prose_mentions(self) -> None:
         output = "卡片缺少待人工回答的问题和回答判定标准。"
         self.assertFalse(maestro_replay.output_marker_present("待人工回答的问题", output))
@@ -259,6 +290,54 @@ class ScoreTest(unittest.TestCase):
         )
 
         self.assertEqual(result["overall"], {"total": 1, "agreed": 0, "disagreed": 1, "agreement_rate": 0.0})
+
+    def test_frozen_reviewer_binds_card_to_case_artifact_and_head(self) -> None:
+        frozen = {
+            **case("FIXTURE-CONTINUE", "decision-continue", phase="Implementation", label="escalated"),
+            "expected_decision": "continue_implementation",
+            "case_context": {"artifact": {"id": "impl-current", "pr_head": "head-current"}},
+        }
+        base_prediction = {
+            **frozen,
+            "prediction": "continue implementation",
+            "card_decision": "continue_implementation",
+            "card_target_phase": "Implementation",
+            "card_target_status": "In Progress",
+            "card_execution_state": "awaiting_human_action",
+            "card_artifact_id": "impl-current",
+            "card_pr_head": "head-current",
+        }
+
+        for field, wrong_value in (("card_artifact_id", "impl-old"), ("card_pr_head", "head-old")):
+            with self.subTest(field=field):
+                result = maestro_replay.score_predictions(
+                    [frozen],
+                    [{**base_prediction, field: wrong_value}],
+                )
+                self.assertEqual(result["overall"]["disagreed"], 1)
+
+    def test_frozen_reviewer_rejects_duplicate_core_card_fields(self) -> None:
+        frozen = {
+            **case("FIXTURE-CONTINUE", "decision-continue", phase="Implementation", label="escalated"),
+            "expected_decision": "continue_implementation",
+            "case_context": {"artifact": {"id": "impl-current", "pr_head": "head-current"}},
+        }
+        output = """
+        收敛判断: continue implementation
+        建议 target phase: Implementation
+        建议 target phase: Design
+        建议 issue status: In Progress
+        执行状态: awaiting human action
+        Reviewed Implementation artifact id: impl-current
+        PR Head: head-current
+        RECOMMENDATION: continue implementation
+        CONSUMED_CONTEXT: none
+        """
+        parsed = maestro_replay.parse_reviewer_prediction(output)
+
+        result = maestro_replay.score_predictions([frozen], [{**frozen, **parsed}])
+
+        self.assertEqual(result["overall"]["disagreed"], 1)
 
 
 class ReplayCommandTest(unittest.TestCase):
