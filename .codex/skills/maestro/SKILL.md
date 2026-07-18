@@ -49,9 +49,12 @@ the reviewer subagent must collect evidence itself from the issue key.
 By default, `$maestro ISSUE-1234` is read-only. If the user explicitly asks you
 to send the reply for them, e.g. "帮我回复", then:
 
-1. When the recommendation requires a reply, always reply to the awaiting-review
-   phase artifact's thread. For cross-phase request changes, only the leading
-   `/rework <phase>` in the draft expresses the target phase.
+1. Before any reply or state write, re-read Linear and GitHub. Require the same
+   artifact, PR Head, and human activity as the reviewer result; on a mismatch,
+   discard it and run a fresh review. When the recommendation requires a reply,
+   always reply to the concrete reviewed awaiting artifact named in `回复位置`.
+   For cross-phase request changes, only the leading `/rework <phase>` in the
+   draft expresses the target phase.
    - clarification-answer resume: when the human has supplied an answer to an
      unresolved `[NEEDS CLARIFICATION]` marker and asks you to send it, set the issue to `In Progress` after replying with that answer in the awaiting-review artifact thread; this is not phase approval.
    - continue implementation: reply with `/rework implementation <reason>`;
