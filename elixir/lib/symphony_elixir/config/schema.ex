@@ -78,6 +78,8 @@ defmodule SymphonyElixir.Config.Schema do
       field(:kind, :string)
       field(:endpoint, :string, default: "https://api.linear.app/graphql")
       field(:api_key, :string)
+      field(:client_id, :string)
+      field(:client_secret, :string)
       field(:project_slug, :string)
       field(:project_slugs, StringOrStringList, default: [])
       field(:project_name, :string)
@@ -97,6 +99,8 @@ defmodule SymphonyElixir.Config.Schema do
           :kind,
           :endpoint,
           :api_key,
+          :client_id,
+          :client_secret,
           :project_slug,
           :project_slugs,
           :project_name,
@@ -468,6 +472,8 @@ defmodule SymphonyElixir.Config.Schema do
     tracker = %{
       settings.tracker
       | api_key: resolve_secret_setting(settings.tracker.api_key, System.get_env("LINEAR_API_KEY")),
+        client_id: resolve_secret_setting(settings.tracker.client_id, System.get_env("LINEAR_CLIENT_ID")),
+        client_secret: resolve_secret_setting(settings.tracker.client_secret, System.get_env("LINEAR_CLIENT_SECRET")),
         project_slug: settings.tracker.project_slug |> resolve_secret_setting(nil) |> normalize_project_slug(),
         project_slugs: resolve_project_slugs_setting(settings.tracker.project_slugs),
         project_name: settings.tracker.project_name |> resolve_secret_setting(nil) |> normalize_project_name(),

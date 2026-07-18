@@ -163,6 +163,32 @@ defmodule SymphonyElixir.Config do
     end
   end
 
+  @spec linear_auth() ::
+          {:ok, {:api_key, String.t()} | {:client_credentials, String.t(), String.t()}}
+          | {:error, term()}
+  def linear_auth, do: settings!().tracker |> linear_auth()
+
+  @spec linear_auth(Schema.Tracker.t()) ::
+          {:ok, {:api_key, String.t()} | {:client_credentials, String.t(), String.t()}}
+          | {:error, term()}
+  def linear_auth(%Schema.Tracker{api_key: api_key}) when is_binary(api_key), do: {:ok, {:api_key, api_key}}
+
+  def linear_auth(%Schema.Tracker{client_id: client_id, client_secret: client_secret}) do
+    case {client_id, client_secret} do
+      {client_id, client_secret} when is_binary(client_id) and is_binary(client_secret) ->
+        {:ok, {:client_credentials, client_id, client_secret}}
+
+      {client_id, _} when is_binary(client_id) ->
+        {:error, {:missing_linear_auth_variable, "LINEAR_CLIENT_SECRET"}}
+
+      {_, client_secret} when is_binary(client_secret) ->
+        {:error, {:missing_linear_auth_variable, "LINEAR_CLIENT_ID"}}
+
+      _ ->
+        {:error, :missing_linear_auth}
+    end
+  end
+
   @spec configured_project_slugs() :: {:ok, [String.t()]} | {:error, term()}
   def configured_project_slugs, do: Schema.configured_project_slugs(settings!().tracker)
 
@@ -199,9 +225,6 @@ defmodule SymphonyElixir.Config do
       settings.tracker.kind not in ["linear", "memory"] ->
         {:error, {:unsupported_tracker_kind, settings.tracker.kind}}
 
-      settings.tracker.kind == "linear" and not is_binary(settings.tracker.api_key) ->
-        {:error, :missing_linear_api_token}
-
       settings.tracker.kind == "linear" ->
         validate_linear_tracker_semantics(settings.tracker)
 
@@ -210,14 +233,13 @@ defmodule SymphonyElixir.Config do
     end
   end
 
-  defp validate_linear_tracker_semantics(%{api_key: api_key} = tracker) when is_binary(api_key) do
-    with {:ok, project_slugs} <- configured_project_slugs(tracker),
+  defp validate_linear_tracker_semantics(tracker) do
+    with {:ok, _auth} <- linear_auth(tracker),
+         {:ok, project_slugs} <- configured_project_slugs(tracker),
          {:ok, project_names} <- configured_project_names(tracker) do
       validate_linear_project_scope(project_slugs, project_names)
     end
   end
-
-  defp validate_linear_tracker_semantics(_tracker), do: {:error, :missing_linear_api_token}
 
   defp validate_linear_project_scope(project_slugs, project_names) do
     cond do

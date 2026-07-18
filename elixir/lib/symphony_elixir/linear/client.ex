@@ -4,7 +4,7 @@ defmodule SymphonyElixir.Linear.Client do
   """
 
   require Logger
-  alias SymphonyElixir.{Config, Linear.Issue}
+  alias SymphonyElixir.{Config, Linear.Auth, Linear.Issue}
 
   @issue_page_size 50
   @comment_page_size 100
@@ -199,13 +199,9 @@ defmodule SymphonyElixir.Linear.Client do
   def fetch_candidate_issues do
     tracker = Config.settings!().tracker
 
-    if is_nil(tracker.api_key) do
-      {:error, :missing_linear_api_token}
-    else
-      with {:ok, project_scope} <- configured_project_scope(tracker),
-           {:ok, assignee_filter} <- routing_assignee_filter() do
-        do_fetch_by_project_scope(project_scope, tracker.active_states, assignee_filter)
-      end
+    with {:ok, project_scope} <- configured_project_scope(tracker),
+         {:ok, assignee_filter} <- routing_assignee_filter() do
+      do_fetch_by_project_scope(project_scope, tracker.active_states, assignee_filter)
     end
   end
 
@@ -245,21 +241,8 @@ defmodule SymphonyElixir.Linear.Client do
     payload = build_graphql_payload(query, variables, Keyword.get(opts, :operation_name))
     request_fun = Keyword.get(opts, :request_fun, &post_graphql_request/2)
 
-    with {:ok, headers} <- graphql_headers(opts),
-         {:ok, %{status: 200, body: body}} <- request_fun.(payload, headers) do
-      {:ok, body}
-    else
-      {:ok, response} ->
-        Logger.error(
-          "Linear GraphQL request failed status=#{response.status}" <>
-            linear_error_context(payload, response)
-        )
-
-        {:error, {:linear_api_status, response.status}}
-
-      {:error, reason} ->
-        Logger.error("Linear GraphQL request failed: #{inspect(reason)}")
-        {:error, {:linear_api_request, reason}}
+    with {:ok, authorization} <- graphql_authorization(opts) do
+      do_graphql_request(payload, authorization, request_fun, Keyword.get(opts, :auth_opts, []), 0)
     end
   end
 
@@ -349,10 +332,6 @@ defmodule SymphonyElixir.Linear.Client do
   def fetch_issue_comments_for_test(issue_id, graphql_fun)
       when is_binary(issue_id) and is_function(graphql_fun, 2) do
     do_fetch_issue_comments(issue_id, graphql_fun)
-  end
-
-  defp fetch_issues_by_normalized_states(_state_names, %{api_key: nil}) do
-    {:error, :missing_linear_api_token}
   end
 
   defp fetch_issues_by_normalized_states(state_names, tracker) do
@@ -613,29 +592,59 @@ defmodule SymphonyElixir.Linear.Client do
     end
   end
 
-  defp graphql_headers(opts) do
+  defp graphql_authorization(opts) do
     case Keyword.fetch(opts, :api_key) do
-      {:ok, token} -> graphql_headers_from_token(token)
-      :error -> graphql_headers_from_token(Config.settings!().tracker.api_key)
+      {:ok, token} when is_binary(token) and token != "" -> {:ok, %{mode: :api_key, token: token}}
+      {:ok, _token} -> {:error, :missing_linear_api_token}
+      :error -> Auth.authorization(Keyword.get(opts, :auth_opts, []))
     end
   end
 
-  defp graphql_headers_from_token(token) when is_binary(token) and token != "" do
-    {:ok,
-     [
-       {"Authorization", token},
-       {"Content-Type", "application/json"}
-     ]}
+  defp do_graphql_request(payload, authorization, request_fun, auth_opts, attempt) do
+    headers = graphql_headers(authorization)
+
+    case request_fun.(payload, headers) do
+      {:ok, %{status: 200, body: body}} ->
+        {:ok, body}
+
+      {:ok, %{status: 401}} when authorization.mode == :oauth and attempt == 0 ->
+        with {:ok, refreshed} <- Auth.refresh(authorization.version, auth_opts) do
+          do_graphql_request(payload, refreshed, request_fun, auth_opts, 1)
+        end
+
+      {:ok, response} ->
+        context =
+          if authorization.mode == :api_key and response.status != 401,
+            do: linear_error_context(payload, response),
+            else: ""
+
+        Logger.error("Linear GraphQL request failed status=#{response.status}" <> context)
+        {:error, {:linear_api_status, response.status}}
+
+      {:error, reason} ->
+        Logger.error("Linear GraphQL request failed before receiving a response")
+        {:error, {:linear_api_request, reason}}
+    end
   end
 
-  defp graphql_headers_from_token(_token), do: {:error, :missing_linear_api_token}
+  defp graphql_headers(%{mode: :oauth, token: token}) do
+    [{"Authorization", "Bearer " <> token}, {"Content-Type", "application/json"}]
+  end
+
+  defp graphql_headers(%{mode: :api_key, token: token}) do
+    [{"Authorization", token}, {"Content-Type", "application/json"}]
+  end
 
   defp post_graphql_request(payload, headers) do
-    Req.post(Config.settings!().tracker.endpoint,
-      headers: headers,
-      json: payload,
-      connect_options: [timeout: 30_000]
-    )
+    case Req.post(Config.settings!().tracker.endpoint,
+           headers: headers,
+           json: payload,
+           connect_options: [timeout: 30_000],
+           retry: false
+         ) do
+      {:error, _reason} -> {:error, :request_failed}
+      response -> response
+    end
   end
 
   defp decode_linear_response(%{"data" => %{"issues" => %{"nodes" => nodes}}}, assignee_filter) do

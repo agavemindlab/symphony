@@ -28,6 +28,7 @@ defmodule SymphonyElixir.Application do
       {Task.Supervisor, name: SymphonyElixir.TaskSupervisor},
       SymphonyElixir.AnalyticsCache,
       SymphonyElixir.WorkflowStore,
+      SymphonyElixir.Linear.Auth,
       SymphonyElixir.PhaseEventScanner,
       SymphonyElixir.Orchestrator,
       SymphonyElixir.HttpServer,
