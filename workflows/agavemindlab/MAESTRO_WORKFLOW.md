@@ -125,14 +125,14 @@ Maestro OAuth app identity.
 
 Every reply starts with `🤖 Maestro 预审核:`, includes `建议回复方式` and
 `置信度：<N>/10`, and records the reviewed artifact id and Head. The reviewed
-artifact id is the same awaiting artifact id as the reply's parent. When
+artifact id and the reply's `parentId` are the same awaiting artifact id. When
 confidence is below 10/10, name the concrete evidence gap, ambiguity, or risk
 that prevents a higher score and link it to `依据` or `注意`.
 
 ### Auto-rework ordinary request changes
 
-- When the recommendation is `request changes`, reply once in the pre-review
-  snapshot's awaiting artifact thread with its exact `/rework <phase> ...`
+- When the recommendation is `request changes`, reply once with the pre-review
+  snapshot's awaiting artifact id as `parentId` and its exact `/rework <phase> ...`
   draft; the command alone expresses the target phase. Unless
   `MAESTRO_AUTO_REWORK` is `false`/`0`, end the reply with
   `🤖 auto: 已自动将 issue 置为 Rework`, move the issue to `Rework`, then remove

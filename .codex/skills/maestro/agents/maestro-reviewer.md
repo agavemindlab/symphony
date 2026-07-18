@@ -58,7 +58,7 @@ Recommend how the human should reply to the current phase artifact. Return:
   clarification / merge nudge / completion confirmation / no reply yet.
 - `回复对象`: next Symphony agent / human.
 - `回复位置`: the concrete Linear comment/thread to reply to, including phase
-  heading, comment id or timestamp, or `none`.
+  heading and comment id, or `none`.
 - `建议 issue status`: the Linear state the human should set after sending the
   reply, or `unchanged`.
 - `建议回复`: a ready-to-send Chinese draft.
@@ -102,8 +102,8 @@ Status recommendations:
 Reply locations:
 
 - Every recommendation that creates a Linear reply uses the concrete current
-  awaiting-review artifact thread. For cross-phase request changes, only the
-  leading `/rework <phase>` in the draft expresses the target phase.
+  awaiting-review artifact comment id as `parentId`. Every request-changes draft
+  starts with `/rework <phase>`; only that command expresses the target phase.
 - Implementation merge nudge and no reply yet: none; for a merge nudge,
   setting `Merging` is the workflow signal unless the human needs a note.
 

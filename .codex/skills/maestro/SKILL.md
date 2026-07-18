@@ -31,7 +31,7 @@ the reviewer subagent must collect evidence itself from the issue key.
      clarification / merge nudge / completion confirmation / no reply yet.
    - `回复对象`: next Symphony agent / human.
    - `回复位置`: concrete Linear comment/thread to reply to, including phase
-     heading, comment id or timestamp, or `none`.
+     heading and comment id, or `none`.
    - `建议 issue status`: In Progress / Merging / Rework / Done / unchanged.
    - `建议回复`: a ready-to-send Chinese draft. For approve, request changes,
      merge nudge, and completion confirmation, set `回复对象` to next Symphony
@@ -49,10 +49,10 @@ the reviewer subagent must collect evidence itself from the issue key.
 By default, `$maestro ISSUE-1234` is read-only. If the user explicitly asks you
 to send the reply for them, e.g. "帮我回复", then:
 
-1. When the recommendation requires a reply, always reply to the concrete
-   reviewed awaiting artifact named in `回复位置`. For cross-phase request
-   changes, only the leading `/rework <phase>` in the draft expresses the target
-   phase.
+1. Rerun the isolated reviewer immediately before acting and use only its fresh
+   result. When it requires a reply, use the reviewed awaiting artifact comment
+   id in `回复位置` as the Linear reply `parentId`. Every request-changes draft
+   starts with `/rework <phase>`; only that command expresses the target phase.
    - clarification-answer resume: when the human has supplied an answer to an
      unresolved `[NEEDS CLARIFICATION]` marker and asks you to send it, set the issue to `In Progress` after replying with that answer in the awaiting-review artifact thread; this is not phase approval.
    - continue implementation: reply with `/rework implementation <reason>`;

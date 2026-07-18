@@ -513,15 +513,21 @@ defmodule SymphonyElixir.CoreTest do
     [workflow, preflight, launcher, reviewer] =
       Enum.map([workflow, preflight, launcher, reviewer], &String.replace(&1, ~r/\s+/, " "))
 
-    assert preflight =~ "pre-review snapshot's awaiting artifact thread"
-    assert preflight =~ "same awaiting artifact id as the reply's parent"
-    assert launcher =~ "always reply to the concrete reviewed awaiting artifact"
-    assert reviewer =~ "Every recommendation that creates a Linear reply"
+    assert preflight =~ "reply's `parentId` are the same awaiting artifact id"
+    assert preflight =~ "awaiting artifact id as `parentId`"
+    assert launcher =~ "Rerun the isolated reviewer immediately before acting"
+    assert launcher =~ "comment id in `回复位置` as the Linear reply `parentId`"
+    assert reviewer =~ "awaiting-review artifact comment id as `parentId`"
 
     for contract <- [preflight, launcher, reviewer] do
       assert contract =~ "/rework <phase>"
       refute contract =~ "artifact thread for the phase that must be reworked"
       refute contract =~ "reviewer-selected artifact"
+    end
+
+    for contract <- [launcher, reviewer] do
+      assert contract =~ "Every request-changes draft starts with"
+      assert contract =~ "including phase heading and comment id"
     end
 
     assert workflow =~ "Fast path — explicit commands"
