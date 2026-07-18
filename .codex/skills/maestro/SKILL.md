@@ -49,10 +49,14 @@ the reviewer subagent must collect evidence itself from the issue key.
 By default, `$maestro ISSUE-1234` is read-only. If the user explicitly asks you
 to send the reply for them, e.g. "帮我回复", then:
 
-1. Rerun the isolated reviewer immediately before acting and use only its fresh
-   result. When it requires a reply, use the reviewed awaiting artifact comment
-   id in `回复位置` as the Linear reply `parentId`. Every request-changes draft
-   starts with `/rework <phase>`; only that command expresses the target phase.
+1. Use only the fresh reviewer result produced in this turn; never act on a
+   recommendation from an earlier turn. Immediately before any write, re-read
+   Linear and GitHub and stop without writing if the awaiting artifact id or PR
+   Head changed, or newer human feedback or state action exists. When the result
+   requires a reply, use the reviewed awaiting artifact comment id in `回复位置`
+   as the Linear reply `parentId`. A request-changes reply for the next Symphony
+   agent starts with `/rework <phase>`; only that command expresses the target
+   phase.
    - clarification-answer resume: when the human has supplied an answer to an
      unresolved `[NEEDS CLARIFICATION]` marker and asks you to send it, set the issue to `In Progress` after replying with that answer in the awaiting-review artifact thread; this is not phase approval.
    - continue implementation: reply with `/rework implementation <reason>`;

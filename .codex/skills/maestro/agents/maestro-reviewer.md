@@ -102,8 +102,9 @@ Status recommendations:
 Reply locations:
 
 - Every recommendation that creates a Linear reply uses the concrete current
-  awaiting-review artifact comment id as `parentId`. Every request-changes draft
-  starts with `/rework <phase>`; only that command expresses the target phase.
+  awaiting-review artifact comment id as `parentId`. A request-changes reply for
+  the next Symphony agent starts with `/rework <phase>`; only that command
+  expresses the target phase.
 - Implementation merge nudge and no reply yet: none; for a merge nudge,
   setting `Merging` is the workflow signal unless the human needs a note.
 

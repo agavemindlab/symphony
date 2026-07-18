@@ -515,7 +515,9 @@ defmodule SymphonyElixir.CoreTest do
 
     assert preflight =~ "reply's `parentId` are the same awaiting artifact id"
     assert preflight =~ "awaiting artifact id as `parentId`"
-    assert launcher =~ "Rerun the isolated reviewer immediately before acting"
+    assert launcher =~ "fresh reviewer result produced in this turn"
+    assert launcher =~ "stop without writing if the awaiting artifact id or PR Head changed"
+    assert launcher =~ "newer human feedback or state action exists"
     assert launcher =~ "comment id in `回复位置` as the Linear reply `parentId`"
     assert reviewer =~ "awaiting-review artifact comment id as `parentId`"
 
@@ -526,7 +528,7 @@ defmodule SymphonyElixir.CoreTest do
     end
 
     for contract <- [launcher, reviewer] do
-      assert contract =~ "Every request-changes draft starts with"
+      assert contract =~ "request-changes reply for the next Symphony agent starts with"
       assert contract =~ "including phase heading and comment id"
     end
 
