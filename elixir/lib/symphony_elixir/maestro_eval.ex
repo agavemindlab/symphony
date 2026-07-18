@@ -173,7 +173,7 @@ defmodule SymphonyElixir.MaestroEval do
 
     signal =
       if Analytics.convergence_review?(review),
-        do: convergence_signal(review, reviewed_at, outcomes, reviews),
+        do: convergence_signal(review, outcomes, reviews),
         else: thread_signal(review, reviewed_at, signals)
 
     {agreement, verdict_source, signal_event_id} = resolve_verdict(review, signal, verdict_state)
@@ -222,7 +222,7 @@ defmodule SymphonyElixir.MaestroEval do
     end
   end
 
-  defp convergence_signal(review, _reviewed_at, outcomes, reviews) do
+  defp convergence_signal(review, outcomes, reviews) do
     case Analytics.next_phase_outcome(review, outcomes, reviews) do
       nil ->
         nil
@@ -283,19 +283,19 @@ defmodule SymphonyElixir.MaestroEval do
   end
 
   defp resolve_ordinary_verdict(review, signal, verdict_state) do
-    case thread_agreement(Map.get(review, "recommendation"), signal, verdict_state) do
+    case thread_agreement(Map.get(review, "recommendation"), signal) do
       nil -> dispatch_verdict(review, verdict_state)
       agreement -> {agreement, "thread", signal.event_id}
     end
   end
 
-  defp thread_agreement("approve", %{verdict: :approved_signal}, _state), do: :agreed
-  defp thread_agreement("approve", %{verdict: :rework_signal}, _state), do: :overridden
-  defp thread_agreement("request_changes", %{verdict: :rework_signal}, _state), do: :agreed
-  defp thread_agreement("request_changes", %{verdict: :approved_signal}, _state), do: :overridden
-  defp thread_agreement("merge_nudge", %{verdict: :approved_signal}, _state), do: :agreed
-  defp thread_agreement("merge_nudge", %{verdict: :rework_signal}, _state), do: :overridden
-  defp thread_agreement(_recommendation, _signal, _state), do: nil
+  defp thread_agreement("approve", %{verdict: :approved_signal}), do: :agreed
+  defp thread_agreement("approve", %{verdict: :rework_signal}), do: :overridden
+  defp thread_agreement("request_changes", %{verdict: :rework_signal}), do: :agreed
+  defp thread_agreement("request_changes", %{verdict: :approved_signal}), do: :overridden
+  defp thread_agreement("merge_nudge", %{verdict: :approved_signal}), do: :agreed
+  defp thread_agreement("merge_nudge", %{verdict: :rework_signal}), do: :overridden
+  defp thread_agreement(_recommendation, _signal), do: nil
 
   defp dispatch_verdict(review, verdict_state) do
     case Analytics.maestro_verdict(review, verdict_state) do

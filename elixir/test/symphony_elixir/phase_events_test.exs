@@ -270,6 +270,19 @@ defmodule SymphonyElixir.PhaseEventsTest do
              auto: false
            } = event
 
+    assert %{recommendation: "continue_implementation"} =
+             derive_maestro_event("""
+             🤖 Maestro 预审核
+             > **收敛判断**: continue implementation
+             """)
+
+    assert %{recommendation: "continue_implementation"} =
+             derive_maestro_event("""
+             🤖 Maestro 预审核
+             建议回复方式: continue implementation
+             收敛判断: continue implementation
+             """)
+
     assert %{recommendation: "rework_design", target_phase: "Design", target_status: "Rework"} =
              derive_maestro_event("""
              🤖 Maestro 预审核
@@ -330,6 +343,9 @@ defmodule SymphonyElixir.PhaseEventsTest do
       assert %{recommendation: "unknown"} =
                derive_maestro_event("🤖 Maestro 预审核:\n收敛判断: #{decision}")
     end
+
+    assert %{recommendation: "unknown"} =
+             derive_maestro_event("🤖 Maestro 预审核:\n理由里提到收敛判断，但没有字段。")
   end
 
   test "derive_all adds one human_comment event per non-bot comment, thread replies included" do

@@ -254,14 +254,27 @@ Symphony only starts the agent when the issue is in an active state (`Todo`, `In
    - Gather the auto-rework signal separately from human feedback. It qualifies only when the issue is `Rework`, the Maestro-authored reply matches the current reviewed artifact/head, contains both `建议回复方式: request changes` and `🤖 auto: 已自动将 issue 置为 Rework`, and its `建议回复` starts with `/rework <phase>`. All other Maestro replies are advisory. An awaiting Implementation artifact with `Review verdict: ESCALATED` can never qualify, even if a legacy reply carries that marker.
    - For an awaiting Implementation artifact with `Review verdict: ESCALATED`,
      select the newest Maestro judgment card matching the current Implementation
-     artifact id and PR Head, retaining the card author's actor id. On demand,
+     artifact id and PR Head, retaining both the card author's and current
+     Implementation artifact author's actor ids. The card qualifies only when
+     `收敛判断`, `建议 target phase`, `建议 issue status`,
+     `执行状态: awaiting human action`, `判断理由`, and
+     `下一轮建议方向` each appear exactly once, are non-empty, and match
+     the documented decision/status mapping. `rework design` additionally
+     requires `失效的 Design assumption`, `建议修改的机制或边界`,
+     `下一轮 proof / acceptance criteria`, and `不受影响的既有约束`;
+     `ask clarification` requires one question and answer criterion.
+     Missing, duplicate, contradictory, or incomplete card fields fail closed.
+     On demand,
      query Linear `Issue.history` for state
      changes after that card, including `createdAt`, `fromState`, `toState`,
      `actor { id name app }`, and `botActor { id name type subType }`. A state
      action is human only when the newest row that produced the current state
-     has an actor, `actor.app == false`, has no `botActor`, and its actor id
-     differs from the Maestro card author's actor id. This last check prevents
-     a Maestro instance using a user-actor token from authorizing its own card;
+     is a direct `Human Review` → current-state transition, has an actor,
+     `actor.app == false`, has no `botActor`, and its actor id differs from both
+     service identities: it differs from the Maestro card author's actor id and
+     differs from the current Implementation artifact author's actor id. These
+     checks prevent Maestro or Symphony using a user-actor token from
+     authorizing its own work;
      normal Symphony is not dispatched while the issue remains in `Human Review`.
      Missing or ambiguous provenance fails closed. Do not add this
      query to ordinary routing or engine precomputation.
@@ -291,8 +304,9 @@ Symphony only starts the agent when the issue is in an active state (`Todo`, `In
      in the workpad.
 
    A stale artifact/head, mismatched card/status, unreadable history, missing
-   action/card-author identity, `actor.app == true`, any `botActor`, or a state
-   actor matching the Maestro card author returns the issue to
+   action/card/artifact-author identity, `actor.app == true`, any `botActor`,
+   a non-Human-Review origin, or a state actor matching either service author
+   returns the issue to
    `Human Review` and stops. Never treat a Maestro or integration state write as
    human approval. Never treat `ESCALATED` as approval or open Deployment.
 

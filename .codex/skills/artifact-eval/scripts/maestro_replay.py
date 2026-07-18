@@ -31,7 +31,12 @@ DEFAULT_CODEX_CMD = (
     "codex exec --sandbox workspace-write "
     "-c sandbox_workspace_write.network_access=true --skip-git-repo-check"
 )
-HERMETIC_CODEX_CMD = "codex exec --sandbox read-only --skip-git-repo-check"
+HERMETIC_CODEX_CMD = (
+    "codex exec --sandbox read-only --ignore-user-config --ignore-rules --ephemeral "
+    "-c 'web_search=\"disabled\"' -c 'mcp_servers={}' "
+    "-c 'model_reasoning_summary=\"none\"' -c 'shell_environment_policy.inherit=\"none\"' "
+    "--skip-git-repo-check"
+)
 DEFAULT_OUTPUT_DIR = "eval/reviews/replay"
 DEFAULT_LABELS = "approve,request_changes,escalated"
 DEFAULT_CONCURRENCY = 2
@@ -396,20 +401,24 @@ def run_case(case: dict, *, codex_argv: list[str], prompt: str, timeout_s: float
             check=False,
             cwd=_replay_workdir(),
         )
-        output = completed.stdout + ("\n" + completed.stderr if completed.stderr else "")
-        parsed = parse_prediction(output) if completed.returncode == 0 else "error"
+        contract_output = completed.stdout
+        output = contract_output + ("\n" + completed.stderr if completed.stderr else "")
+        parsed = parse_prediction(contract_output) if completed.returncode == 0 else "error"
         returncode = completed.returncode
     except subprocess.TimeoutExpired as exc:
+        contract_output = _as_text(exc.stdout)
         output = _as_text(exc.stdout) + _as_text(exc.stderr)
         parsed = "timeout"
         returncode = None
     duration_s = round(time.monotonic() - started, 1)
     prediction = parsed if isinstance(parsed, dict) else {"prediction": parsed}
-    prediction["observed_output_markers"] = [marker for marker in case.get("required_output_markers") or [] if output_marker_present(marker, output)]
+    prediction["observed_output_markers"] = [
+        marker for marker in case.get("required_output_markers") or [] if output_marker_present(marker, contract_output)
+    ]
     return {
         **case,
         **prediction,
-        "confidence": parse_confidence(output),
+        "confidence": parse_confidence(contract_output),
         "raw_tail": output[-RAW_TAIL_CHARS:],
         "duration_s": duration_s,
         "returncode": returncode,

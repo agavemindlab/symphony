@@ -472,6 +472,14 @@ class ReplayCommandTest(unittest.TestCase):
             maestro_replay.codex_argv_for_case(maestro_replay.DEFAULT_CODEX_CMD, frozen),
             shlex.split(maestro_replay.HERMETIC_CODEX_CMD),
         )
+        argv = maestro_replay.codex_argv_for_case(maestro_replay.DEFAULT_CODEX_CMD, frozen)
+        self.assertIn("--ignore-user-config", argv)
+        self.assertIn("--ignore-rules", argv)
+        self.assertIn("--ephemeral", argv)
+        self.assertIn('web_search="disabled"', argv)
+        self.assertIn("mcp_servers={}", argv)
+        self.assertIn('model_reasoning_summary="none"', argv)
+        self.assertIn('shell_environment_policy.inherit="none"', argv)
 
     def test_frozen_reviewer_rejects_a_card_that_contradicts_its_audit_recommendation(self) -> None:
         frozen = {
@@ -740,6 +748,9 @@ class FrozenRoutingFixtureTest(unittest.TestCase):
                 "card_status_mismatch",
                 "slash_command_precedence",
                 "card_author_token",
+                "artifact_author_token",
+                "non_human_review_origin",
+                "malformed_card",
                 "oauth_app",
                 "bot_actor",
             }
@@ -751,6 +762,15 @@ class FrozenRoutingFixtureTest(unittest.TestCase):
             author_token["case_context"]["state_history"][0]["actor"]["id"],
             author_token["case_context"]["maestro_card"]["author_id"],
         )
+        artifact_token = next(case for case in cases if case["family"] == "artifact_author_token")
+        self.assertEqual(
+            artifact_token["case_context"]["state_history"][0]["actor"]["id"],
+            artifact_token["case_context"]["artifact"]["author_id"],
+        )
+        wrong_origin = next(case for case in cases if case["family"] == "non_human_review_origin")
+        self.assertNotEqual(wrong_origin["case_context"]["state_history"][0]["fromState"], "Human Review")
+        malformed = next(case for case in cases if case["family"] == "malformed_card")
+        self.assertNotIn("rationale", malformed["case_context"]["maestro_card"])
 
 
 class RoutingScoreTest(unittest.TestCase):
@@ -947,6 +967,33 @@ class RoutingReplayCommandTest(unittest.TestCase):
             maestro_replay.codex_argv_for_case(maestro_replay.DEFAULT_CODEX_CMD, frozen),
             shlex.split(maestro_replay.HERMETIC_CODEX_CMD),
         )
+
+    def test_routing_contract_uses_stdout_not_stderr_transport_echo(self) -> None:
+        frozen = {
+            **routing_case("FIXTURE-ESC-STDERR", "stderr-echo", expected="Implementation"),
+            "expected_decision": "continue_implementation",
+            "required_context_markers": ["retry actor query"],
+            "case_context": {
+                "artifact": {"review_verdict": "ESCALATED"},
+                "maestro_card": {"decision": "continue implementation"},
+                "state_history": [{"toState": "In Progress", "actor": {"app": False}}],
+                "human_feedback": [],
+            },
+        }
+        self.cases_path.write_text(json.dumps(frozen) + "\n")
+        codex_cmd = self.fake_codex(
+            "import sys\n"
+            "sys.stdin.read()\n"
+            "answer = 'TARGET_PHASE: Implementation\\nCONSUMED_DECISION: continue_implementation\\nCONSUMED_CONTEXT: retry actor query'\n"
+            "print(answer)\n"
+            "print(answer, file=sys.stderr)\n",
+        )
+
+        self.assertEqual(self.run_routing_replay(codex_cmd), 0)
+        result = self.read_predictions()[0]
+        self.assertEqual(result["prediction"], "Implementation")
+        self.assertEqual(result["consumed_decision"], "continue_implementation")
+        self.assertEqual(result["consumed_context"], ["retry actor query"])
 
     def test_rerun_resumes_by_published_event_id(self) -> None:
         codex_cmd = self.fake_codex(
