@@ -206,12 +206,24 @@ defmodule SymphonyElixir.TrackerCommentsTest do
     assert {:error, :boom} = Client.fetch_issue_comments_for_test("issue-1", transport_error_fun)
   end
 
-  test "linear client fetch_issue_comments requires an api token" do
+  test "linear client fetch_issue_comments requires configured auth" do
+    previous_api_key = System.get_env("LINEAR_API_KEY")
+    previous_client_id = System.get_env("LINEAR_CLIENT_ID")
+    previous_client_secret = System.get_env("LINEAR_CLIENT_SECRET")
+
+    on_exit(fn ->
+      restore_env("LINEAR_API_KEY", previous_api_key)
+      restore_env("LINEAR_CLIENT_ID", previous_client_id)
+      restore_env("LINEAR_CLIENT_SECRET", previous_client_secret)
+    end)
+
+    System.delete_env("LINEAR_API_KEY")
+    System.delete_env("LINEAR_CLIENT_ID")
+    System.delete_env("LINEAR_CLIENT_SECRET")
     write_workflow_file!(Workflow.workflow_file_path(), tracker_api_token: nil)
 
     capture_log(fn ->
-      assert {:error, {:linear_api_request, :missing_linear_api_token}} =
-               Client.fetch_issue_comments("issue-1")
+      assert {:error, :missing_linear_auth} = Client.fetch_issue_comments("issue-1")
     end)
   end
 

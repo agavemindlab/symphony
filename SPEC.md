@@ -362,6 +362,13 @@ Fields:
   - MAY be a literal token or `$VAR_NAME`.
   - Canonical environment variable for `tracker.kind == "linear"`: `LINEAR_API_KEY`.
   - If `$VAR_NAME` resolves to an empty string, treat the key as missing.
+  - Takes precedence over client credentials when both modes are configured.
+- `client_id` / `client_secret` (string)
+  - MAY be literal values or `$VAR_NAME` references.
+  - Canonical environment variables: `LINEAR_CLIENT_ID` and
+    `LINEAR_CLIENT_SECRET`.
+  - Both are REQUIRED when `api_key` is absent. The exchanged access token
+    MUST remain in process memory and MUST NOT be logged or persisted.
 - `project_slug` (string)
   - Backward-compatible single Linear project selector.
   - REQUIRED for dispatch when `tracker.kind == "linear"` unless `project_slugs` is set.
@@ -583,7 +590,8 @@ Validation checks:
 
 - Workflow file can be loaded and parsed.
 - `tracker.kind` is present and supported.
-- `tracker.api_key` is present after `$` resolution.
+- `tracker.api_key` is present after `$` resolution, or both
+  `tracker.client_id` and `tracker.client_secret` are present.
 - `tracker.project_slug` or `tracker.project_slugs` is present when REQUIRED by the selected
   tracker kind.
 - `tracker.project_slug` and `tracker.project_slugs` are not both non-empty.
@@ -598,6 +606,8 @@ not require recognizing or validating extension fields unless that extension is 
 - `tracker.kind`: string, REQUIRED, currently `linear`
 - `tracker.endpoint`: string, default `https://api.linear.app/graphql` when `tracker.kind=linear`
 - `tracker.api_key`: string or `$VAR`, canonical env `LINEAR_API_KEY` when `tracker.kind=linear`
+- `tracker.client_id`: string or `$VAR`, canonical env `LINEAR_CLIENT_ID`
+- `tracker.client_secret`: string or `$VAR`, canonical env `LINEAR_CLIENT_SECRET`
 - `tracker.project_slug`: string, REQUIRED when `tracker.kind=linear` unless `project_slugs` is set
 - `tracker.project_slugs`: string or list of strings, REQUIRED when `tracker.kind=linear` unless
   `project_slug` is set
@@ -1192,7 +1202,11 @@ Linear-specific requirements for `tracker.kind == "linear"`:
 
 - `tracker.kind == "linear"`
 - GraphQL endpoint (default `https://api.linear.app/graphql`)
-- Auth token sent in `Authorization` header
+- Personal API keys are sent directly in `Authorization`; client credentials
+  are exchanged at `https://api.linear.app/oauth/token` with
+  `grant_type=client_credentials` and the resulting token is sent as `Bearer`.
+- An OAuth GraphQL `401` triggers one token exchange and at most one replay of
+  the failed request. API-key requests and a second `401` are not retried.
 - `tracker.project_slug` maps to one Linear project `slugId`
 - `tracker.project_slugs` maps to multiple Linear project `slugId` values and shares one candidate
   dispatch set
@@ -1231,7 +1245,9 @@ Additional normalization details:
 RECOMMENDED error categories:
 
 - `unsupported_tracker_kind`
-- `missing_tracker_api_key`
+- `missing_linear_auth`
+- `missing_linear_auth_variable`
+- `linear_oauth_token_status`
 - `missing_tracker_project_slug`
 - `linear_api_request` (transport failures)
 - `linear_api_status` (non-200 HTTP)
@@ -2111,8 +2127,9 @@ Unless otherwise noted, Sections 17.1 through 17.7 are `Core Conformance`. Bulle
 These checks are RECOMMENDED for production readiness and MAY be skipped in CI when credentials,
 network access, or external service permissions are unavailable.
 
-- A real tracker smoke test can be run with valid credentials supplied by `LINEAR_API_KEY` or a
-  documented local bootstrap mechanism (for example `~/.linear_api_key`).
+- A real tracker smoke test can use `LINEAR_CLIENT_ID` plus
+  `LINEAR_CLIENT_SECRET` (recommended for OAuth app profiles) or
+  `LINEAR_API_KEY` for a personal key or explicit override.
 - Real integration tests SHOULD use isolated test identifiers/workspaces and clean up tracker
   artifacts when practical.
 - A skipped real-integration test SHOULD be reported as skipped, not silently treated as passed.

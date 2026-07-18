@@ -35,11 +35,14 @@ Linear issue can become a dispatch candidate again after restart.
 
 1. Make sure your codebase is set up to work well with agents: see
    [Harness engineering](https://openai.com/index/harness-engineering/).
-2. Get a new personal token in Linear via Settings → Security & access → Personal API keys, and
-   set it as the `LINEAR_API_KEY` environment variable.
+2. For an OAuth app profile, set `LINEAR_CLIENT_ID` and
+   `LINEAR_CLIENT_SECRET`; this is recommended because Symphony obtains and
+   renews the access token in memory. For a personal API key or explicit
+   override, set `LINEAR_API_KEY` instead.
 3. To enable Maestro pre-review after `Human Review` handoff, create a Maestro
-   profile env file whose `LINEAR_API_KEY` is the dedicated Maestro OAuth app
-   token, then run the shared `MAESTRO_WORKFLOW.md` with
+   profile env file with the dedicated Maestro OAuth app's
+   `LINEAR_CLIENT_ID` and `LINEAR_CLIENT_SECRET`, then run the shared
+   `MAESTRO_WORKFLOW.md` with
    `SYMPHONY_PROFILE=maestro SYMPHONY_WORKFLOW_FILE=MAESTRO_WORKFLOW.md`.
 4. Use a project workflow under [`../workflows/`](../workflows/). The shared
    `workflows/agavemindlab/WORKFLOW.md` and `skills/` entries are inherited by
@@ -187,9 +190,14 @@ Notes:
   choose project-specific clone, setup, or teardown behavior.
 - If a hook needs `mise exec` inside a freshly cloned workspace, trust the repo config and fetch
   the project dependencies in `hooks.after_create` before invoking `mise` later from other hooks.
-- `tracker.api_key` reads from `LINEAR_API_KEY` when unset or when value is `$LINEAR_API_KEY`.
+- `tracker.api_key` reads from `LINEAR_API_KEY`; it is the backward-compatible
+  personal-key path and overrides client credentials when both are present.
+- `tracker.client_id` and `tracker.client_secret` read from
+  `LINEAR_CLIENT_ID` and `LINEAR_CLIENT_SECRET`. Both are required when no API
+  key is set. OAuth access tokens are kept in memory, renewed once after a
+  GraphQL `401`, and never passed to Codex child processes.
 - Maestro pre-review runs as a separate workflow (`MAESTRO_WORKFLOW.md`). Its profile's
-  `LINEAR_API_KEY` is the Maestro OAuth app identity; do not run `MAESTRO_WORKFLOW.md` with the
+  credentials provide a separate OAuth app identity; do not run `MAESTRO_WORKFLOW.md` with the
   normal Symphony profile. The session-level env gates it honors: `MAESTRO_AUTO_REWORK` (default
   on — request-changes verdicts move the issue to `Rework` with a `🤖 auto` reply line; `false`/`0`
   for recommendation-only) and `MAESTRO_AUTO_APPROVE` / `MAESTRO_AUTO_APPROVE_MIN_CONFIDENCE`
@@ -208,6 +216,8 @@ Notes:
 ```yaml
 tracker:
   api_key: $LINEAR_API_KEY
+  client_id: $LINEAR_CLIENT_ID
+  client_secret: $LINEAR_CLIENT_SECRET
   project_slug: $SYMPHONY_PROJECT_SLUG
 workspace:
   root: $SYMPHONY_WORKSPACE_ROOT
