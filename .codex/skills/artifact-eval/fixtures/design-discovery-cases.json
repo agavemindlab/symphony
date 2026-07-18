@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "id": "litellm-fallback-history",
+      "source_issue": "DEV-5327",
+      "failed_artifact": "06a60d46-3188-4912-b22e-ddf900ab53ef",
+      "forbidden_diagnosis": "Delete established fallbacks=[] opt-outs without comparing the prior LiteLLM fallback-logging fixes.",
+      "linear_query": "same-project LiteLLM fallback logging and Fireworks overload history",
+      "history_effect": "Preserve established fallbacks=[] logging opt-outs and diagnose the shared overload classifier first.",
+      "allowed_operations": ["read"],
+      "discovery_order": ["linear_history", "target_sentry_event", "sentry_siblings", "root_cause", "approach"],
+      "linear_history": [
+        {
+          "identifier": "DEV-4906",
+          "status": "Duplicate",
+          "comments": ["central Fireworks overload classifier retained LLM failure propagation"],
+          "prs": ["https://github.com/agavemindlab/grotto/pull/1489"]
+        },
+        {
+          "identifier": "DEV-4897",
+          "status": "Done",
+          "comments": ["glossary correction intentionally used fallbacks=[] to avoid LiteLLM fallback error logging"],
+          "prs": [
+            "https://github.com/agavemindlab/grotto/pull/1485",
+            "https://github.com/agavemindlab/grotto/pull/1494"
+          ]
+        }
+      ],
+      "sentry": {
+        "target_event": "sanitized Fireworks no-healthy-upstream signature",
+        "siblings": ["sanitized handled fallback-logging sibling"]
+      }
+    },
+    {
+      "id": "queuepool-history",
+      "source_issue": "DEV-5439",
+      "failed_artifact": "d5e07b29-50bd-4bd2-a5d9-3ed55eb1e6b1",
+      "forbidden_diagnosis": "Choose chat/SSE request sessions as the primary root cause without comparing same-title and long-session history.",
+      "linear_query": "same-project QueuePool timeout title and stable error-token history",
+      "history_effect": "Prioritize long-lived background transaction scopes over chat/SSE sessions as the primary root-cause path.",
+      "allowed_operations": ["read"],
+      "discovery_order": ["linear_history", "target_sentry_event", "sentry_siblings", "root_cause", "approach"],
+      "linear_history": [
+        {
+          "identifier": "DEV-4512",
+          "status": "Done",
+          "comments": [],
+          "prs": [
+            "https://github.com/agavemindlab/grotto/pull/1098",
+            "https://github.com/agavemindlab/grotto/pull/1099"
+          ]
+        },
+        {
+          "identifier": "DEV-4228",
+          "status": "Done",
+          "comments": ["network and embedding work moved outside database session scopes"],
+          "prs": [
+            "https://github.com/agavemindlab/grotto/pull/1113",
+            "https://github.com/agavemindlab/grotto/pull/1127"
+          ]
+        }
+      ],
+      "sentry": {
+        "target_event": "GROTTO-HD QueuePool timeout signature",
+        "siblings": ["sanitized background transcription sibling", "sanitized long-session sibling"]
+      }
+    }
+  ]
+}
