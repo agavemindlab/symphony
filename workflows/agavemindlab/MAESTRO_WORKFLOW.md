@@ -123,8 +123,10 @@ Maestro OAuth app identity.
 
 ## Apply The Recommendation
 
-Every reply starts with `🤖 Maestro 预审核:`, includes `建议回复方式` and (when
-available) `置信度：<N>/10`, and records the reviewed artifact id and Head.
+Every reply starts with `🤖 Maestro 预审核:`, includes `建议回复方式` and
+`置信度：<N>/10`, and records the reviewed artifact id and Head. When
+confidence is below 10/10, name the concrete evidence gap, ambiguity, or risk
+that prevents a higher score and link it to `依据` or `注意`.
 
 ### Auto-rework ordinary request changes
 
