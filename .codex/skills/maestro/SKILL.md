@@ -49,15 +49,11 @@ the reviewer subagent must collect evidence itself from the issue key.
 By default, `$maestro ISSUE-1234` is read-only. If the user explicitly asks you
 to send the reply for them, e.g. "帮我回复", then:
 
-1. Reply in the exact target thread:
-   - approve / ask clarification / completion confirmation: reply to the
-     awaiting-review phase artifact's thread.
+1. When the recommendation requires a reply, always reply to the awaiting-review
+   phase artifact's thread. For cross-phase request changes, only the leading
+   `/rework <phase>` in the draft expresses the target phase.
    - clarification-answer resume: when the human has supplied an answer to an
      unresolved `[NEEDS CLARIFICATION]` marker and asks you to send it, set the issue to `In Progress` after replying with that answer in the awaiting-review artifact thread; this is not phase approval.
-   - request changes: reply to the artifact thread for the phase that must be
-     reworked; for same-phase rework this is the awaiting-review artifact, and
-     for cross-phase rework this may be Requirements, Design, or another
-     unresolved artifact.
    - continue implementation: reply with `/rework implementation <reason>`;
      this is a same-phase continuation, not approval.
    - Implementation merge nudge: do not add a nudge comment unless the

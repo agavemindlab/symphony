@@ -500,6 +500,42 @@ defmodule SymphonyElixir.CoreTest do
   end
 
   @tag :prompt_contract
+  test "maestro replies stay on the reviewed awaiting artifact across phase rework" do
+    repo_root = Path.expand("..", File.cwd!())
+    workflow = File.read!(Path.join(repo_root, "workflows/agavemindlab/WORKFLOW.md"))
+
+    preflight =
+      File.read!(Path.join(repo_root, "workflows/agavemindlab/MAESTRO_WORKFLOW.md"))
+
+    launcher = File.read!(Path.join(repo_root, ".codex/skills/maestro/SKILL.md"))
+    reviewer = File.read!(Path.join(repo_root, ".codex/skills/maestro/agents/maestro-reviewer.md"))
+
+    [workflow, preflight, launcher, reviewer] =
+      Enum.map([workflow, preflight, launcher, reviewer], &String.replace(&1, ~r/\s+/, " "))
+
+    assert preflight =~ "pre-review snapshot's awaiting artifact thread"
+    assert preflight =~ "same awaiting artifact id as the reply's parent"
+    assert launcher =~ "always reply to the awaiting-review phase artifact's thread"
+    assert reviewer =~ "Every recommendation that creates a Linear reply"
+
+    for contract <- [preflight, launcher, reviewer] do
+      assert contract =~ "/rework <phase>"
+      refute contract =~ "artifact thread for the phase that must be reworked"
+      refute contract =~ "reviewer-selected artifact"
+    end
+
+    assert workflow =~ "Fast path — explicit commands"
+    assert workflow =~ "/rework design"
+    assert workflow =~ "(`requirements` | `design` | `implementation` | `deployment`"
+    assert preflight =~ "records the reviewed artifact id and Head"
+    assert preflight =~ "置信度：<N>/10"
+    assert reviewer =~ "decisive transcript events"
+    assert preflight =~ "same artifact/head"
+    assert preflight =~ "remove `symphony:maestro`"
+    assert preflight =~ "except an `ESCALATED` Implementation review"
+  end
+
+  @tag :prompt_contract
   test "DEV-5517 Maestro confidence explains why a higher score is unsupported without changing verdict routing" do
     repo_root = Path.expand("..", File.cwd!())
 

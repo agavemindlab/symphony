@@ -101,13 +101,9 @@ Status recommendations:
 
 Reply locations:
 
-- approve, ask clarification, and completion confirmation:
-  the concrete awaiting-review artifact thread.
-- request changes: the concrete artifact thread for the phase that must be
-  reworked — the awaiting-review artifact for same-phase rework, the relevant
-  Requirements / Design / other unresolved artifact for cross-phase rework.
-- continue implementation: the current ESCALATED Implementation artifact
-  thread.
+- Every recommendation that creates a Linear reply uses the concrete current
+  awaiting-review artifact thread. For cross-phase request changes, only the
+  leading `/rework <phase>` in the draft expresses the target phase.
 - Implementation merge nudge and no reply yet: none; for a merge nudge,
   setting `Merging` is the workflow signal unless the human needs a note.
 
