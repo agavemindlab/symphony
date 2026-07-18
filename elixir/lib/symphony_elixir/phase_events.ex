@@ -245,16 +245,19 @@ defmodule SymphonyElixir.PhaseEvents do
   defp labeled_value(body, label, values) do
     pattern = "^\\s*(?:[-*>]\\s*)*(?:[`*_]+\\s*)*#{label}(?:\\s*[`*_]+)?\\s*[:：]\\s*[*_`]*(#{values})(?:\\s*[*_`]+)?\\s*$"
 
-    case Regex.run(Regex.compile!(pattern, "imu"), body, capture: :all_but_first) do
-      [value] -> value
-      nil -> nil
+    case Regex.scan(Regex.compile!(pattern, "imu"), body, capture: :all_but_first) do
+      [[value]] -> value
+      _other -> nil
     end
   end
 
   defp maestro_recommendation(body) do
-    body
-    |> String.split("\n")
-    |> Enum.find_value("unknown", &recommendation_from_line/1)
+    recommendations = body |> String.split("\n") |> Enum.map(&recommendation_from_line/1) |> Enum.reject(&is_nil/1)
+
+    case recommendations do
+      [recommendation] -> recommendation
+      _other -> "unknown"
+    end
   end
 
   defp recommendation_from_line(line) do
