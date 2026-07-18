@@ -242,10 +242,15 @@ def _parse_enum_line(output: str, pattern: re.Pattern, allowed: tuple[str, ...])
 
 
 def parse_marker_list(output: str, pattern: re.Pattern) -> list[str]:
-    matches = [match for line in output.splitlines() if (match := pattern.match(line))]
-    if len(matches) != 1:
+    values = [
+        value
+        for line in output.splitlines()
+        if (match := pattern.match(line))
+        and not re.fullmatch(r"<[^<>]+>", value := match.group(1).strip().strip("`*_ "))
+    ]
+    if len(values) != 1:
         return []
-    value = matches[0].group(1).strip().strip("`*_ ")
+    value = values[0]
     if value.lower() == "none":
         return []
     return [normalize_marker(marker) for marker in re.split(r"[,，]", value) if marker.strip().strip("`*_ ")]

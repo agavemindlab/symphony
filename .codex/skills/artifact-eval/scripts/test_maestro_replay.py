@@ -89,6 +89,13 @@ class ParseRecommendationTest(unittest.TestCase):
             ),
             [],
         )
+        self.assertEqual(
+            maestro_replay.parse_consumed_context(
+                "`CONSUMED_CONTEXT: <comma-separated markers>`\n"
+                "CONSUMED_CONTEXT: marker-a",
+            ),
+            ["marker-a"],
+        )
 
     def test_parses_card_artifact_and_head_binding(self) -> None:
         parsed = maestro_replay.parse_reviewer_prediction(
