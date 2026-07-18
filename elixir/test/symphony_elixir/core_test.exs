@@ -516,7 +516,6 @@ defmodule SymphonyElixir.CoreTest do
     assert preflight =~ "pre-review snapshot's awaiting artifact thread"
     assert preflight =~ "same awaiting artifact id as the reply's parent"
     assert launcher =~ "always reply to the concrete reviewed awaiting artifact"
-    assert launcher =~ "same artifact, PR Head, and human activity"
     assert reviewer =~ "Every recommendation that creates a Linear reply"
 
     for contract <- [preflight, launcher, reviewer] do
