@@ -143,6 +143,12 @@ class ParseRecommendationTest(unittest.TestCase):
                 "下一轮 proof / acceptance criteria:\n- add proof-present coverage\n不受影响的既有约束: constraint-present",
             ),
         )
+        self.assertFalse(
+            maestro_replay.output_marker_present(
+                "下一轮建议方向",
+                "下一轮建议方向:\nImplementation artifact id: impl-current\nPR Head: head-current",
+            ),
+        )
 
 
 class SelectCasesTest(unittest.TestCase):
@@ -734,6 +740,8 @@ class FrozenRoutingFixtureTest(unittest.TestCase):
                 "card_status_mismatch",
                 "slash_command_precedence",
                 "card_author_token",
+                "oauth_app",
+                "bot_actor",
             }
             <= families,
         )

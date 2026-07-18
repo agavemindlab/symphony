@@ -38,7 +38,6 @@ DEFAULT_CONCURRENCY = 2
 DEFAULT_TIMEOUT_S = 600.0
 RAW_TAIL_CHARS = 2000
 SCOREABLE_LABELS = {"approve": "approve", "request_changes": "request changes"}
-# Longest markers first so "request changes" is not shadowed by a bare "approve".
 RECOMMENDATIONS = (
     "completion confirmation",
     "continue implementation",
@@ -71,6 +70,7 @@ CONTRACT_FIELD_LABELS = {
     "建议 target phase",
     "建议 issue status",
     "执行状态",
+    "Implementation artifact id",
     "Reviewed Implementation artifact id",
     "PR Head",
     "判断理由",
@@ -109,7 +109,7 @@ def read_jsonl(path: Path) -> list[dict]:
 
 
 def case_id(case: dict) -> str:
-    """Review cases are keyed by artifact, routing cases by their publish event."""
+    """Use the explicit fixture/event id, then fall back to issue and dispatch."""
     explicit = case.get("id") or case.get("artifact_comment_id") or case.get("published_event_id")
     if explicit:
         return str(explicit)

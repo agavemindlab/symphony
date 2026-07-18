@@ -235,7 +235,7 @@ defmodule SymphonyElixir.PhaseEvents do
       %{
         target_phase: labeled_value(body, "建议\\s+target\\s+phase", "Requirements|Design|Implementation|Deployment"),
         target_status: labeled_value(body, "建议\\s+issue\\s+status", "In Progress|Rework|unchanged"),
-        execution_state: if(String.contains?(String.downcase(body), "awaiting human action"), do: "awaiting_human_action")
+        execution_state: if(labeled_value(body, "执行状态", "awaiting human action"), do: "awaiting_human_action")
       }
     else
       %{}
@@ -243,7 +243,9 @@ defmodule SymphonyElixir.PhaseEvents do
   end
 
   defp labeled_value(body, label, values) do
-    case Regex.run(Regex.compile!("#{label}[^\\n:：]*[:：]\\s*[*_`]*(#{values})", "iu"), body, capture: :all_but_first) do
+    pattern = "^\\s*(?:[-*>]\\s*)*(?:[`*_]+\\s*)*#{label}(?:\\s*[`*_]+)?\\s*[:：]\\s*[*_`]*(#{values})(?:\\s*[*_`]+)?\\s*$"
+
+    case Regex.run(Regex.compile!(pattern, "imu"), body, capture: :all_but_first) do
       [value] -> value
       nil -> nil
     end

@@ -295,6 +295,15 @@ defmodule SymphonyElixir.PhaseEventsTest do
              建议 target phase: unknown
              建议 issue status: unknown
              """)
+
+    assert %{target_phase: nil, target_status: nil, execution_state: nil} =
+             derive_maestro_event("""
+             🤖 Maestro 预审核
+             收敛判断: continue implementation
+             建议 target phase: Design or Implementation
+             建议 issue status: Rework or In Progress
+             执行状态: not awaiting human action
+             """)
   end
 
   test "maestro reviews without a recognizable recommendation are unknown" do
