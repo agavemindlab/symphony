@@ -500,6 +500,35 @@ defmodule SymphonyElixir.CoreTest do
   end
 
   @tag :prompt_contract
+  test "DEV-5517 Maestro confidence explains why a higher score is unsupported without changing verdict routing" do
+    repo_root = Path.expand("..", File.cwd!())
+
+    maestro_workflow =
+      File.read!(Path.join(repo_root, "workflows/agavemindlab/MAESTRO_WORKFLOW.md"))
+
+    reviewer =
+      File.read!(Path.join(repo_root, ".codex/skills/maestro/agents/maestro-reviewer.md"))
+
+    launcher = File.read!(Path.join(repo_root, ".codex/skills/maestro/SKILL.md"))
+
+    maestro_workflow = String.replace(maestro_workflow, ~r/\s+/, " ")
+    reviewer = String.replace(reviewer, ~r/\s+/, " ")
+    launcher = String.replace(launcher, ~r/\s+/, " ")
+
+    for contract <- ["below 10/10", "concrete evidence gap, ambiguity, or risk", "`依据` or `注意`"] do
+      for prompt <- [maestro_workflow, reviewer, launcher], do: assert(prompt =~ contract)
+    end
+
+    refute maestro_workflow =~ "(when available)"
+    assert reviewer =~ "prevents a higher score"
+    assert reviewer =~ "never return a bare score"
+    assert reviewer =~ "changes neither the verdict nor"
+    assert reviewer =~ "recommended issue status"
+    assert reviewer =~ "approve may still carry low-risk gaps in `依据` or `注意`"
+    assert launcher =~ "below-10 confidence lacks a concrete reason"
+  end
+
+  @tag :prompt_contract
   test "shared workflow renders a visible expanded clarification gate" do
     repo_root = Path.expand("..", File.cwd!())
     workflow_path = Path.join(repo_root, "workflows/agavemindlab/WORKFLOW.md")
