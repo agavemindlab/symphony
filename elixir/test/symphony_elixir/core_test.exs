@@ -407,19 +407,29 @@ defmodule SymphonyElixir.CoreTest do
     end
   end
 
-  test "DEV-5338 style question discussion fixture replies without rewriting artifacts" do
+  test "DEV-5536 question handoff skips Maestro while fresh rework activates it once" do
     workflow = shared_workflow_prompt()
     artifact = %{id: "requirements-question-thread", created_at: ~U[2026-06-23 01:00:00Z]}
 
-    calls = dry_run_artifact_calls(workflow, :question_discussion, "Requirements", artifact)
+    question_calls = dry_run_artifact_calls(workflow, :question_discussion, "Requirements", artifact)
 
-    assert calls == [{:commentCreate, {:reply_to_artifact, artifact.id}, "answer Requirements question"}]
-    refute Enum.any?(calls, fn {operation, _, _} -> operation in [:commentResolve, :commentUpdate] end)
+    assert {:commentCreate, {:reply_to_artifact, artifact.id}, "answer Requirements question"} in question_calls
 
-    refute Enum.any?(calls, fn
-             {:commentCreate, :top_level_phase_artifact, _body} -> true
+    assert {:issueUpdate, :state, "Human Review"} in question_calls
+    refute Enum.any?(question_calls, &match?({:issueUpdate, :add_label, "symphony:maestro"}, &1))
+    refute Enum.any?(question_calls, &match?({operation, _, _} when operation in [:commentResolve, :commentUpdate], &1))
+    refute Enum.any?(question_calls, &match?({:commentCreate, :top_level_phase_artifact, _body}, &1))
+
+    rework_calls = dry_run_artifact_calls(workflow, :same_phase_rework, "Implementation", artifact)
+
+    assert {:commentResolve, artifact.id} in rework_calls
+    assert {:commentCreate, :top_level_phase_artifact, "## Implementation"} in rework_calls
+    assert {:issueUpdate, :state, "Human Review"} in rework_calls
+
+    assert Enum.count(rework_calls, fn
+             {:issueUpdate, :add_label, "symphony:maestro"} -> true
              _ -> false
-           end)
+           end) == 1
   end
 
   test "aggregate dispatch ordering interleaves projects" do
@@ -3845,9 +3855,39 @@ defmodule SymphonyElixir.CoreTest do
     ]
 
     if Enum.all?(required_contracts, &String.contains?(workflow, &1)) do
-      [{:commentCreate, {:reply_to_artifact, artifact.id}, "answer #{phase} question"}]
+      maestro_handoff =
+        if String.contains?(
+             workflow,
+             "Return the issue to `Human Review` without adding `symphony:maestro`"
+           ) do
+          []
+        else
+          [{:issueUpdate, :add_label, "symphony:maestro"}]
+        end
+
+      [{:commentCreate, {:reply_to_artifact, artifact.id}, "answer #{phase} question"}] ++
+        maestro_handoff ++ [{:issueUpdate, :state, "Human Review"}]
     else
       [{:commentUpdate, artifact.id, "## #{phase}"}]
+    end
+  end
+
+  defp dry_run_artifact_calls(workflow, :same_phase_rework, phase, old_artifact) do
+    required_contracts = [
+      "### Rework cycle (same phase)",
+      "Post a fresh artifact comment",
+      "add the `symphony:maestro` label before moving the issue to `Human Review`"
+    ]
+
+    if Enum.all?(required_contracts, &String.contains?(workflow, &1)) do
+      [
+        {:commentResolve, old_artifact.id},
+        {:commentCreate, :top_level_phase_artifact, "## #{phase}"},
+        {:issueUpdate, :add_label, "symphony:maestro"},
+        {:issueUpdate, :state, "Human Review"}
+      ]
+    else
+      []
     end
   end
 
