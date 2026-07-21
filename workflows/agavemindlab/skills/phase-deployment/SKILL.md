@@ -32,7 +32,8 @@ action after reading the `## Deployment` artifact.
   artifact already exists with unresolved `⚠️ 待观察` items). The PR has long
   since merged. **Skip cleanup and land entirely** — do not touch the working
   tree; this run only reads the existing `## Deployment` 的 `待验证项` block and
-  `## Requirements` and runs checks against production logs. Go straight to
+  `## Requirements`, then runs each recorded check against its named production
+  evidence source. Go straight to
   **Verification** to finish the pending items. This is what
   Deployment-in-`In Progress` means: continue verifying what could not be
   confirmed at deploy time.
@@ -70,10 +71,9 @@ Drive every acceptance `S<N>` from `## Requirements` to a resolved status
 **post-merge 最终验收** for each, recording the evidence form the design named —
 a 截屏 / 录屏 for an interactive `S<N>`, the query+matched-lines for a log
 signal — readably (verdict line + artifact, raw output folded). The `验收对照`
-section is the running ledger. On a re-entry the still-`⚠️ 待观察` items are the
-main work — but also re-confirm any earlier `✅` you judge was only a
-point-in-time proxy for a criterion whose real intent is sustained or needs
-fresh confirmation; do not mechanically trust a prior pass.
+section is the running ledger. On re-entry, re-confirm an earlier `✅` only when
+its recorded evidence is stale or time-bound and the criterion explicitly
+requires sustained or fresh confirmation.
 
 ### Authenticated production acceptance accounts
 
@@ -110,7 +110,7 @@ When a post-merge acceptance check requires logged-in user state:
 1. **Verify what is checkable now.** For each unresolved `S<N>`, run its check
    and record evidence: immediate signals at deploy (smoke tests, endpoint
    health, error-rate baseline), and any `延迟验收` whose window has already
-   elapsed (run its recorded `待验证项` query against the production log and
+   elapsed (run its recorded `待验证项` check against the named evidence source and
    judge it against the predicate — never weaken the predicate to pass it).
 2. **Leave genuinely-pending items `⚠️ 待观察`** with a concrete reason and a
    concrete way to make the condition happen:
@@ -184,7 +184,7 @@ Use `⚠️ 待观察` (not `❌ 失败`) for acceptance criteria that are simpl
 checkable (window still open, external signal not yet readable) — they are not
 failed, just pending. Each pending item carries a runnable spec in `待验证项`
 so a later Deployment re-entry (with no branch) can finish it from the artifact
-and production-log access alone.
+and its named production evidence source alone.
 
 ## Cross-phase rework
 
@@ -197,7 +197,9 @@ not create a fix PR while `current_phase` remains Deployment.
 
 ## Exit
 
-After posting or updating the `## Deployment` artifact:
+After posting `## Deployment` on merge entry, or replacing the current artifact
+on verification re-entry through the workflow's same-phase Rework cycle so the
+fresh top-level artifact contains the authoritative updated ledger:
 
 1. Move the issue back to `Human Review`.
 2. Stop. Do **not** move the issue to `Done`.

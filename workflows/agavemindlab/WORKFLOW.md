@@ -111,7 +111,7 @@ Continuation context:
 - This is retry attempt #{{ attempt }} because the ticket is still in an active state.
 - Resume from the current workspace state instead of restarting from scratch.
 - Do not repeat already-completed investigation or validation unless needed for new code changes.
-- Do not end the turn while the issue remains in an active state unless blocked by missing required permissions, secrets, or tools.
+- Continue the target phase to its documented `advance`, `stop`, or blocked exit; do not abandon it merely because the turn is long.
 {% endif %}
 
 Issue context:
@@ -139,7 +139,7 @@ Instructions:
 3. Final messages must report completed actions and blockers only. Do not include generic "next steps for user".
 4. **Subagent use is explicitly authorized.** Do not wait for additional user confirmation before using subagents.
 
-Confine all **writes** to the provided repository copy, except that phase-required gstack `review` may create or update only its own runtime state under `$HOME/.gstack/`, managed nested-Codex sessions under `$HOME/.codex/`, and `/tmp/codex-adv-*` or `/tmp/codex-review-*`. It must not mutate configuration, skills, prompts, rules, or credentials. This exception authorizes no other gstack skill, path, checkout, or external system.
+Confine all **filesystem writes** to the provided repository copy, except that phase-required gstack `review` may create or update only its own runtime state under `$HOME/.gstack/`, managed nested-Codex sessions under `$HOME/.codex/`, and `/tmp/codex-adv-*` or `/tmp/codex-review-*`. It must not mutate configuration, skills, prompts, rules, or credentials. This exception authorizes no other gstack skill, path, checkout, or external system.
 
 Reading outside the repo is allowed **when the task points you there** — a path named in the issue, its thread, `AGENTS.md`, or the repo's own config (eval corpora, datasets, fixtures, logs, sibling checkouts) is readable even though it lives outside the repo. That reference is the authorization: do **not** self-block or demand a human action to read a path the task already names. Do not go further: do not rummage through unrelated paths, other projects, or secret stores (`~/.ssh`, credential / `.env` files) unless the task explicitly requires it, and never copy such contents into a Linear artifact. If a needed read genuinely falls outside what the task references and you cannot tell whether it is authorized, treat that as a real blocker and ask.
 
@@ -248,7 +248,7 @@ Symphony only starts the agent when the issue is in an active state (`Todo`, `In
    - `In Progress`, `Rework` → determine the target phase via steps 4–5.
 
 4. Gather the signals. When the `## 引擎预计算的路由事实` block above is available, treat its artifact states, awaiting phase, and new-comment lists as verified mechanics — do not re-derive them from scratch; fetch full comment bodies only where an excerpt is insufficient. When it is marked unavailable, derive them yourself as below:
-   - **Proposal-consent channel (run first, orthogonal to phase intent).** Scan unresolved `## 建议新建 issue` proposal comments for a new human reply in *their* thread, and fulfill via the `symphony-issue` skill's fulfill mode (consent → create the proposed issue schedulable + reply `已创建 ENG-123` + resolve the proposal comment — a fulfilled `blocking` proposal then re-parks this issue at `Todo` and ends the session; rejection → resolve as `已放弃`). This lives in a different comment thread than the phase artifacts, so it never collides with phase approval; fulfilling spawns here first keeps a single "approve phase + consent to a sub-issue" reply pair well-ordered. See the Spawning related issues section.
+   - **Proposal-consent channel (run first, orthogonal to phase intent).** Identify workpad `待履行` records and new replies in unresolved `## 建议新建 issue` threads. Resolve rejections as `已放弃` without touching a phase artifact. If there is no pending or newly consented fulfillment, continue gathering signals normally. Otherwise copy all newer artifact-thread and standalone human feedback — plus human PR reviews/comments when `current_phase` is Implementation — into workpad notes. Record the artifact id, proposal ids, and next operation as `待履行`, then upload and confirm fresh agent state; on upload failure leave the artifact unresolved and create nothing. Resolve the awaiting artifact only after persistence succeeds, then resume/create every consented sibling via `symphony-issue`. Any later failure returns to the current phase skill, which publishes a replacement artifact carrying the preserved feedback and blocker before `Human Review`. After a `blocking` fulfillment or complete `sub-issue` batch, re-park this issue at `Todo` and end once. With no awaiting artifact left, resume cannot be mistaken for approval.
    - Identify the phase awaiting review = the most recent unresolved artifact with no closing reply (neither `✅` human approval nor `⏩` auto-advance). A closing reply closes the artifact for routing but does not by itself make it expired; do not resolve it unless the rework protocols below say to. The workpad `current_phase` should already name the awaiting phase; if the workpad is absent (brand-new branch), infer it as the most recent unresolved phase artifact without a closing reply. No artifacts at all → target phase is Requirements, go to step 6.
    - Gather new human feedback from two places: (a) replies in each unresolved Phase artifact's thread, including phase-closed artifacts in the current chain; inspect each artifact's `children` / thread replies first, and (b) standalone top-level **human** comments on the issue that are not replies to any artifact. When reading Linear comments, retain each comment's `parent { id }`; Linear may also return replies in `comments.nodes`, so never treat a parented reply node as standalone top-level feedback. A reply's feedback keeps the phase intent of that artifact. Exclude agent-authored `## 建议新建 issue` proposal comments — those are the consent channel handled by the first bullet, not feedback. Scan **every** unresolved artifact, not just the awaiting-review one — humans request cross-phase rework by commenting on the artifact they want changed (e.g. feedback on `## Design` while `## Implementation` awaits review). "New" = newer than the agent's last closing reply on that artifact (or, for standalone comments, newer than the agent's last action). Attribute each standalone comment to the phase it discusses; if unclear, assume the awaiting-review phase. If a comment refers back to an earlier round ("上次"/"之前提到的"), pull the specific resolved comment it points to per the `symphony-linear` skill's back-reference exception.
    - Gather the auto-rework signal separately from human feedback. It qualifies only when the issue is `Rework`, the Maestro-authored reply matches the current reviewed artifact/head, contains both `建议回复方式: request changes` and `🤖 auto: 已自动将 issue 置为 Rework`, and its `建议回复` starts with `/rework <phase>`. All other Maestro replies are advisory. An awaiting Implementation artifact with `Review verdict: ESCALATED` can never qualify, even if a legacy reply carries that marker.
@@ -333,7 +333,7 @@ procedure for that phase.
 
 ## Phase Artifact Protocol
 
-Each phase artifact version is a top-level Linear comment identified by its heading (see Phase Map). A fresh phase with no current artifact publishes with `commentCreate`. A same-phase rework, including a clarification-answer resume, resolves the old artifact with `commentResolve`, then publishes a fresh top-level artifact with `commentCreate` and puts the change summary on the new artifact. Once a phase artifact has been published, do not edit its body with `commentUpdate`; keep `commentUpdate` to raw tool mechanics, non-phase comments, or other explicitly non-review artifacts. No phase edits another phase's artifact, and no comments are posted outside this protocol.
+Each phase artifact version is a top-level Linear comment identified by its heading (see Phase Map). A fresh phase with no current artifact publishes with `commentCreate`. A same-phase rework, including a clarification-answer resume, resolves the old artifact with `commentResolve`, then publishes a fresh top-level artifact with `commentCreate` and puts the change summary on the new artifact. Once a phase artifact has been published, do not edit its body with `commentUpdate`; keep `commentUpdate` to raw tool mechanics, non-phase comments, or other explicitly non-review artifacts. No phase edits another phase's artifact; non-phase comments are posted only where this workflow explicitly authorizes them.
 
 After a `## Requirements` artifact exists, the issue description is intake
 context only and never overrides the current artifact chain or human replies;
@@ -461,16 +461,16 @@ issue's `creator`**, never to Symphony. An **autonomously created** issue
 (Tier A) lands in the team's **intake state** (resolved by `type` — `triage`
 else `backlog`, never by name) without the `symphony` label, so it is never
 auto-worked; a human promotes it when ready. A **consent-fulfilled** issue
-(Tier B: `blocking` / `sub-issue`) is created **schedulable** — `symphony`
-label + the team's `Todo` state — because the consent reply is the scheduling
-authorization; execution order is enforced by its blocking relations, not by
-parking. A `blocking` discovery parks the current issue at `Human Review`
+(Tier B: `blocking` / `sub-issue`) becomes schedulable — `symphony` label +
+the team's `Todo` state — only after its required blocking relations succeed.
+A `blocking` discovery parks the current issue at `Human Review`
 with a 🚧 callout until consent; once the blocker is created, fulfill mode
 re-parks the current issue at `Todo`, where the blocked-by dispatch gate
 auto-resumes it after the blocker completes. A consented `sub-issue`
-decomposition additionally links each child as blocking the parent, so the
-parent auto-resumes for integration and acceptance once all children are
-terminal. Full mechanics, dedup, and the workpad record live in
+decomposition first resolves the awaiting phase artifact, then schedules every
+consented sibling and re-parks the parent at `Todo`, so it auto-resumes that phase for
+integration and acceptance once all children are terminal. Full mechanics,
+dedup, and the workpad record live in
 `symphony-issue`.
 
 ## Workpad
@@ -508,6 +508,7 @@ cleanup:
 ## Spawned Issues
 - 已创建 ENG-123 — <title> · related/blocks/parent · <one-line why>
 - 待同意 <proposal-comment-id> — <title> · blocking/sub-issue
+- 待履行 <proposal-comment-id|ENG-123> — <artifact-id> · <next incomplete operation>
 - 已放弃 <proposal-comment-id> — <title> · <reason>
 ```
 

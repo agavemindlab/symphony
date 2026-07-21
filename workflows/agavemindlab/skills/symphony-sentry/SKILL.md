@@ -181,32 +181,6 @@ Sentry evidence unavailable through CLI/API.
 Do not write "no Sentry capability" unless both CLI and API paths were probed
 and failed for captured reasons.
 
-## DEV-5439 Sanity Check
-
-Use this issue as a safe, redacted fixture when validating the runbook shape:
-
-```sh
-org=gl-test
-project=grotto
-issue_id=7597426195
-short_id=GROTTO-HD
-```
-
-Known behavior on `sentry-cli 3.4.1`:
-
-- `sentry-cli info` can succeed through global CLI auth while
-  `SENTRY_AUTH_TOKEN` and `SENTRY_TOKEN` are absent in the agent shell.
-- `sentry-cli issues list -o gl-test -p grotto -i 7597426195 --max-rows 5`
-  returns recent rows that may exclude `GROTTO-HD`; do not use this as the
-  target lookup.
-- `sentry-cli issues list -o gl-test -p grotto --all | rg '7597426195|GROTTO-HD'`
-  finds the target row: issue `7597426195`, short id `GROTTO-HD`, title
-  `TimeoutError: QueuePool limit...`, last seen `2026-07-07T04:23:17.617737Z`,
-  status `unresolved`.
-- With no REST token env, the correct outcome is CLI issue discovery plus
-  "event-detail auth missing"; do not claim stack/function/path evidence was
-  retrieved.
-
 ## Safe Summary Shape
 
 Write only the smallest useful evidence into Linear, PRs, commit messages, and

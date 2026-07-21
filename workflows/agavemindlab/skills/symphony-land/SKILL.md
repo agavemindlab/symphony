@@ -19,8 +19,8 @@ description:
   Merging gate.
 - Squash-merge the PR once checks pass, then watch the `main` workflows for
   the merge commit.
-- Do not yield to the user until the PR is merged and the post-merge runs are
-  complete, or until a failure has been reported and a rollback decision is made.
+- Continue until the PR is merged and post-merge runs finish, or until an
+  explicit failure, clarification, or bounded post-merge timeout exit.
 - No need to delete remote branches after merge if the repo auto-deletes head
   branches; check `AGENTS.md` for the project's branch deletion policy.
 
@@ -101,15 +101,11 @@ description:
     respond inline with a justification and ask the user before changing code.
 18. **Pushback template:** When disagreeing, reply inline with: acknowledge +
     rationale + offer alternative.
-19. **Ambiguity gate:** When ambiguity blocks progress, use the clarification
-    flow (assign PR to current GH user, mention them, wait for response). Do not
-    implement until ambiguity is resolved.
-    - If you are confident you know better than the reviewer, you may proceed
-      without asking the user, but reply inline with your rationale.
-20. **Per-comment mode:** For each review comment, choose one of: accept,
-    clarify, or push back. Reply inline stating the mode before changing code.
-21. **Reply before change:** Always respond with intended action before pushing
-    code changes (inline for review comments, issue thread for automated reviews).
+19. **Ambiguity gate:** Before merge, put the visible clarification in the
+    current `## Implementation` thread and return to `Human Review`. The human
+    answers by moving the issue to `In Progress`, so Main Flow routes any code
+    change through Implementation; only a subsequently confirmed CLEAN artifact
+    may return to `Merging`.
 
 ## Commands
 
@@ -164,8 +160,18 @@ gated_head=$(gh pr view --json headRefOid -q .headRefOid)
 # Watch review feedback, PR checks, mergeability, and PR head updates.
 # Implement a polling loop appropriate to the project's CI setup, or
 # use the project's land watcher script if one exists under .agents/skills/symphony-land/.
-python3 .agents/skills/symphony-land/scripts/land_watch.py 2>/dev/null || \
-  echo "No land_watch.py found; poll manually with: gh pr checks && gh pr view --json reviews" >&2
+if [ -f .agents/skills/symphony-land/land_watch.py ]; then
+  python3 .agents/skills/symphony-land/land_watch.py || exit $?
+else
+  echo "No land_watch.py found; stop before merge and use the manual polling section" >&2
+  exit 1
+fi
+```
+
+After either the watcher or bounded manual polling gate succeeds, run the merge
+command separately:
+
+```sh
 
 # Squash-merge only the head that passed the gate.
 gh pr merge --squash --match-head-commit "$gated_head" \
@@ -179,7 +185,7 @@ gh pr merge --squash --match-head-commit "$gated_head" \
 ## Async Watch Helper
 
 If the project provides an asyncio watcher script at
-`.agents/skills/symphony-land/scripts/land_watch.py`, prefer it to monitor review
+`.agents/skills/symphony-land/land_watch.py`, prefer it to monitor review
 comments, CI, and head updates in parallel. Typical exit codes:
 
 - 2: Review comments detected (address feedback)
@@ -199,11 +205,10 @@ If no watcher script is present, poll manually using:
 - If no PR checks appear after the bounded wait, continue only after review
   feedback and mergeability are clean; the post-merge watch still decides
   whether a `main` workflow run was expected.
-- Use judgment to identify flaky failures. If a failure is a flake (e.g., a
-  timeout on only one platform), you may proceed without fixing it.
+- Rerun a suspected flaky check; never treat a failed required check as green.
 - If CI pushes an auto-fix commit (authored by GitHub Actions), it does not
   trigger a fresh CI run. Detect the updated PR head, pull locally, merge
-  the upstream base if needed, add a real author commit, and force-push to
+  the upstream base if needed, add a real author commit, and push to
   retrigger CI, then restart the checks loop.
 - If mergeability is `UNKNOWN`, wait and re-check.
 - Do not merge while review comments (human or automated) are outstanding.
@@ -218,6 +223,8 @@ are documented in `AGENTS.md` — follow them to determine what to watch.
   paths, record that no deploy was triggered.
 - If deploy-triggered files changed and no run appears after a short wait,
   report that as a deployment signal failure.
+- If a run has no terminal progress for 30 minutes, report its current URL and
+  status as a bounded-timeout deployment risk instead of polling again.
 - If any post-merge run fails, is cancelled, times out, or requires action,
   inspect logs with `gh run view <run-id> --log-failed` and report
   immediately: failed workflow/job, run URL, suspected cause, user impact,
@@ -283,8 +290,6 @@ direction.
 
 - The PR title and description should reflect the full scope of the change, not
   just the most recent fix.
-- Classify each review comment as one of: correctness, design, style,
-  clarification, scope.
 - For correctness feedback, provide concrete validation (test, log, or
   reasoning) before closing it.
 - When accepting feedback, include a one-line rationale in the root-level

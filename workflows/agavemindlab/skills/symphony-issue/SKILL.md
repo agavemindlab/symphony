@@ -35,7 +35,7 @@ Linear relation.
 | related | loosely related, no dependency | `related` | **A — autonomous** |
 | downstream blocked | current `blocks` the new issue | `blocks` (current→new) | **A — autonomous** |
 | blocking | current `blocked-by` the new issue | propose only | **B — consent-gated** |
-| sub-issue | decompose current into children | `parentId` | **B — consent-gated** |
+| sub-issue | decompose current into children | `parentId` + child `blocks` current | **B — consent-gated** |
 
 Also assign a type label: `Bug | Feature | Refactor | Performance | Migration | Chore | Spike | Other`.
 
@@ -63,24 +63,26 @@ work was discovered:
      `type: "backlog"` (see symphony-linear "Spawn a Linear issue"). No
      `symphony` label. The issue lands outside `active_states`, so Symphony
      never auto-works it; a human promotes it when ready.
-   - *Tier B (fulfilled on consent)*: the human's consent reply **is** the
-     scheduling authorization. Create it directly schedulable: state = the
-     team's `Todo` state (`type: "unstarted"`, matching a workflow
-     `active_states` entry) and `labelIds` = `Type:Xxx` **plus** the
-     workflow's `symphony` label. Execution order is enforced by the blocking
-     relations, not by parking the issue.
+   - *Tier B (fulfilled on consent)*: after Main Flow durably preserves feedback
+     and resolves the parent artifact, create the child in intake and persist
+     `待履行 · schedule`. Schedule it with `issueUpdate`, then create its blocking
+     relation. Until the relation succeeds, the pending record preempts parent
+     phase work; child scheduling is already authorized by human consent.
 2. **`assignee` = the current issue's `creator`.** Never assign a spawned
    issue to Symphony's own account.
 3. **`team` = current issue's team; `project` = the routed target project.**
    Resolve the target project's `projectId` and pass it to
    `issueCreate`; omit `projectId` only when the current issue has no project
    and the registry also says there is no project route.
-4. **Idempotency.** The workpad `## Spawned Issues` section records every item
-   created or proposed on this branch; never recreate a recorded item.
-5. **Persist-before-proceed.** After a successful `issueCreate`, immediately
-   record the new id in the workpad, then upload a fresh `Symphony agent state`
-   Linear issue attachment per the WORKFLOW Persistence section before doing
-   anything else. Do not stage the workpad into the PR branch.
+4. **Tier B idempotency.** Never recreate an `已创建` item. Reconcile the
+   recorded child's current state and relations, then resume a `待履行` item at
+   its next incomplete operation.
+5. **Tier B persist-before-proceed.** After `issueCreate`, immediately record
+   the new id and next operation as `待履行` and upload fresh agent state.
+   Update that operation after each successful step; stale state is reconciled
+   per invariant 4. Mark it `已创建` only after scheduling and relation succeed.
+   Tier A keeps its `已创建` record in step 4 below. Do not stage the
+   workpad.
 
 ## Tier A — autonomous create
 
@@ -107,14 +109,18 @@ work was discovered:
 3. **Link** (`issueRelationCreate`): `related` for follow-up/related;
    current `blocks` new for downstream blocked.
 4. **Record + persist**: write the new issue's identifier into workpad `## Spawned Issues`
-   (status `已创建`), then upload a fresh state attachment (invariant 5).
+   as `已创建`, then upload a fresh state attachment.
 5. **Surface**: return the new issue's identifier to the calling phase, which lists it in its
    artifact (Design 未覆盖范围 / Implementation 风险 / Deployment 后续事项).
 
-**Failure handling:** `issueCreate` ok but `issueRelationCreate` fails → do
-**not** roll back; note `关系未设成，请人工补` in the artifact. Creation itself
-fails in a non-blocking context → record in workpad notes, downgrade the item
-to a `建议新建` list entry, never stall the main flow.
+**Failure handling:** Query the child state and relations, keep `待履行` at the
+next incomplete operation, and leave the proposal unresolved. Return the error
+to the current phase, which publishes a replacement artifact with the blocker
+before moving the parent to `Human Review`. A later run resumes the recorded
+id before phase intent. If the child became terminal before its pending link,
+record completion and resume the parent without creating an obsolete relation.
+Other relation failures are noted as `关系未设成，请人工补`; non-blocking create
+failure becomes a `建议新建` entry.
 
 ## Tier B — propose, then create on consent
 
@@ -162,53 +168,20 @@ Flow impact by kind:
 Main Flow scans unresolved `## 建议新建 issue` comments for a new reply, then
 interprets the reply's **intent** (not a fixed keyword list):
 
-- **Consent** (e.g. `同意 / 建吧 / 可以 / 👍`) → create the recorded item with
-  the Tier A create/link/record/persist steps, except consent makes it
-  **schedulable** (invariant 1, Tier B): state = the team's `Todo`, labels =
-  `Type:Xxx` + `symphony`, assignee = creator. Relations by kind:
+- **Consent** (e.g. `同意 / 建吧 / 可以 / 👍`) → create the item in intake as
+  `待履行 · schedule` (or reconcile its recorded id), run `issueUpdate` with
+  state = `Todo`, labels = `Type:Xxx` + `symphony`, assignee = creator, then
+  create and confirm the relation from invariant 1.
   - *blocking* → new issue `blocks` the current issue; after creating it,
-    move the current issue to `Todo` and end the session — the blocked-by
-    gate resumes it automatically once the blocker is terminal.
+    Main Flow re-parks the current issue after fulfillment.
   - *sub-issue* → `parentId` = current issue **and** each child `blocks` the
-    current issue, so Symphony runs the children first and auto-resumes the
-    parent for integration and acceptance once every child is terminal.
+    current issue; Main Flow fulfills every consented sibling before it
+    re-parks the parent and ends once.
   Then reply `已创建 ENG-123` in the proposal thread, resolve the proposal
-  comment, flip the workpad entry `待同意 → 已创建`.
+  comment, and flip the workpad entry `待履行 → 已创建`.
 - **Rejection** (e.g. `不用了 / 先不建`) → resolve the proposal comment, flip
   to `已放弃`; never re-propose.
 - **Unclear** → treat as ordinary discussion; create nothing.
 
 A human may also hand-create the issue instead; if you see it already exists,
 record it and move on. Both paths coexist.
-
-## Workpad `## Spawned Issues`
-
-```md
-## Spawned Issues
-- 已创建 ENG-123 — <title> · related/blocks/parent · <one-line why>
-- 待同意 <proposal-comment-id> — <title> · blocking/sub-issue
-- 已放弃 <proposal-comment-id> — <title> · <reason>
-```
-
-## Worked examples
-
-- **independent follow-up during Implementation** → `related` issue created in
-  the intake state, assignee = creator, listed in the `## Implementation`
-  artifact; workpad `已创建 ENG-123`.
-- **implementation ticket that depends on the current artifact** → `downstream
-  blocked`, linked as current `blocks` new.
-- **multi-project discovery** → split into one issue per target project and
-  link them by the dependency that actually blocks execution.
-- **blocking dependency found** → proposal comment + blocker callout on the
-  artifact + `Human Review`; nothing created until consent.
-- **consent reply in a proposal thread** → issue created schedulable
-  (`symphony` label + `Todo`), relation set, `已创建 ENG-123` replied, proposal
-  comment resolved, workpad `待同意 → 已创建`; a blocking fulfill additionally
-  re-parks the current issue at `Todo` for auto-resume.
-- **sub-issue decomposition consented** → children created schedulable, each
-  `parentId` + `blocks` the parent; the parent stays put and is auto-resumed
-  by the blocked-by gate after the last child completes.
-- **rejection reply** → proposal comment resolved, workpad `已放弃`.
-- **resume with the item already recorded** → skipped, not recreated.
-- **soft-search hit** → no duplicate; relation added to the existing issue,
-  `→ ENG-123` noted in the artifact.

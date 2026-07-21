@@ -138,18 +138,6 @@ query IssueByIdentifier($identifier: String!) {
 }
 ```
 
-Resolve a key to an internal id:
-
-```graphql
-query IssueByIdOrKey($id: String!) {
-  issue(id: $id) {
-    id
-    identifier
-    title
-  }
-}
-```
-
 Read the issue once the internal id is known:
 
 ```graphql
@@ -234,9 +222,9 @@ comment(s) needed to resolve that reference, then act on it. Pull only what the
 reference requires; do not reload the whole resolved history.
 
 ```graphql
-query IssueComments($issueId: String!) {
+query IssueComments($issueId: String!, $after: String) {
   issue(id: $issueId) {
-    comments(first: 50) {
+    comments(first: 50, after: $after) {
       nodes {
         id
         body
@@ -256,12 +244,18 @@ query IssueComments($issueId: String!) {
             }
             createdAt
           }
+          pageInfo { hasNextPage endCursor }
         }
       }
+      pageInfo { hasNextPage endCursor }
     }
   }
 }
 ```
+
+Continue top-level pages until `hasNextPage` is false. If a child connection
+has another page, query that comment directly and continue its thread before
+routing feedback.
 
 ### Reply to a comment thread
 
@@ -511,8 +505,9 @@ mutation CreateIssue($input: IssueCreateInput!) {
 
 `input`: `{ teamId, title, description, stateId, assigneeId, labelIds, projectId?, parentId? }`.
 
-**6. Link the issue** (skip for sub-issues — parent-child is set via
-`parentId` above, not a relation):
+**6. Link the issue.** `parentId` establishes sub-issue hierarchy; consented
+sub-issues also link the new child as blocking the current parent, as defined
+by `symphony-issue`:
 
 ```graphql
 mutation CreateIssueRelation($input: IssueRelationCreateInput!) {
@@ -678,14 +673,6 @@ human-provided issue-scoped secrets in `.issue-secrets/`, never under
 
 ## Usage rules
 
-- Use `linear_graphql` for comment edits, uploads, and ad-hoc Linear API
-  queries.
-- Prefer the narrowest issue lookup that matches what you already know:
-  key -> identifier search -> internal id.
-- For state transitions, fetch team states first and use the exact `stateId`
-  instead of hardcoding names inside mutations.
-- Prefer `attachmentLinkGitHubPR` over a generic URL attachment when linking a
-  GitHub PR to a Linear issue.
 - Do not introduce new raw-token shell helpers for GraphQL access.
 - If you need shell work for uploads, only use it for signed upload URLs
   returned by `fileUpload`; those URLs already carry the needed authorization.

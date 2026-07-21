@@ -35,9 +35,9 @@ description: |
 ## Reviewer configuration
 
 The designated automated reviewer is the `AUTOMATED_REVIEWER` environment
-variable. If it is non-empty, request review from that account after every PR
-create/update with a code, test, or documentation diff. If it is empty, skip
-the automated review request and proceed directly to human handoff.
+variable. If it is non-empty, add that account after every PR create/update
+with a code, test, or documentation diff without removing pending human
+reviewers. If it is empty, proceed directly to human handoff.
 
 ## Related Skills
 
@@ -93,13 +93,8 @@ the automated review request and proceed directly to human handoff.
 8. Request code review per the project's reviewer configuration:
    - Request review after every PR create/update with a code, test, or
      documentation diff, unless no reviewer is configured.
-   - Before requesting an automated reviewer, inspect existing PR review
-     requests. If any pending reviewer is a human account, preserve the
-     human review request, record that automated review was skipped to avoid
-     disturbing the human reviewer, and proceed to human handoff.
-   - Do not use `--remove-reviewer`, do not rewrite the requested-reviewer
-     set, and do not treat replacing a human reviewer with an automated
-     reviewer as acceptable.
+   - Add the automated reviewer without `--remove-reviewer` or rewriting the
+     existing requested-reviewer set.
    - Record the request timestamp and head SHA in the Implementation artifact
      notes, not in cleanup files that are kept out of the PR branch.
    - Wait up to 20 minutes for automated review feedback, polling about once
@@ -114,9 +109,6 @@ the automated review request and proceed directly to human handoff.
    - If automated review does not arrive before the timeout, do not block
      forever and do not mark the review as passed. Record the timeout in the
      `## Implementation` artifact's `风险/注意`.
-   - If automated review is skipped to preserve a pending human reviewer
-     request, do not treat that as success or failure; record the preserved
-     reviewer and continue to human PR review handoff.
 9. Reply with the PR URL from `gh pr view --repo "$upstream_repo"`.
 
 ## Commands
@@ -208,15 +200,8 @@ fi
 # Initial push: push feature branches to the fork (`origin`).
 git push -u origin HEAD
 
-# If that failed because the remote moved, use the symphony-pull skill.
-# After pull-skill resolution and re-validation, retry the normal push:
-git push -u origin HEAD
-
 # If the configured remote rejects the push for auth, permissions, or
 # workflow restrictions, stop and surface the exact error.
-
-# Only if history was rewritten locally:
-git push --force-with-lease origin HEAD
 
 if [ -z "$upstream_repo" ] || [ "$upstream_repo" = "$upstream_url" ]; then
   echo "Could not derive GitHub upstream repo from remote URL: $upstream_url" >&2
@@ -268,25 +253,11 @@ review_requested_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 # Request review from the project's configured automated reviewer.
 # Check AGENTS.md or the workflow env for the reviewer account name.
 # If no reviewer is configured, skip this block.
-# If a human reviewer is already requested, preserve it and skip.
 automated_reviewer="${AUTOMATED_REVIEWER:-}"
 
 if [ -z "$automated_reviewer" ]; then
   echo "No automated reviewer configured; proceeding to human handoff." >&2
 else
-  human_reviewers=$(
-    gh pr view "$pr_number" --repo "$upstream_repo" --json reviewRequests --jq \
-      ".reviewRequests[] | (.login // .slug // .name // \"\") | select(. != \"\" and . != \"$automated_reviewer\" and (. | test(\"(\\\\[bot\\\\]|-bot)\$\") | not))" \
-      2>/dev/null || true
-  )
-
-  if [ -n "$human_reviewers" ]; then
-    echo "Pending human reviewer request(s) already exist; preserving them and skipping automated review request." >&2
-    echo "$human_reviewers" >&2
-    gh pr view "$pr_number" --repo "$upstream_repo" --json url -q .url
-    exit 6
-  fi
-
   review_request_error=$(mktemp)
   if ! gh pr edit "$pr_number" --repo "$upstream_repo" --add-reviewer "$automated_reviewer" 2>"$review_request_error"; then
     if gh pr view "$pr_number" --repo "$upstream_repo" --json reviewRequests --jq '.reviewRequests[].login' | grep -qx "$automated_reviewer"; then
@@ -304,7 +275,7 @@ fi
 # Exit codes:
 # - 0: review completed with no pending actionable feedback
 # - 2: actionable feedback detected; address it, push fixes, and rerun this skill
-# - 6: no automated approval (timeout or preserved human reviewer); continue to
+# - 6: no automated approval before timeout; continue to
 #      human PR review handoff and record the reason
 # Implement or adapt a polling loop appropriate to the project's CI setup.
 
@@ -314,12 +285,11 @@ gh pr view "$pr_number" --repo "$upstream_repo" --json url -q .url
 
 ## Notes
 
-- Do not use `--force`; only use `--force-with-lease` as the last resort.
 - Distinguish sync problems from remote auth/permission problems:
   - Use the `symphony-pull` skill for non-fast-forward or stale-branch issues.
   - Surface auth, permissions, or workflow restrictions directly instead of
     changing remotes or protocols.
-- Reviewer timeout and "preserve pending human reviewer" exits use status 6.
+- Reviewer timeout exits use status 6.
   This is a bounded fallback to human PR review, not success, so Symphony
   can stop waiting without losing the review signal or disturbing human
   reviewers.

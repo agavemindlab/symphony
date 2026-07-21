@@ -19,7 +19,7 @@ with these fields locked down:
 - `Primary: Type:<...>` classifier
 - `要解决的问题（what）`
 - `为什么解决（why）`
-- `验收标准（S1, S2, ...）` — every entry passing the 5 rules below, and the
+- `验收标准（S1, S2, ...）` — every entry passing the applicable rules below, and the
   set as a whole passing the sufficiency check below
 
 The `验收标准` are the issue's **close test**: when every `S<N>` is satisfied
@@ -32,15 +32,9 @@ The Design approach is not part of this artifact; it belongs in `## Design`.
 
 ## At phase start
 
-Main Flow has already checked out the feature branch (so
-`.symphony/workpad.md` is writable) and opens this skill only when
-Requirements is the target phase. Two cases:
-
-- **Fresh run** — no `## Requirements` artifact yet, or it has no
-  unresolved human feedback. Proceed to Discovery.
-- **Rework** — the `## Requirements` artifact has unresolved human feedback
-  in its thread. Address that feedback and follow the same-phase Rework
-  cycle in your workflow instructions when re-posting the artifact.
+Main Flow has already checked out the feature branch, selected Requirements,
+and supplied any rework feedback. Address that feedback before Discovery and
+use the workflow's same-phase Rework cycle when replacing an artifact.
 
 ## Discovery
 
@@ -198,13 +192,8 @@ resolved in **one batch** with a recommended answer per question, so the human
 can approve the whole set with a single reply or push back only on the items
 they disagree with.
 
-**What becomes a question — and what doesn't.** office-hours is natively
-one-at-a-time; the batch is how you run it unattended. Simulate its
-interrogation: answer each question it would put to you with your **own
-recommended answer**, walk on down its tree, and keep going until it reaches
-its natural stopping point. Collect every uncertainty you hit along that full
-path — do not stop early to keep the list short; a batch is cheapest when it is
-complete, because the human answers it in one pass. Then sort each one:
+**What becomes a question — and what doesn't.** Classify only uncertainties
+that could change the problem, acceptance criteria, or build:
 
 - **Immaterial** (a safe default exists and a wrong guess costs little) → do
   **not** ask. Take the default, record it in `关键假设` as `<value>（假设）`,
@@ -246,12 +235,9 @@ ___
 ___
 ```
 
-Give each question as many concrete branches as the decision genuinely has
-(office-hours' framing decides this, not a fixed number), exactly one marked
-`（推荐）`. Every option states its consequence; the recommended one's doubles
-as the rationale. There is **no cap** on questions per round — surface every
-material uncertainty the walk reached; that one complete batch is the efficient
-ask.
+Give each question the concrete branches the decision genuinely has, exactly
+one marked `（推荐）`, and state every option's consequence. Batch the material
+questions found by the scoped analysis.
 
 Do **not** propose or create sub-issues here. Requirements settles *what* and
 *why*, not *how*, so the work cannot be decomposed yet — that is a Design
@@ -383,7 +369,7 @@ The artifact is complete enough to post when all of these hold — this is
 about form, not correctness:
 
 - `Primary:`, `要解决的问题`, `为什么解决`, `验收标准` all filled.
-- Every `S<N>` satisfies the 5 rules and is independently verifiable.
+- Every `S<N>` satisfies its applicable rules and is independently verifiable.
 - The `S<N>` set passes the **sufficiency check** — necessary and sufficient to
   close the issue (the set-falsification test holds: all-green ⟹ closeable).
 - Type-specific writing emphasis satisfied for `Primary:` (e.g. a Bug carries
