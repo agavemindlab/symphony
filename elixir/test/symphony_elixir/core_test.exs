@@ -510,6 +510,50 @@ defmodule SymphonyElixir.CoreTest do
   end
 
   @tag :prompt_contract
+  test "maestro replies stay on the reviewed awaiting artifact across phase rework" do
+    repo_root = Path.expand("..", File.cwd!())
+    workflow = File.read!(Path.join(repo_root, "workflows/agavemindlab/WORKFLOW.md"))
+
+    preflight =
+      File.read!(Path.join(repo_root, "workflows/agavemindlab/MAESTRO_WORKFLOW.md"))
+
+    launcher = File.read!(Path.join(repo_root, ".codex/skills/maestro/SKILL.md"))
+    reviewer = File.read!(Path.join(repo_root, ".codex/skills/maestro/agents/maestro-reviewer.md"))
+
+    [workflow, preflight, launcher, reviewer] =
+      Enum.map([workflow, preflight, launcher, reviewer], &String.replace(&1, ~r/\s+/, " "))
+
+    assert preflight =~ "reply's `parentId` are the same awaiting artifact id"
+    assert preflight =~ "awaiting artifact id as `parentId`"
+    assert launcher =~ "fresh reviewer result produced in this turn"
+    assert launcher =~ "stop without writing if the awaiting artifact id or PR Head changed"
+    assert launcher =~ "newer human feedback or state action exists"
+    assert launcher =~ "comment id in `回复位置` as the Linear reply `parentId`"
+    assert reviewer =~ "awaiting-review artifact comment id as `parentId`"
+
+    for contract <- [preflight, launcher, reviewer] do
+      assert contract =~ "/rework <phase>"
+      refute contract =~ "artifact thread for the phase that must be reworked"
+      refute contract =~ "reviewer-selected artifact"
+    end
+
+    for contract <- [launcher, reviewer] do
+      assert contract =~ "request-changes reply for the next Symphony agent starts with"
+      assert contract =~ "including phase heading and comment id"
+    end
+
+    assert workflow =~ "Fast path — explicit commands"
+    assert workflow =~ "/rework design"
+    assert workflow =~ "(`requirements` | `design` | `implementation` | `deployment`"
+    assert preflight =~ "records the reviewed artifact id and Head"
+    assert preflight =~ "置信度：<N>/10"
+    assert reviewer =~ "decisive transcript events"
+    assert preflight =~ "same artifact/head"
+    assert preflight =~ "remove `symphony:maestro`"
+    assert preflight =~ "except an `ESCALATED` Implementation review"
+  end
+
+  @tag :prompt_contract
   test "DEV-5517 Maestro confidence explains why a higher score is unsupported without changing verdict routing" do
     repo_root = Path.expand("..", File.cwd!())
 

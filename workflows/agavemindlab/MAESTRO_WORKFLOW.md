@@ -124,14 +124,16 @@ Maestro OAuth app identity.
 ## Apply The Recommendation
 
 Every reply starts with `🤖 Maestro 预审核:`, includes `建议回复方式` and
-`置信度：<N>/10`, and records the reviewed artifact id and Head. When
+`置信度：<N>/10`, and records the reviewed artifact id and Head. The reviewed
+artifact id and the reply's `parentId` are the same awaiting artifact id. When
 confidence is below 10/10, name the concrete evidence gap, ambiguity, or risk
 that prevents a higher score and link it to `依据` or `注意`.
 
 ### Auto-rework ordinary request changes
 
-- When the recommendation is `request changes`, reply in the reviewer-selected
-  artifact thread with its exact `/rework <phase> ...` draft. Unless
+- When the recommendation is `request changes`, reply once with the pre-review
+  snapshot's awaiting artifact id as `parentId` and its exact `/rework <phase> ...`
+  draft; the command alone expresses the target phase. Unless
   `MAESTRO_AUTO_REWORK` is `false`/`0`, end the reply with
   `🤖 auto: 已自动将 issue 置为 Rework`, move the issue to `Rework`, then remove
   `symphony:maestro`. This applies to ordinary Requirements, Design,
@@ -143,8 +145,9 @@ that prevents a higher score and link it to `依据` or `注意`.
   `/rework design ...`, or a human clarification. Never auto-rework it: leave
   the issue in `Human Review`, remove `symphony:maestro`, and wait for a newer
   human action.
-- For every other recommendation, reply in the reviewer-selected artifact
-  thread, leave the issue in `Human Review`, then remove `symphony:maestro`. A
+- For every other recommendation that requires a reply, use that same awaiting
+  artifact thread, leave the issue in `Human Review`, then remove
+  `symphony:maestro`. A
   merge nudge may mention untidy commits, but must not rewrite history or
   reactivate the issue.
 

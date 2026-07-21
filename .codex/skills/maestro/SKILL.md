@@ -31,7 +31,7 @@ the reviewer subagent must collect evidence itself from the issue key.
      clarification / merge nudge / completion confirmation / no reply yet.
    - `回复对象`: next Symphony agent / human.
    - `回复位置`: concrete Linear comment/thread to reply to, including phase
-     heading, comment id or timestamp, or `none`.
+     heading and comment id, or `none`.
    - `建议 issue status`: In Progress / Merging / Rework / Done / unchanged.
    - `建议回复`: a ready-to-send Chinese draft. For approve, request changes,
      merge nudge, and completion confirmation, set `回复对象` to next Symphony
@@ -49,15 +49,16 @@ the reviewer subagent must collect evidence itself from the issue key.
 By default, `$maestro ISSUE-1234` is read-only. If the user explicitly asks you
 to send the reply for them, e.g. "帮我回复", then:
 
-1. Reply in the exact target thread:
-   - approve / ask clarification / completion confirmation: reply to the
-     awaiting-review phase artifact's thread.
+1. Use only the fresh reviewer result produced in this turn; never act on a
+   recommendation from an earlier turn. Immediately before any write, re-read
+   Linear and GitHub and stop without writing if the awaiting artifact id or PR
+   Head changed, or newer human feedback or state action exists. When the result
+   requires a reply, use the reviewed awaiting artifact comment id in `回复位置`
+   as the Linear reply `parentId`. A request-changes reply for the next Symphony
+   agent starts with `/rework <phase>`; only that command expresses the target
+   phase.
    - clarification-answer resume: when the human has supplied an answer to an
      unresolved `[NEEDS CLARIFICATION]` marker and asks you to send it, set the issue to `In Progress` after replying with that answer in the awaiting-review artifact thread; this is not phase approval.
-   - request changes: reply to the artifact thread for the phase that must be
-     reworked; for same-phase rework this is the awaiting-review artifact, and
-     for cross-phase rework this may be Requirements, Design, or another
-     unresolved artifact.
    - continue implementation: reply with `/rework implementation <reason>`;
      this is a same-phase continuation, not approval.
    - Implementation merge nudge: do not add a nudge comment unless the
