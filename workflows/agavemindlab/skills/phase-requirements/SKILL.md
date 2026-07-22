@@ -334,7 +334,7 @@ Primary: Type:<Bug|Feature|Refactor|Performance|Migration|Chore|Spike|Other>
 
 ## When blocked
 
-When a batched clarification block remains after honest analysis, apply the workflow's complete-gate test: An incomplete clarification gate returns `stop` to Main Flow after publication for the standard review/rework handoff without moving the issue yourself; only a complete gate uses this blocked path:
+When a batched clarification block remains after honest analysis, apply the workflow's complete-gate test. An incomplete clarification gate returns `stop` to Main Flow after publication for the standard review/rework handoff without moving the issue yourself. Do not execute the complete-gate steps below. Only a complete gate uses this blocked path:
 
 1. Write the batched block at the foot of the `## Requirements` artifact.
 2. Publish the artifact through the workflow artifact protocol.
@@ -428,6 +428,4 @@ single approval, **when in doubt, stop** — auto-advance is for the unambiguous
 case. After a stop, the human approves by moving the issue back to an active
 state and the next session advances to Design.
 
-(The "When blocked" path above is the harder stop: an unresolved
-`### NEEDS CLARIFICATION` means the artifact is not even safe to build on, so
-it moves to `Human Review` directly.)
+(The "When blocked" path above is the harder stop: A complete unresolved `### NEEDS CLARIFICATION` gate moves to `Human Review` directly.)

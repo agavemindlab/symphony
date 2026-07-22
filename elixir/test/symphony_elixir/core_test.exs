@@ -411,6 +411,8 @@ defmodule SymphonyElixir.CoreTest do
     workflow = shared_workflow_prompt()
     artifact = %{id: "dev-5549-requirements", created_at: ~U[2026-07-22 01:00:00Z]}
 
+    assert workflow =~ "at least two distinct, nonblank concrete answer options"
+
     complete_question = %{
       question: "Which retention window should apply?",
       background: "Only the product owner can choose the policy.",
@@ -477,6 +479,8 @@ defmodule SymphonyElixir.CoreTest do
 
       assert skill =~ "Every question states why it needs a human decision"
       assert skill =~ ~r/An incomplete clarification gate\s+returns `stop` to Main Flow/
+      assert skill =~ "Do not execute the complete-gate steps below"
+      assert skill =~ "A complete unresolved `### NEEDS CLARIFICATION` gate moves to `Human Review` directly"
       refute skill =~ "prefer surfacing it as a batched"
     end
 
