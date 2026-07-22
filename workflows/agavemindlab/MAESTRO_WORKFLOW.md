@@ -107,15 +107,16 @@ Maestro OAuth app identity.
    deduplication only when it is a Maestro preflight reply, matches the same
    artifact/head, and no newer human feedback or human-authored state action
    exists. For a qualifying reply, write no second review. If it carries the
-   auto-rework marker below but the issue is still in `Human Review`, retry the
-   `Rework` state update before removing `symphony:maestro`; otherwise keep
+   auto-rework marker below and the artifact is not `Review verdict: ESCALATED`, retry the `Rework` state update and leave `symphony:maestro`;
+   if it carries the auto-approve marker, retry the `In Progress` state update and leave `symphony:maestro`; otherwise keep
    `Human Review`, remove the label, and stop.
 4. Read `.agents/skills/maestro/agents/maestro-reviewer.md` and apply it directly
    in this fresh preflight session, collecting Linear / GitHub / repository
    evidence plus Codex session transcripts referenced by phase artifact
    footers. Do not invoke `$maestro` or spawn a nested reviewer.
-5. Immediately after reaching a recommendation and before any reply, state, or
-   label write, re-read Linear and GitHub. Require `Human Review` with both labels,
+5. Immediately after reaching a recommendation and before any reply, re-read
+   Linear and GitHub. Immediately before an automatic state transition, re-read Linear
+   again. Both snapshots require `Human Review` with both labels,
    the same awaiting artifact and PR head as the pre-review snapshot, and no
    newer human feedback or human-authored state action. On any mismatch, discard
    the stale recommendation and stop without mutating Linear; an otherwise
@@ -128,14 +129,14 @@ Every reply starts with `🤖 Maestro 预审核:`, includes `建议回复方式`
 confidence is below 10/10, name the concrete evidence gap, ambiguity, or risk
 that prevents a higher score and link it to `依据` or `注意`.
 
-### Auto-rework ordinary request changes
+### Apply review state transitions
 
 - When the recommendation is `request changes`, reply in the reviewer-selected
   artifact thread with its exact `/rework <phase> ...` draft. Unless
   `MAESTRO_AUTO_REWORK` is `false`/`0`, end the reply with
-  `🤖 auto: 已自动将 issue 置为 Rework`, move the issue to `Rework`, then remove
-  `symphony:maestro`. This applies to ordinary Requirements, Design,
-  Implementation, and Deployment review, except an `ESCALATED` Implementation review.
+  `🤖 auto: 已自动将 issue 置为 Rework`, then move the issue to `Rework` and
+  leave `symphony:maestro` for Main Flow to consume. This applies to ordinary
+  Requirements, Design, Implementation, and Deployment review, except an `ESCALATED` Implementation review.
   With auto-rework disabled, leave the issue in `Human Review` and remove the
   label.
 - For `Review verdict: ESCALATED`, require the reviewer recommendation to cite
@@ -143,6 +144,14 @@ that prevents a higher score and link it to `依据` or `注意`.
   `/rework design ...`, or a human clarification. Never auto-rework it: leave
   the issue in `Human Review`, remove `symphony:maestro`, and wait for a newer
   human action.
+- When the recommendation is `approve`, reply in the current artifact thread
+  with the reviewer-selected content, artifact id, Head, confidence, and short
+  rationale. Only when all hold — `MAESTRO_AUTO_APPROVE` is `true`/`1`; the
+  awaiting phase is Requirements or Design, never Implementation, Deployment,
+  or Spike findings; confidence >= `MAESTRO_AUTO_APPROVE_MIN_CONFIDENCE`
+  (default 9); and no unresolved clarification gate or high-impact open question
+  remains — end with `🤖 auto: 已自动批准，置为 In Progress`, then move the issue to
+  `In Progress` and leave `symphony:maestro` for Main Flow to consume. Otherwise leave it in `Human Review` and remove the label.
 - For every other recommendation, reply in the reviewer-selected artifact
   thread, leave the issue in `Human Review`, then remove `symphony:maestro`. A
   merge nudge may mention untidy commits, but must not rewrite history or
@@ -150,6 +159,6 @@ that prevents a higher score and link it to `依据` or `注意`.
 
 Do not write phase-closing replies such as `✅ 已批准` or `⏩ 自动进入`.
 
-If label cleanup fails after a reply, stop anyway; the same artifact/head marker
-prevents duplicate review and the next pickup must retry cleanup before doing
-anything else.
+If a post-reply state or label write fails, stop anyway; the same artifact/head
+marker prevents duplicate review and the next pickup must finish that marker's
+state/label disposition before doing anything else.
