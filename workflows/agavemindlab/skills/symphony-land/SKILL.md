@@ -33,9 +33,10 @@ description:
 
 1. Locate the PR for the current branch.
 2. Confirm the human approved Merging (the issue is in the `Merging` state)
-   and read the approved `## Implementation` artifact before merging. It must
-   supply a merge-safety read, plus a post-merge verification plan only when
-   an acceptance criterion is `延迟验收`:
+   and read the approved `## Requirements` and `## Implementation` artifacts
+   before merging. Use Requirements' `关键假设` as the source of truth for
+   `延迟验收`; Implementation must supply a merge-safety read plus a matching
+   post-merge verification plan for each such criterion:
    - A merge-safety read: the `Acceptance mapping` and `合并风险判断` sections establish
      whether the PR is safe to merge and whether any remaining issue could
      crash services, corrupt/lose data, break background jobs, or only affect

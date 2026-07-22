@@ -649,6 +649,7 @@ defmodule SymphonyElixir.CoreTest do
              ~r/A missing post-merge\s+verification plan blocks merging only when an acceptance criterion is\s+`延迟验收`\./
 
     assert land_skill =~ "A missing merge-safety read always blocks merging"
+    assert land_skill =~ "Use Requirements' `关键假设` as the source of truth"
     refute land_skill =~ "If either element is missing"
     assert land_skill =~ "`Acceptance mapping` and `合并风险判断`"
     refute land_skill =~ "`验收对照` and `风险/注意`"
@@ -730,6 +731,9 @@ defmodule SymphonyElixir.CoreTest do
 
     refute maestro_workflow =~ "(when available) `置信度：<N>/10`"
     assert reviewer =~ "`置信度`: `N/10`"
+    assert linear_skill =~ "Clean phase handoff sets `stateId` and the full `labelIds` in one `issueUpdate`"
+    assert linear_skill =~ "Main Flow removes it after an automatic transition"
+    refute linear_skill =~ "Add `symphony:maestro` before moving the issue to `Human Review`"
   end
 
   test "workflow defines the status card as a non-routing digest" do
