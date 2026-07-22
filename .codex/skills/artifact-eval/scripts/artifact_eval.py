@@ -28,6 +28,14 @@ WORKFLOW_FILES = (
     "workflows/agavemindlab/WORKFLOW.md",
     "workflows/agavemindlab/skills/phase-{phase}/SKILL.md",
 )
+RUNBOOK_FIELDS = (
+    "等待条件", "操作位置", "责任方", "操作步骤", "secret 来源",
+    "可观测信号", "复验方式", "通过判据", "何时可验", "完成后的 issue 动作",
+)
+ORDINARY_FIELDS = (
+    "等待条件", "触发动作/责任方", "可观测信号", "查询",
+    "通过判据", "何时可验", "信号出现后人工动作",
+)
 
 
 class CaseError(RuntimeError):
@@ -527,6 +535,52 @@ def materialize_fixture(source: Path, destination: Path, repo_root: Path) -> Pat
     return destination
 
 
+def require_adjacent_lines(lines: list[str], heading: str) -> int:
+    if lines.count(heading) != 1:
+        raise CaseError(f"missing exact {heading}")
+    start = lines.index(heading)
+    fields = lines[start + 1 : start + 1 + len(RUNBOOK_FIELDS)]
+    if len(fields) != len(RUNBOOK_FIELDS) or any(
+        not line.startswith(f"- **{name}**:")
+        for line, name in zip(fields, RUNBOOK_FIELDS)
+    ):
+        raise CaseError(f"incomplete adjacent fields after {heading}")
+    return start
+
+
+def verify_deployment_runbook_fixture(repo_root: Path, fixture_path: Path | None = None) -> None:
+    fixture_path = fixture_path or (
+        Path(__file__).resolve().parents[1] / "fixtures" / "deployment-runbook.json"
+    )
+    fixture = read_json(fixture_path)
+    if (
+        fixture.get("source_issue") != "DEV-5363"
+        or fixture.get("source_comment") != "204522be-aea1-47cb-b130-76318c523677"
+    ):
+        raise CaseError("deployment-runbook fixture has the wrong read-only source")
+    draft_lines = fixture.get("expected_artifact", "").splitlines()
+    fixture_heading = "#### Runbook — S4: 历史 webhook 已失效、轮换或吊销"
+    fixture_heading_index = require_adjacent_lines(draft_lines, fixture_heading)
+    ordinary_lines = [line for line in draft_lines if line.startswith("- S5:")]
+    if len(ordinary_lines) != 1 or any(f"**{name}**" not in ordinary_lines[0] for name in ORDINARY_FIELDS):
+        raise CaseError("deployment-runbook fixture requires one complete ordinary S5")
+    if draft_lines.index(ordinary_lines[0]) > fixture_heading_index:
+        raise CaseError("ordinary S5 must precede the S4 Runbook")
+
+    skill = (repo_root / "workflows/agavemindlab/skills/phase-deployment/SKILL.md").read_text()
+    skill_heading = "#### Runbook — S<N>: <criterion>"
+    skill_lines = skill.splitlines()
+    skill_heading_index = require_adjacent_lines(skill_lines, skill_heading)
+    ordinary_skill = next(
+        (line for line in skill_lines if line.startswith("- S<N>: **等待条件**")),
+        "",
+    )
+    if any(f"**{name}**" not in ordinary_skill for name in ORDINARY_FIELDS):
+        raise CaseError("phase-deployment requires one complete ordinary S<N>")
+    if skill_lines.index(ordinary_skill) > skill_heading_index or "**人工操作**" in skill:
+        raise CaseError("phase-deployment pending forms are misclassified")
+
+
 def verify_fixtures(repo_root: Path) -> int:
     skill_root = Path(__file__).resolve().parents[1]
     fixtures = skill_root / "fixtures"
@@ -579,6 +633,7 @@ def verify_fixtures(repo_root: Path) -> int:
         repo_root=repo_root,
         replay_root=run_root / "replays",
     )
+    verify_deployment_runbook_fixture(repo_root)
     if minimal_result.status != "PASS":
         print(f"minimal-case: {minimal_result.status}", file=sys.stderr)
         return 1
@@ -592,6 +647,7 @@ def verify_fixtures(repo_root: Path) -> int:
     print(f"minimal-case: PASS ({minimal_result.report_path})")
     print(f"missing-context-case: MISSING_CONTEXT ({missing_result.report_path})")
     print("broken-case: INVALID_CASE")
+    print("deployment-runbook: PASS")
     print(f"design-discovery-cases: PASS ({len(discovery_cases)}/2)")
     return 0
 
