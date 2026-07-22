@@ -407,6 +407,100 @@ defmodule SymphonyElixir.CoreTest do
     end
   end
 
+  test "DEV-5556 complete blocked clarifications skip Maestro until a fresh artifact resolves them" do
+    workflow = shared_workflow_prompt()
+    artifact = %{id: "dev-5549-requirements", created_at: ~U[2026-07-22 01:00:00Z]}
+
+    complete_question = %{
+      question: "Which retention window should apply?",
+      background: "Only the product owner can choose the policy.",
+      options: ["A", "B"],
+      recommendation: "A",
+      impacts: %{"A" => "Lower storage cost", "B" => "Longer recovery window"}
+    }
+
+    complete_gate = %{
+      unresolved?: true,
+      questions: [
+        complete_question,
+        %{
+          question: "Who can override the retention window?",
+          background: "Only the product owner can assign policy ownership.",
+          options: ["A", "B"],
+          recommendation: "B",
+          impacts: %{"A" => "Any admin can override it", "B" => "Only owners can override it"}
+        }
+      ]
+    }
+
+    for phase <- ["Requirements", "Design"] do
+      calls =
+        dry_run_artifact_calls(
+          workflow,
+          :blocked_clarification,
+          phase,
+          artifact,
+          complete_gate
+        )
+
+      assert {:issueUpdate, :state, "Human Review"} in calls
+      assert {:commentUpdate, :status_card_target, artifact.id} in calls
+      refute Enum.any?(calls, &match?({:issueUpdate, :add_label, "symphony:maestro"}, &1))
+      refute Enum.any?(calls, &match?({:issueUpdate, :remove_label, "symphony:maestro"}, &1))
+      refute Enum.any?(calls, &match?({:start_maestro_session, _artifact_id}, &1))
+      refute Enum.any?(calls, &match?({:commentCreate, :clarification_summary, _body}, &1))
+    end
+
+    for phase_skill <- ["phase-requirements", "phase-design"] do
+      skill =
+        File.read!(
+          Path.expand(
+            "../workflows/agavemindlab/skills/#{phase_skill}/SKILL.md",
+            File.cwd!()
+          )
+        )
+
+      assert skill =~ "Every question states why it needs a human decision"
+      refute skill =~ "prefer surfacing it as a batched"
+    end
+
+    for missing_field <- [:question, :background, :options, :recommendation, :impacts] do
+      calls =
+        dry_run_artifact_calls(
+          workflow,
+          :blocked_clarification,
+          "Requirements",
+          artifact,
+          update_in(complete_gate.questions, fn [first, second | rest] ->
+            [first, Map.delete(second, missing_field) | rest]
+          end)
+        )
+
+      assert {:issueUpdate, :add_label, "symphony:maestro"} in calls
+      assert {:start_maestro_session, artifact.id} in calls
+    end
+
+    revised_calls =
+      dry_run_artifact_calls(
+        workflow,
+        :blocked_clarification,
+        "Requirements",
+        %{artifact | id: "fresh-revised-requirements"},
+        %{complete_gate | unresolved?: false}
+      )
+
+    assert {:issueUpdate, :add_label, "symphony:maestro"} in revised_calls
+    assert {:start_maestro_session, "fresh-revised-requirements"} in revised_calls
+
+    for phase <- ["Requirements", "Design"] do
+      ordinary_calls =
+        dry_run_artifact_calls(workflow, :blocked_clarification, phase, artifact, nil)
+
+      assert {:issueUpdate, :add_label, "symphony:maestro"} in ordinary_calls
+      assert {:start_maestro_session, artifact.id} in ordinary_calls
+    end
+  end
+
   test "DEV-5536 question handoff skips Maestro while fresh rework activates it once" do
     workflow = shared_workflow_prompt()
     artifact = %{id: "requirements-question-thread", created_at: ~U[2026-06-23 01:00:00Z]}
@@ -3910,6 +4004,59 @@ defmodule SymphonyElixir.CoreTest do
     end
   end
 
+  defp dry_run_artifact_calls(
+         workflow,
+         :blocked_clarification,
+         phase,
+         artifact,
+         clarification_gate
+       ) do
+    short_circuit_contracts = [
+      "current awaiting Requirements or Design artifact",
+      "every unresolved question",
+      "why only a human can decide",
+      "concrete answer options",
+      "exactly one recommended answer per question",
+      "consequence of every option",
+      "leave `symphony:maestro` unchanged",
+      "start no Maestro session",
+      "original artifact thread",
+      "fresh revised artifact no longer has an unresolved clarification gate"
+    ]
+
+    short_circuit? =
+      phase in ["Requirements", "Design"] and
+        complete_unresolved_clarification?(clarification_gate) and
+        Enum.all?(short_circuit_contracts, &String.contains?(workflow, &1))
+
+    standard_handoff? =
+      Enum.all?(
+        [
+          "An incomplete gate follows the existing review/rework handoff",
+          "fresh revised artifact no longer has an unresolved clarification gate",
+          "For every eligible outcome above and for other phases, add the `symphony:maestro` label"
+        ],
+        &String.contains?(workflow, &1)
+      )
+
+    if short_circuit? do
+      [
+        {:issueUpdate, :state, "Human Review"},
+        {:commentUpdate, :status_card_target, artifact.id}
+      ]
+    else
+      if standard_handoff? do
+        [
+          {:issueUpdate, :add_label, "symphony:maestro"},
+          {:issueUpdate, :state, "Human Review"},
+          {:start_maestro_session, artifact.id}
+        ]
+      else
+        []
+      end
+    end
+  end
+
   defp dry_run_artifact_calls(workflow, :cross_phase_rollback, target_phase, awaiting_phase, artifacts) do
     required_contracts = [
       "from the target phase through the awaiting-review phase",
@@ -3967,6 +4114,27 @@ defmodule SymphonyElixir.CoreTest do
       created_at: DateTime.add(old_artifact.created_at, 1, :second)
     }
   end
+
+  defp complete_unresolved_clarification?(gate) when is_map(gate) do
+    questions = Map.get(gate, :questions, [])
+
+    gate[:unresolved?] == true and questions != [] and
+      Enum.all?(questions, &complete_clarification_question?/1)
+  end
+
+  defp complete_unresolved_clarification?(_gate), do: false
+
+  defp complete_clarification_question?(question) do
+    options = Map.get(question, :options, [])
+    impacts = Map.get(question, :impacts, %{})
+    recommendation = Map.get(question, :recommendation)
+
+    present_text?(question[:question]) and present_text?(question[:background]) and
+      length(options) >= 2 and present_text?(recommendation) and recommendation in options and
+      Enum.all?(options, &present_text?(Map.get(impacts, &1)))
+  end
+
+  defp present_text?(value), do: is_binary(value) and String.trim(value) != ""
 
   defp eventually_read_file!(path, deadline_ms \\ System.monotonic_time(:millisecond) + 1_000) do
     case File.read(path) do

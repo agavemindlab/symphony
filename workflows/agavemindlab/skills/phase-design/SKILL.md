@@ -398,8 +398,8 @@ complete, because the human answers it in one pass. Then sort each one:
   never covers (see the consent convention).
 
 Each question must carry enough for the human to decide **without re-deriving
-the design**: a `背景` line naming the fork and what a wrong pick would cost,
-and a short consequence on **every** option — not just the recommended one (a
+the design**: a `背景` line stating why the fork needs a human decision, naming
+the fork and what a wrong pick would cost, and a short consequence on **every** option — not just the recommended one (a
 bare architecture label gives the reviewer nothing to weigh an override
 against). When plan-eng-review (or your own analysis) surfaced the tradeoff,
 preserve it here — do not flatten the reasoning down to a bare question.
@@ -414,12 +414,12 @@ ___
 > 需要人工决定后 workflow 才能继续。认可全部推荐请回复「同意默认」，否则逐条说明。
 
 **Q1. <question> 〔影响：低〕**
-  背景: <一句：这个 fork 是什么 + 选错的代价>
+  背景: <一句：为什么必须由人类决定 + 这个 fork 是什么 + 选错的代价>
   - A（推荐）: <answer> — <这样选的后果 / 为什么优于备选>
   - B: <answer> — <这样选的后果>
 
 **Q2. <question> 🔴 〔影响：高 · 需明确回答〕**
-  背景: <一句：利害所在 / 为什么 blanket approval 不能覆盖>
+  背景: <一句：为什么必须由人类决定 + 利害所在 / 为什么 blanket approval 不能覆盖>
   - A（推荐）: <answer> — <后果>
   - B: <answer> — <后果>
   - C: <answer> — <后果>
@@ -429,8 +429,9 @@ ___
 
 Give each question as many concrete branches as the decision genuinely has
 (plan-eng-review's framing decides this, not a fixed number), exactly one
-marked `（推荐）`. Every option states its consequence; the recommended one's
-doubles as the rationale. There is **no cap** on questions per round — surface
+marked `（推荐）`. Every question states why it needs a human decision; every
+option states its consequence, and the recommended one's doubles as the rationale.
+There is **no cap** on questions per round — surface
 every material fork the walk reached; that one complete batch is the efficient
 ask. If the material set comes out so large that the issue is clearly
 mis-scoped, that is a signal to propose a `sub-issue` split via `symphony-issue`
@@ -544,10 +545,7 @@ This is the right outcome for a rework, for a human already in the thread,
 for the `Rework` state, and for the **complete-but-not-confident** case:
 there is a real architectural fork a reasonable reviewer might decide
 differently, an uncertain bet, or a non-obvious risk worth a human's eyes
-before you build on it. When you stop for a specific fork, prefer surfacing it
-as a batched `### NEEDS CLARIFICATION` block carrying your recommended
-direction (so the human can one-click `同意默认`) rather than only a passive
-`风险/注意` note; record `confidence: review` in the notes. Because a stop now
+before you build on it. Record `confidence: review` in the notes. Because a stop now
 costs the human a single approval, **when in doubt, stop** — auto-advance is
 for the clearly-right design. After a stop, the human approves by moving the
 issue back to an active state and the next session advances to Implementation.
