@@ -273,8 +273,12 @@ defmodule SymphonyElixir.Orchestrator do
          true <- available_slots(state) > 0 do
       choose_issues(issues, state)
     else
-      {:error, :missing_linear_api_token} ->
-        Logger.error("Linear API token missing in WORKFLOW.md")
+      {:error, :missing_linear_auth} ->
+        Logger.error("Linear authentication missing in WORKFLOW.md")
+        state
+
+      {:error, {:missing_linear_auth_variable, variable}} ->
+        Logger.error("Linear authentication variable missing in WORKFLOW.md: #{variable}")
         state
 
       {:error, :missing_linear_project_scope} ->

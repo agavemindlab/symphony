@@ -18,6 +18,7 @@ from typing import Any
 SCHEMA_VERSION = 1
 MISSING_CONTEXT_EXIT = 2
 MAX_UNTRACKED_BYTES = 1024 * 1024
+MAX_DISCOVERY_CANDIDATES = 5
 SYMPHONY_ALLOWLIST = (
     ".symphony/workpad.md",
     ".symphony/design.md",
@@ -144,6 +145,95 @@ def validate_case(case_dir: Path) -> dict[str, Any]:
 
     read_untracked_manifest(case_dir, repo.get("untracked_manifest"))
     return data
+
+
+def validate_discovery_fixture(data: object) -> list[dict[str, Any]]:
+    if not isinstance(data, dict) or data.get("schema_version") != SCHEMA_VERSION:
+        raise CaseError("Invalid discovery fixture schema")
+    cases = data.get("cases")
+    if not isinstance(cases, list) or not cases:
+        raise CaseError("Discovery fixture requires cases")
+
+    for case in cases:
+        if not isinstance(case, dict):
+            raise CaseError("Invalid discovery case")
+        for field in (
+            "id",
+            "source_issue",
+            "failed_artifact",
+            "forbidden_diagnosis",
+            "linear_query",
+            "history_effect",
+        ):
+            if not isinstance(case.get(field), str) or not case[field].strip():
+                raise CaseError(f"Missing discovery field: {field}")
+        if case.get("allowed_operations") != ["read"]:
+            raise CaseError("Discovery fixture must be read-only")
+
+        history = case.get("linear_history")
+        if not isinstance(history, list) or not history:
+            raise CaseError("Discovery case requires Linear history")
+        if len(history) > MAX_DISCOVERY_CANDIDATES:
+            raise CaseError(
+                f"Discovery case allows at most {MAX_DISCOVERY_CANDIDATES} Linear candidates"
+            )
+        for candidate in history:
+            identifier = candidate.get("identifier") if isinstance(candidate, dict) else None
+            if (
+                not isinstance(candidate, dict)
+                or not isinstance(identifier, str)
+                or not identifier.strip()
+                or candidate.get("status") not in {"Done", "Duplicate"}
+            ):
+                raise CaseError("Linear history must identify Done or Duplicate status")
+            for evidence in ("comments", "prs"):
+                values = candidate.get(evidence)
+                if not isinstance(values, list) or not all(
+                    isinstance(value, str) and value.strip() for value in values
+                ):
+                    raise CaseError(f"Invalid Linear {evidence} evidence")
+        if not any(candidate.get("comments") for candidate in history):
+            raise CaseError("Discovery case requires comment evidence")
+        if not any(candidate.get("prs") for candidate in history):
+            raise CaseError("Discovery case requires linked PR evidence")
+
+        order = case.get("discovery_order")
+        if not isinstance(order, list) or not all(
+            step in order for step in ("linear_history", "root_cause", "approach")
+        ):
+            raise CaseError("Discovery case requires ordered decision steps")
+        if order.index("linear_history") > min(order.index("root_cause"), order.index("approach")):
+            raise CaseError("Linear history must precede diagnosis and approach")
+
+        sentry = case.get("sentry")
+        target_event = sentry.get("target_event") if isinstance(sentry, dict) else None
+        if not isinstance(target_event, str) or not target_event.strip():
+            raise CaseError("Sentry discovery requires target event detail")
+        siblings = sentry.get("siblings") if isinstance(sentry, dict) else None
+        if (
+            not isinstance(siblings, list)
+            or not siblings
+            or len(siblings) > MAX_DISCOVERY_CANDIDATES
+            or not all(isinstance(sibling, str) and sibling.strip() for sibling in siblings)
+        ):
+            raise CaseError(
+                f"Sentry discovery requires 1-{MAX_DISCOVERY_CANDIDATES} valid siblings"
+            )
+        expected_order = (
+            "linear_history",
+            "target_sentry_event",
+            "sentry_siblings",
+            "root_cause",
+            "approach",
+        )
+        if not all(step in order for step in expected_order):
+            raise CaseError("Sentry discovery requires complete ordered decision steps")
+        if [order.index(step) for step in expected_order] != sorted(
+            order.index(step) for step in expected_order
+        ):
+            raise CaseError("Sentry discovery must precede diagnosis and approach")
+
+    return cases
 
 
 def read_untracked_manifest(case_dir: Path, manifest_path: str) -> list[dict[str, str]]:
@@ -443,8 +533,18 @@ def verify_fixtures(repo_root: Path) -> int:
     minimal = fixtures / "minimal-case"
     missing = fixtures / "missing-context-case"
     linear_snapshot = fixtures / "linear-snapshot.json"
-    if not minimal.is_dir() or not missing.is_dir() or not linear_snapshot.is_file():
+    discovery_fixture = fixtures / "design-discovery-cases.json"
+    if (
+        not minimal.is_dir()
+        or not missing.is_dir()
+        or not linear_snapshot.is_file()
+        or not discovery_fixture.is_file()
+    ):
         raise CaseError("Missing fixture cases")
+
+    discovery_cases = validate_discovery_fixture(read_json(discovery_fixture))
+    if len(discovery_cases) != 2:
+        raise CaseError("Discovery fixture must contain exactly 2 cases")
 
     run_root = repo_root / ".symphony" / "artifact-eval" / "fixture-runs"
     run_root.mkdir(parents=True, exist_ok=True)
@@ -492,6 +592,7 @@ def verify_fixtures(repo_root: Path) -> int:
     print(f"minimal-case: PASS ({minimal_result.report_path})")
     print(f"missing-context-case: MISSING_CONTEXT ({missing_result.report_path})")
     print("broken-case: INVALID_CASE")
+    print(f"design-discovery-cases: PASS ({len(discovery_cases)}/2)")
     return 0
 
 

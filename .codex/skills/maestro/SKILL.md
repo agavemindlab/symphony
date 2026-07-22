@@ -1,6 +1,6 @@
 ---
 name: maestro
-description: Use when the user invokes `$maestro ISSUE-1234` such as `$maestro DEV-1234` to get an isolated subagent recommendation for how to reply to a Symphony issue currently in Human Review. The parent agent launches a fresh reviewer subagent with only the issue key; the subagent performs read-only Linear/GitHub evidence collection and returns the reply method and draft response without changing Linear or GitHub state.
+description: Use when the user invokes `$maestro ISSUE-1234` such as `$maestro DEV-1234` to get an isolated subagent recommendation for how to reply to a Symphony issue currently in Human Review. The parent agent launches a fresh reviewer subagent with only the issue key; the subagent performs read-only Linear, GitHub, and referenced Codex-session evidence collection and returns the reply method and draft response without changing state.
 ---
 
 # Maestro
@@ -23,20 +23,24 @@ the reviewer subagent must collect evidence itself from the issue key.
    pass current conversation history, issue title/state, artifact text, comment
    summaries, PR facts, prior `$maestro` results, your expected answer, or the
    reviewer prompt as a skill/file reference.
-4. Wait for the subagent result. If required output fields are missing, ask the
-   same subagent once to fix only the format; do not supply issue facts.
+4. Wait for the subagent result. If required output fields are missing, or a
+   below-10 confidence lacks a concrete reason matched to `依据` or `注意`, ask
+   the same subagent once to fix only the format; do not supply issue facts.
 5. Return the subagent's concise Chinese recommendation with:
-   - `建议回复方式`: approve / request changes / ask clarification / merge nudge /
-     completion confirmation / no reply yet.
+   - `建议回复方式`: approve / request changes / continue implementation / ask
+     clarification / merge nudge / completion confirmation / no reply yet.
    - `回复对象`: next Symphony agent / human.
    - `回复位置`: concrete Linear comment/thread to reply to, including phase
      heading, comment id or timestamp, or `none`.
    - `建议 issue status`: In Progress / Merging / Rework / Done / unchanged.
    - `建议回复`: a ready-to-send Chinese draft. For approve, request changes,
      merge nudge, and completion confirmation, set `回复对象` to next Symphony
-     agent and write it as the human's review note for the next run. For ask
-     clarification and no reply yet, set `回复对象` to human and write it for
-     the human, explaining what Maestro cannot decide.
+     agent and write it as the human's review note for the next run. The same
+     applies to continue implementation. For ask clarification and no reply
+     yet, set `回复对象` to human and write it for the human, explaining what
+     Maestro cannot decide.
+   - `置信度`: `N/10`; when below 10/10, name the concrete evidence gap, ambiguity,
+     or risk that prevents a higher score and match it to `依据` or `注意`.
    - `依据`: 2-5 evidence bullets.
    - `注意`: only if there is uncertainty or missing evidence.
 
@@ -54,6 +58,8 @@ to send the reply for them, e.g. "帮我回复", then:
      reworked; for same-phase rework this is the awaiting-review artifact, and
      for cross-phase rework this may be Requirements, Design, or another
      unresolved artifact.
+   - continue implementation: reply with `/rework implementation <reason>`;
+     this is a same-phase continuation, not approval.
    - Implementation merge nudge: do not add a nudge comment unless the
      recommendation includes a human-facing clarification; the state change to
      `Merging` is the signal.
@@ -66,15 +72,11 @@ to send the reply for them, e.g. "帮我回复", then:
    PR comments, merge, deploy, or move to `Done` unless the recommendation says
    `Done` and the user explicitly asked you to act.
 
-Maestro pre-review sessions execute their request-changes verdict by default:
-the pre-review reply ends with a `🤖 auto: 已自动将 issue 置为 Rework` line and
-the issue is moved to `Rework` (reversible; a human can move it back with a
-reason). Setting the operator env `MAESTRO_AUTO_REWORK=false` downgrades the
-session to recommendation-only. With the operator env `MAESTRO_AUTO_APPROVE=true`
-(default off), a pre-review approve verdict on a Requirements or Design artifact
-also moves the issue to `In Progress` the same reversible way, gated on
-confidence reaching `MAESTRO_AUTO_APPROVE_MIN_CONFIDENCE` (default 9).
-`Merging` and `Done` are always the human's call.
+Maestro pre-review sessions auto-execute `request changes` by default, except an `ESCALATED` Implementation review: they append
+`🤖 auto: 已自动将 issue 置为 Rework` and set the issue to `Rework`. Set
+`MAESTRO_AUTO_REWORK=false` to keep ordinary request changes recommendation-only.
+ESCALATED and all non-rework verdicts stay in `Human Review` until a later human
+reply or state action starts the transition.
 
 ## Subagent Task
 
@@ -83,22 +85,25 @@ Send the subagent a prompt shaped like this, after the contents of
 
 ```text
 Use the Maestro reviewer prompt above to advise on issue <KEY>. Rely only on
-the issue key and evidence you collect read-only from Linear, GitHub, and local
-repo metadata. Ignore any prior conversation context and parent-agent
-interpretation. Do not mutate Linear, GitHub, files, or issue state.
+the issue key and evidence you collect read-only from Linear, GitHub, local repo
+metadata, and Codex session transcripts referenced by phase artifact footers.
+Ignore any prior conversation context and parent-agent interpretation. Do not
+mutate Linear, GitHub, files, or issue state.
 
 Task:
 1. Fetch and inspect the issue, active unresolved Phase artifacts with no
    phase-closing reply, human feedback, related issues, and PR evidence needed
    by the reviewer prompt.
-2. Decide the best reply method: approve, request changes, ask clarification,
-   merge nudge, completion confirmation, or no reply yet.
+2. Decide the best reply method: approve, request changes, continue
+   implementation, ask clarification, merge nudge, completion confirmation,
+   or no reply yet.
 3. State the reply audience: next Symphony agent or human.
 4. State the concrete reply location, not an abstract label.
 5. State the recommended Linear issue status after the reply.
 6. Draft the exact Chinese reply the human could post. For approve, request
-   changes, merge nudge, and completion confirmation, address the next Symphony
-   agent run. For ask clarification and no reply yet, address the human.
+   changes, continue implementation, merge nudge, and completion confirmation,
+   address the next Symphony agent run. For ask clarification and no reply yet,
+   address the human.
 7. For every phase, compare the artifact's evidence with the acceptance source
    of truth; do not rely only on the Symphony agent's self-assessment or `✅`
    statuses. For Deployment, do not approve a bundled `S1-S6` / main-readback
@@ -146,6 +151,8 @@ Task:
    label on a metric named by the issue's purpose is a material proof gap, not
    just transparency.
 12. Cite the decisive evidence and call out missing evidence or uncertainty.
+13. For `Review verdict: ESCALATED`, follow the reviewer prompt's Codex-session
+   trend rubric and cite its decisive events.
 Keep the answer concise and do not recommend changing state directly unless the
 human's reply should explicitly instruct that.
 ```

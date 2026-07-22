@@ -3,13 +3,15 @@ defmodule SymphonyElixir.CLI do
   Escript entrypoint for running Symphony with an explicit WORKFLOW.md path.
   """
 
-  alias SymphonyElixir.LogFile
+  alias SymphonyElixir.{Config, Linear.Auth, LogFile}
 
   @acknowledgement_switch :i_understand_that_this_will_be_running_without_the_usual_guardrails
   @switches [{@acknowledgement_switch, :boolean}, logs_root: :string, port: :integer]
 
   @type ensure_started_result :: {:ok, [atom()]} | {:error, term()}
   @type deps :: %{
+          optional(:tracker_kind) => (-> String.t()),
+          optional(:prewarm_linear_auth) => (-> :ok | {:error, term()}),
           file_regular?: (String.t() -> boolean()),
           set_workflow_file_path: (String.t() -> :ok | {:error, term()}),
           set_logs_root: (String.t() -> :ok | {:error, term()}),
@@ -60,7 +62,7 @@ defmodule SymphonyElixir.CLI do
 
       case deps.ensure_all_started.() do
         {:ok, _started_apps} ->
-          :ok
+          prewarm_linear_auth(deps)
 
         {:error, reason} ->
           {:error, "Failed to start Symphony with workflow #{expanded_path}: #{inspect(reason)}"}
@@ -82,8 +84,24 @@ defmodule SymphonyElixir.CLI do
       set_workflow_file_path: &SymphonyElixir.Workflow.set_workflow_file_path/1,
       set_logs_root: &set_logs_root/1,
       set_server_port_override: &set_server_port_override/1,
-      ensure_all_started: fn -> Application.ensure_all_started(:symphony_elixir) end
+      ensure_all_started: fn -> Application.ensure_all_started(:symphony_elixir) end,
+      tracker_kind: fn -> Config.settings!().tracker.kind end,
+      prewarm_linear_auth: &Auth.prewarm/0
     }
+  end
+
+  defp prewarm_linear_auth(deps) do
+    if Map.get(deps, :tracker_kind, fn -> "linear" end).() == "linear" do
+      case Map.get(deps, :prewarm_linear_auth, fn -> :ok end).() do
+        :ok -> :ok
+        {:error, {:linear_oauth_token_status, status}} -> {:error, "Failed to authenticate with Linear OAuth (HTTP #{status})"}
+        {:error, {:missing_linear_auth_variable, variable}} -> {:error, "Missing Linear authentication variable: #{variable}"}
+        {:error, :missing_linear_auth} -> {:error, "Missing Linear authentication: set LINEAR_API_KEY or both client credential variables"}
+        {:error, _reason} -> {:error, "Failed to authenticate with Linear OAuth"}
+      end
+    else
+      :ok
+    end
   end
 
   defp maybe_set_logs_root(opts, deps) do

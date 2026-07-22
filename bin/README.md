@@ -26,7 +26,8 @@ later layer overrides earlier layers:
    sources, and skips it silently if missing.
 2. **`~/.config/symphony/<profile>.env`** — operator profile. Machine-local, not
    in any repo, shared across every project that selects the same profile.
-   Required (the launcher exits if missing). Must define `LINEAR_API_KEY`.
+   Required (the launcher exits if missing). Define either `LINEAR_API_KEY` or
+   both `LINEAR_CLIENT_ID` and `LINEAR_CLIENT_SECRET`.
 3. **`workflows/<project>/project.env`** — committed project settings.
    Required. Must define one of `SYMPHONY_PROJECT_SLUG`,
    `SYMPHONY_PROJECT_SLUGS`, `SYMPHONY_PROJECT_NAME`, or
@@ -46,6 +47,19 @@ later layer overrides earlier layers:
 Later files override earlier files, so the gitignored `project.env.local` (when
 present) has the highest precedence.
 
+For OAuth app profiles, use client credentials so Symphony can renew the
+in-memory access token automatically after a `401`:
+
+```sh
+LINEAR_CLIENT_ID="..."
+LINEAR_CLIENT_SECRET="..."
+```
+
+`LINEAR_API_KEY` remains supported for personal API keys and takes precedence
+when both modes are configured. The launcher clears inherited Linear auth
+before loading the selected profile, so main and `--maestro` use their own
+profile identities. Access tokens are not written back to profile files.
+
 ## Profile selection
 
 Because the profile name must be known before sourcing the operator profile,
@@ -57,8 +71,12 @@ preserved.
 The profile is picked in this order, taking the first non-empty value:
 
 1. Caller-provided `SYMPHONY_PROFILE` already in the environment.
-2. `SYMPHONY_PROFILE` set in `project.env`.
-3. `grandline`.
+2. Under `--maestro`: `SYMPHONY_MAESTRO_PROFILE`, else `maestro`. A namespace
+   whose Linear workspace has its own reviewer identity (e.g. `personal`) sets
+   `SYMPHONY_MAESTRO_PROFILE` in its `project.env.defaults`; `--maestro` never
+   uses `project.env`'s `SYMPHONY_PROFILE`, which names the *main* instance.
+3. `SYMPHONY_PROFILE` set in `project.env`.
+4. `grandline`.
 
 ## Other exports
 
@@ -80,11 +98,13 @@ bin/symphony-run <project> --maestro
 ```
 
 `--maestro` is shorthand for `SYMPHONY_WORKFLOW_FILE=MAESTRO_WORKFLOW.md` +
-`SYMPHONY_PROFILE=maestro` (explicit caller env still wins). It additionally
+the reviewer profile (`SYMPHONY_MAESTRO_PROFILE`, default `maestro`; explicit
+caller env still wins). It additionally
 replaces `SYMPHONY_PORT` with `SYMPHONY_MAESTRO_PORT` (unset → no dashboard),
 so the reviewer instance never fights the main instance for its port. The
-`maestro` profile env's `LINEAR_API_KEY` is the Maestro OAuth identity;
-workspaces go under `SYMPHONY_MAESTRO_WORKSPACE_ROOT` (default
+`maestro` profile's client credentials or `LINEAR_API_KEY` provide its
+separate Linear identity. Workspaces go under
+`SYMPHONY_MAESTRO_WORKSPACE_ROOT` (default
 `$SYMPHONY_WORKSPACE_ROOT-maestro`). Both instances share
 `elixir/log/symphony.log` and the analytics NDJSON (locked appends;
 readers dedup by event_id).
@@ -101,6 +121,7 @@ set -a
 source workflows/agavemindlab/project.env.defaults
 source workflows/<project>/project.env
 profile="${SYMPHONY_PROFILE:-grandline}"
+unset LINEAR_API_KEY LINEAR_CLIENT_ID LINEAR_CLIENT_SECRET
 source "$HOME/.config/symphony/$profile.env"
 source workflows/<project>/project.env
 [ ! -f workflows/<project>/project.env.local ] || \
