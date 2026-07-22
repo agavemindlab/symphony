@@ -1189,26 +1189,10 @@ defmodule SymphonyElixir.Orchestrator do
   defp cleanup_startup_issue_marker(_issue), do: :ok
 
   defp startup_marker_cleanup_issue?(%Issue{} = issue) do
-    issue_has_label?(issue, RunningMarker.label_name())
+    RunningMarker.label_name() in Issue.label_names(issue)
   end
 
   defp startup_marker_cleanup_issue?(_issue), do: false
-
-  defp issue_has_label?(%Issue{} = issue, label) when is_binary(label) do
-    normalized_label = normalize_issue_label(label)
-
-    issue
-    |> Issue.label_names()
-    |> Enum.any?(&(normalize_issue_label(&1) == normalized_label))
-  end
-
-  defp normalize_issue_label(label) when is_binary(label) do
-    label
-    |> String.trim()
-    |> String.downcase()
-  end
-
-  defp normalize_issue_label(_label), do: ""
 
   defp revalidate_issue_for_dispatch(%Issue{id: issue_id}, issue_fetcher, terminal_states)
        when is_binary(issue_id) and is_function(issue_fetcher, 1) do

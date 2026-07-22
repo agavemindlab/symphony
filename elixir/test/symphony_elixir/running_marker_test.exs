@@ -27,6 +27,15 @@ defmodule SymphonyElixir.RunningMarkerTest do
     assert Agent.get(token_calls, & &1) == 1
   end
 
+  test "stopped leaves labels with trailing whitespace attached" do
+    write_workflow_file!(Workflow.workflow_file_path(), tracker_api_token: "api-key-probe")
+    other_label = %{"id" => "label-1", "name" => RunningMarker.label_name() <> " "}
+    state = start_state!(attached: [other_label])
+
+    assert :ok = RunningMarker.update(:stopped, issue(), request_fun: marker_request_fun(state))
+    assert Agent.get(state, & &1.attached) == [other_label]
+  end
+
   test "an expired OAuth token refreshes once and replays the marker request once" do
     oauth_only!()
     state = start_state!(team_label: %{"id" => "label-1", "name" => RunningMarker.label_name()}, first_401: true)

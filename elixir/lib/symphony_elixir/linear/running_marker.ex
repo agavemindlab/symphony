@@ -207,8 +207,6 @@ defmodule SymphonyElixir.Linear.RunningMarker do
     Client.graphql(query, variables, opts)
   end
 
-  defp marker_label?(%{"name" => name}) when is_binary(name), do: normalize(name) == normalize(label_name())
+  defp marker_label?(%{"name" => name}) when is_binary(name), do: name == label_name()
   defp marker_label?(_label), do: false
-
-  defp normalize(label), do: label |> String.trim() |> String.downcase()
 end

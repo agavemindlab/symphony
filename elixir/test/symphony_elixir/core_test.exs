@@ -2070,6 +2070,13 @@ defmodule SymphonyElixir.CoreTest do
         state: "Done",
         labels: ["symphony:running:default"]
       },
+      %Issue{
+        id: "near-label-1",
+        identifier: "MT-NEAR-LABEL",
+        title: "Near label",
+        state: "In Progress",
+        labels: ["symphony:running:default "]
+      },
       %Issue{id: "other-1", identifier: "MT-OTHER", title: "Other", state: "Backlog"}
     ])
 
