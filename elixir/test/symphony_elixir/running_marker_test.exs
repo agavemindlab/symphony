@@ -262,6 +262,40 @@ defmodule SymphonyElixir.RunningMarkerTest do
     assert_hook_failed("linear_running_marker")
   end
 
+  test "custom hooks clear Linear auth reintroduced by shell initialization" do
+    test_root = Path.join(System.tmp_dir!(), "running-marker-shell-auth-#{System.unique_integer([:positive])}")
+    fake_bin = Path.join(test_root, "bin")
+    marker = Path.join(test_root, "auth-env.txt")
+    previous_path = System.get_env("PATH")
+
+    File.mkdir_p!(fake_bin)
+
+    File.write!(Path.join(fake_bin, "sh"), """
+    #!/bin/sh
+    export LINEAR_API_KEY=reintroduced
+    export LINEAR_CLIENT_ID=reintroduced
+    export LINEAR_CLIENT_SECRET=reintroduced
+    export CUSTOM_LINEAR_SECRET=reintroduced
+    exec /bin/sh "$@"
+    """)
+
+    File.chmod!(Path.join(fake_bin, "sh"), 0o755)
+    System.put_env("PATH", fake_bin <> ":" <> (previous_path || ""))
+
+    on_exit(fn ->
+      restore_env("PATH", previous_path)
+      File.rm_rf(test_root)
+    end)
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_client_secret: "$CUSTOM_LINEAR_SECRET",
+      hook_issue_running: "printf '%s|%s|%s|%s' \"${LINEAR_API_KEY-unset}\" \"${LINEAR_CLIENT_ID-unset}\" \"${LINEAR_CLIENT_SECRET-unset}\" \"${CUSTOM_LINEAR_SECRET-unset}\" > #{marker}"
+    )
+
+    assert :ok = SymphonyElixir.IssueRunHook.run(:running, issue())
+    assert File.read!(marker) == "unset|unset|unset|unset"
+  end
+
   test "a native marker timeout still gives the custom hook its own timeout budget" do
     marker = Path.join(System.tmp_dir!(), "running-marker-timeout-#{System.unique_integer([:positive])}")
     on_exit(fn -> File.rm(marker) end)

@@ -1667,13 +1667,31 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
 
   test "local workspace hooks do not inherit Linear credentials" do
     test_root = Path.join(System.tmp_dir!(), "symphony-hook-auth-env-#{System.unique_integer([:positive])}")
+    fake_bin = Path.join(test_root, "bin")
+    previous_path = System.get_env("PATH")
 
     previous =
       Map.new(["LINEAR_API_KEY", "LINEAR_CLIENT_ID", "LINEAR_CLIENT_SECRET", "CUSTOM_LINEAR_SECRET"], &{&1, System.get_env(&1)})
 
-    on_exit(fn -> Enum.each(previous, fn {name, value} -> restore_env(name, value) end) end)
+    on_exit(fn ->
+      restore_env("PATH", previous_path)
+      Enum.each(previous, fn {name, value} -> restore_env(name, value) end)
+    end)
 
     try do
+      File.mkdir_p!(fake_bin)
+
+      File.write!(Path.join(fake_bin, "sh"), """
+      #!/bin/sh
+      export LINEAR_API_KEY=reintroduced
+      export LINEAR_CLIENT_ID=reintroduced
+      export LINEAR_CLIENT_SECRET=reintroduced
+      export CUSTOM_LINEAR_SECRET=reintroduced
+      exec /bin/sh "$@"
+      """)
+
+      File.chmod!(Path.join(fake_bin, "sh"), 0o755)
+      System.put_env("PATH", fake_bin <> ":" <> (previous_path || ""))
       Enum.each(Map.keys(previous), &System.put_env(&1, "#{&1}-probe"))
 
       write_workflow_file!(Workflow.workflow_file_path(),
@@ -2404,7 +2422,8 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       trace = File.read!(trace_file)
       assert trace =~ "-p 2200 worker-01 bash -lc"
       assert trace =~ "AUTH:unset|unset|unset|unset"
-      assert trace =~ "unset LINEAR_API_KEY LINEAR_CLIENT_ID LINEAR_CLIENT_SECRET CUSTOM_LINEAR_SECRET"
+      assert trace =~ "command unset LINEAR_API_KEY LINEAR_CLIENT_ID LINEAR_CLIENT_SECRET CUSTOM_LINEAR_SECRET || exit 126"
+      assert trace =~ "command unset SYMPHONY_PROJECT_DIR SYMPHONY_LINEAR_PROJECT_ID SYMPHONY_LINEAR_PROJECT_SLUG SYMPHONY_LINEAR_PROJECT_NAME || exit 126"
       assert trace =~ "__SYMPHONY_WORKSPACE__"
       assert trace =~ "~/.symphony-remote-workspaces/MT-SSH-WS"
       assert trace =~ "${workspace#~/}"

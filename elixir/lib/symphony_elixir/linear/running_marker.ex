@@ -119,10 +119,13 @@ defmodule SymphonyElixir.Linear.RunningMarker do
 
   defp next_issue_label_page(issue_id, team_id, %{"hasNextPage" => true, "endCursor" => cursor}, seen_cursors, opts)
        when is_binary(cursor) and cursor != "" do
-    case (cursor in seen_cursors && {:error, :issue_labels_query_failed}) ||
-           find_attached_label(issue_id, cursor, seen_cursors, opts) do
-      {:ok, _next_team_id, label} -> {:ok, team_id, label}
-      error -> error
+    if cursor in seen_cursors do
+      {:error, :issue_labels_query_failed}
+    else
+      case find_attached_label(issue_id, cursor, seen_cursors, opts) do
+        {:ok, _next_team_id, label} -> {:ok, team_id, label}
+        error -> error
+      end
     end
   end
 

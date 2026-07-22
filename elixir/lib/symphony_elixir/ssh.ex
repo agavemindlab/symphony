@@ -1,15 +1,21 @@
 defmodule SymphonyElixir.SSH do
   @moduledoc false
 
+  alias SymphonyElixir.{Config, Subprocess}
+
   @spec run(String.t(), String.t(), keyword()) :: {:ok, {String.t(), non_neg_integer()}} | {:error, term()}
   def run(host, command, opts \\ []) when is_binary(host) and is_binary(command) do
+    {auth_names, opts} = auth_names_and_opts(opts)
+
     with {:ok, executable} <- ssh_executable() do
-      {:ok, System.cmd(executable, ssh_args(host, command), opts)}
+      {:ok, Subprocess.cmd(executable, ssh_args(host, command, auth_names), opts, auth_names)}
     end
   end
 
   @spec start_port(String.t(), String.t(), keyword()) :: {:ok, port()} | {:error, term()}
   def start_port(host, command, opts \\ []) when is_binary(host) and is_binary(command) do
+    {auth_names, opts} = auth_names_and_opts(opts)
+
     with {:ok, executable} <- ssh_executable() do
       line_bytes = Keyword.get(opts, :line)
 
@@ -18,18 +24,29 @@ defmodule SymphonyElixir.SSH do
           :binary,
           :exit_status,
           :stderr_to_stdout,
-          args: Enum.map(ssh_args(host, command), &String.to_charlist/1)
+          args: Enum.map(ssh_args(host, command, auth_names), &String.to_charlist/1),
+          env: Keyword.get(opts, :env, [])
         ]
         |> maybe_put_line_option(line_bytes)
-        |> maybe_put_env(Keyword.get(opts, :env, []))
 
-      {:ok, Port.open({:spawn_executable, String.to_charlist(executable)}, port_opts)}
+      {:ok, Subprocess.open_port({:spawn_executable, String.to_charlist(executable)}, port_opts, auth_names)}
     end
   end
 
   @spec remote_shell_command(String.t()) :: String.t()
-  def remote_shell_command(command) when is_binary(command) do
-    "bash -lc " <> shell_escape(command)
+  def remote_shell_command(command) when is_binary(command), do: remote_shell_command(command, Config.linear_auth_env_names())
+
+  @spec remote_shell_command(String.t(), [String.t()]) :: String.t()
+  def remote_shell_command(command, auth_names) when is_binary(command) and is_list(auth_names) do
+    payload = Config.linear_auth_unset_command(auth_names) <> "\n" <> command
+    "bash -lc " <> shell_escape(payload)
+  end
+
+  defp auth_names_and_opts(opts) do
+    case Keyword.pop(opts, :linear_auth_env_names) do
+      {nil, opts} -> {Config.linear_auth_env_names(), opts}
+      {auth_names, opts} when is_list(auth_names) -> {auth_names, opts}
+    end
   end
 
   defp ssh_executable do
@@ -39,26 +56,18 @@ defmodule SymphonyElixir.SSH do
     end
   end
 
-  defp ssh_args(host, command) do
+  defp ssh_args(host, command, auth_names) do
     %{destination: destination, port: port} = parse_target(host)
 
     []
     |> maybe_put_config()
     |> Kernel.++(["-T"])
     |> maybe_put_port(port)
-    |> Kernel.++([destination, remote_shell_command(command)])
+    |> Kernel.++([destination, remote_shell_command(command, auth_names)])
   end
 
   defp maybe_put_line_option(port_opts, nil), do: port_opts
   defp maybe_put_line_option(port_opts, line_bytes), do: Keyword.put(port_opts, :line, line_bytes)
-
-  defp maybe_put_env(port_opts, []), do: port_opts
-
-  defp maybe_put_env(port_opts, env) when is_list(env) do
-    port_env = Enum.map(env, fn {name, nil} -> {String.to_charlist(name), false} end)
-
-    [{:env, port_env} | port_opts]
-  end
 
   defp maybe_put_config(args) do
     case System.get_env("SYMPHONY_SSH_CONFIG") do

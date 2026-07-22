@@ -3042,6 +3042,120 @@ defmodule SymphonyElixir.CoreTest do
     end
   end
 
+  test "agent runner remote stop-marker commands do not expose Linear credentials" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-agent-runner-marker-auth-#{System.unique_integer([:positive])}"
+      )
+
+    auth_names = [
+      "LINEAR_API_KEY",
+      "LINEAR_CLIENT_ID",
+      "LINEAR_CLIENT_SECRET",
+      "CUSTOM_LINEAR_API_KEY",
+      "CUSTOM_LINEAR_CLIENT_ID",
+      "CUSTOM_LINEAR_CLIENT_SECRET"
+    ]
+
+    previous_path = System.get_env("PATH")
+    previous_trace = System.get_env("SYMP_TEST_SSH_TRACE")
+    previous = Map.new(auth_names, &{&1, System.get_env(&1)})
+
+    on_exit(fn ->
+      restore_env("PATH", previous_path)
+      restore_env("SYMP_TEST_SSH_TRACE", previous_trace)
+      Enum.each(previous, fn {name, value} -> restore_env(name, value) end)
+    end)
+
+    try do
+      trace_file = Path.join(test_root, "ssh.trace")
+      fake_ssh = Path.join(test_root, "ssh")
+
+      File.mkdir_p!(test_root)
+      System.put_env("SYMP_TEST_SSH_TRACE", trace_file)
+      System.put_env("PATH", test_root <> ":" <> (previous_path || ""))
+      Enum.each(auth_names, &System.put_env(&1, "parent-#{&1}"))
+
+      File.write!(fake_ssh, """
+      #!/bin/sh
+      trace_file="${SYMP_TEST_SSH_TRACE:-/tmp/symphony-fake-ssh.trace}"
+      case "$*" in
+        *"stop-after-turn"*)
+          printf 'MARKER_AUTH:%s|%s|%s|%s|%s|%s\n' \
+            "${LINEAR_API_KEY-unset}" \
+            "${LINEAR_CLIENT_ID-unset}" \
+            "${LINEAR_CLIENT_SECRET-unset}" \
+            "${CUSTOM_LINEAR_API_KEY-unset}" \
+            "${CUSTOM_LINEAR_CLIENT_ID-unset}" \
+            "${CUSTOM_LINEAR_CLIENT_SECRET-unset}" >> "$trace_file"
+          ;;
+      esac
+
+      case "$*" in
+        *"__SYMPHONY_WORKSPACE__"*)
+          printf '%s\t%s\t%s\n' '__SYMPHONY_WORKSPACE__' '1' '/remote/workspaces/MT-MARKER-AUTH'
+          exit 0
+          ;;
+        *"rm -f "*"stop-after-turn"*)
+          exit 0
+          ;;
+        *"fake-remote-codex app-server"*)
+          count=0
+          while IFS= read -r line; do
+            count=$((count + 1))
+            case "$count" in
+              1) printf '%s\n' '{"id":1,"result":{}}' ;;
+              2) ;;
+              3) printf '%s\n' '{"id":2,"result":{"thread":{"id":"thread-marker-auth"}}}' ;;
+              4)
+                printf '%s\n' '{"id":3,"result":{"turn":{"id":"turn-marker-auth"}}}'
+                printf '%s\n' '{"method":"turn/completed"}'
+                ;;
+            esac
+          done
+          ;;
+        *"test -e "*"stop-after-turn"*)
+          exit 0
+          ;;
+        *)
+          exit 0
+          ;;
+      esac
+      """)
+
+      File.chmod!(fake_ssh, 0o755)
+
+      write_workflow_file!(Workflow.workflow_file_path(),
+        workspace_root: "/remote/workspaces",
+        tracker_api_token: "$CUSTOM_LINEAR_API_KEY",
+        tracker_client_id: "$CUSTOM_LINEAR_CLIENT_ID",
+        tracker_client_secret: "$CUSTOM_LINEAR_CLIENT_SECRET",
+        codex_command: "fake-remote-codex app-server"
+      )
+
+      issue = %Issue{
+        id: "issue-marker-auth",
+        identifier: "MT-MARKER-AUTH",
+        title: "Remote marker auth boundary",
+        state: "In Progress"
+      }
+
+      assert :ok = AgentRunner.run(issue, nil, worker_host: "worker")
+
+      auth_lines =
+        trace_file
+        |> File.read!()
+        |> String.split("\n", trim: true)
+        |> Enum.filter(&String.starts_with?(&1, "MARKER_AUTH:"))
+
+      assert length(auth_lines) == 2
+      assert Enum.all?(auth_lines, &(&1 == "MARKER_AUTH:unset|unset|unset|unset|unset|unset"))
+    after
+      File.rm_rf(test_root)
+    end
+  end
+
   test "agent runner surfaces ssh startup failures instead of silently hopping hosts" do
     test_root =
       Path.join(

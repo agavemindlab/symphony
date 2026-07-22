@@ -5,7 +5,7 @@ defmodule SymphonyElixir.IssueRunHook do
 
   require Logger
 
-  alias SymphonyElixir.{Analytics, Config, Workflow}
+  alias SymphonyElixir.{Analytics, Config, Subprocess, Workflow}
   alias SymphonyElixir.Linear.{Issue, RunningMarker}
 
   @type event :: :running | :stopped
@@ -23,9 +23,11 @@ defmodule SymphonyElixir.IssueRunHook do
 
   @spec run(event(), Issue.t(), keyword()) :: :ok
   def run(event, %Issue{} = issue, opts) when event in [:running, :stopped] do
-    hooks = Config.settings!().hooks
+    settings = Config.settings!()
+    hooks = settings.hooks
+    auth_names = Config.linear_auth_env_names(settings)
     run_native_marker(hooks.linear_running_marker == true, event, issue, opts, hooks.timeout_ms)
-    run_custom_hook(hook_command(event, hooks), event, issue, opts, hooks.timeout_ms)
+    run_custom_hook(hook_command(event, hooks), event, issue, opts, hooks.timeout_ms, auth_names)
     :ok
   end
 
@@ -64,13 +66,13 @@ defmodule SymphonyElixir.IssueRunHook do
     _kind, _reason -> {:error, :task_exit}
   end
 
-  defp run_custom_hook(command, event, issue, opts, timeout_ms) when is_binary(command) do
-    if configured_command?(command), do: run_command(command, event, issue, opts, timeout_ms)
+  defp run_custom_hook(command, event, issue, opts, timeout_ms, auth_names) when is_binary(command) do
+    if configured_command?(command), do: run_command(command, event, issue, opts, timeout_ms, auth_names)
   end
 
-  defp run_custom_hook(_command, _event, _issue, _opts, _timeout_ms), do: :ok
+  defp run_custom_hook(_command, _event, _issue, _opts, _timeout_ms, _auth_names), do: :ok
 
-  defp run_command(command, event, issue, opts, timeout_ms) do
+  defp run_command(command, event, issue, opts, timeout_ms, auth_names) do
     hook_name = hook_name(event)
     action = "custom"
     workflow_dir = Path.dirname(Workflow.workflow_file_path())
@@ -80,10 +82,13 @@ defmodule SymphonyElixir.IssueRunHook do
 
     task =
       Task.async(fn ->
-        System.cmd("sh", ["-lc", command],
-          cd: workflow_dir,
-          env: env,
-          stderr_to_stdout: true
+        payload = Config.linear_auth_unset_command(auth_names) <> "\n" <> command
+
+        Subprocess.cmd(
+          "sh",
+          ["-lc", payload],
+          [cd: workflow_dir, env: env, stderr_to_stdout: true],
+          auth_names
         )
       end)
 
@@ -140,7 +145,7 @@ defmodule SymphonyElixir.IssueRunHook do
       {"SYMPHONY_ISSUE_STATE", env_value(issue.state)},
       {"SYMPHONY_ISSUE_URL", env_value(issue.url)},
       {"SYMPHONY_WORKER_HOST", env_value(Keyword.get(opts, :worker_host))}
-    ] ++ Enum.map(Config.linear_auth_env_names(), &{&1, nil})
+    ]
   end
 
   defp env_value(nil), do: ""
