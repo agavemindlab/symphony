@@ -2090,7 +2090,7 @@ defmodule SymphonyElixir.CoreTest do
            ]
   end
 
-  test "orchestrator startup cleanup prints progress" do
+  test "orchestrator startup cleanup runs concurrently and waits for every workspace" do
     previous_running_label = System.get_env("SYMPHONY_RUNNING_LABEL")
     System.put_env("SYMPHONY_RUNNING_LABEL", "symphony:running:default")
     on_exit(fn -> restore_env("SYMPHONY_RUNNING_LABEL", previous_running_label) end)
@@ -2102,54 +2102,113 @@ defmodule SymphonyElixir.CoreTest do
     workspace_root =
       Path.join(
         System.tmp_dir!(),
-        "symphony-elixir-startup-cleanup-progress-#{System.unique_integer([:positive])}"
+        "symphony-elixir-startup-cleanup-concurrency-#{System.unique_integer([:positive])}"
       )
 
     on_exit(fn -> File.rm_rf(workspace_root) end)
-    File.mkdir_p!(Path.join(workspace_root, "MT-DONE"))
+    marker_root = Path.join(workspace_root, "markers")
+    release = Path.join(marker_root, "release")
+
+    terminal_issues =
+      Enum.map(1..5, fn index ->
+        %Issue{
+          id: "done-#{index}",
+          identifier: "MT-DONE-#{index}",
+          title: "Done #{index}",
+          state: "Done",
+          labels: if(index == 1, do: ["symphony:running:default"], else: [])
+        }
+      end)
+
+    Enum.each(terminal_issues, &File.mkdir_p!(Path.join(workspace_root, &1.identifier)))
+    File.mkdir_p!(Path.join(workspace_root, "MT-TODO"))
 
     write_workflow_file!(Workflow.workflow_file_path(),
       tracker_kind: "memory",
       workspace_root: workspace_root,
       tracker_active_states: ["Todo"],
       tracker_terminal_states: ["Done"],
-      hook_issue_stopped: "true"
+      hook_issue_stopped: "true",
+      hook_before_remove: """
+      issue_identifier=$(basename "$PWD")
+      mkdir -p "#{marker_root}"
+      touch "#{marker_root}/started-$issue_identifier"
+      while [ ! -f "#{release}" ]; do sleep 0.05; done
+      touch "#{marker_root}/finished-$issue_identifier"
+      if [ "$issue_identifier" = "MT-DONE-2" ]; then exit 17; fi
+      """
     )
 
-    Application.put_env(:symphony_elixir, :memory_tracker_issues, [
-      %Issue{
-        id: "done-1",
-        identifier: "MT-DONE",
-        title: "Done",
-        state: "Done",
-        labels: ["symphony:running:default"]
-      },
-      %Issue{
-        id: "todo-1",
-        identifier: "MT-TODO",
-        title: "Todo",
-        state: "Todo",
-        labels: ["symphony:running:default"]
-      },
-      %Issue{id: "old-1", identifier: "MT-OLD", title: "Old", state: "Done"}
-    ])
+    Application.put_env(
+      :symphony_elixir,
+      :memory_tracker_issues,
+      terminal_issues ++
+        [
+          %Issue{id: "missing", identifier: "MT-MISSING", title: "Missing", state: "Done"},
+          %Issue{
+            id: "todo-1",
+            identifier: "MT-TODO",
+            title: "Todo",
+            state: "Todo",
+            labels: ["symphony:running:default"]
+          }
+        ]
+    )
 
-    orchestrator_name = Module.concat(__MODULE__, :StartupCleanupProgressOrchestrator)
+    orchestrator_name = Module.concat(__MODULE__, :StartupCleanupConcurrencyOrchestrator)
 
-    output =
-      ExUnit.CaptureIO.capture_io(:stderr, fn ->
-        {:ok, pid} = Orchestrator.start_link(name: orchestrator_name)
+    startup_task =
+      Task.async(fn ->
+        ExUnit.CaptureIO.capture_io(:stderr, fn ->
+          {:ok, pid} = Orchestrator.start_link(name: orchestrator_name)
 
-        if Process.alive?(pid) do
-          Process.exit(pid, :normal)
-        end
+          if Process.alive?(pid) do
+            GenServer.stop(pid)
+          end
+        end)
       end)
 
+    on_exit(fn ->
+      File.touch(release)
+
+      if pid = Process.whereis(orchestrator_name) do
+        GenServer.stop(pid)
+      end
+    end)
+
+    assert_eventually(
+      fn ->
+        case File.ls(marker_root) do
+          {:ok, files} -> Enum.count(files, &String.starts_with?(&1, "started-")) == 4
+          {:error, _reason} -> false
+        end
+      end,
+      250
+    )
+
+    refute File.exists?(Path.join(marker_root, "started-MT-DONE-5"))
+    assert Task.yield(startup_task, 0) == nil
+
+    Process.sleep(5_100)
+    assert Task.yield(startup_task, 0) == nil
+
+    File.touch!(release)
+    assert {:ok, output} = Task.yield(startup_task, 5_000)
+
+    Enum.each(terminal_issues, fn issue ->
+      assert File.exists?(Path.join(marker_root, "started-#{issue.identifier}"))
+      assert File.exists?(Path.join(marker_root, "finished-#{issue.identifier}"))
+      refute File.exists?(Path.join(workspace_root, issue.identifier))
+      assert output =~ ~r/startup cleanup: terminal workspaces \d\/5 #{issue.identifier}/
+    end)
+
     assert output =~ "startup cleanup: terminal workspaces"
-    assert output =~ "startup cleanup: terminal workspaces 1/1 MT-DONE"
-    assert output =~ "startup cleanup: issue markers 1/2 MT-DONE"
+    assert output =~ "startup cleanup: issue markers 1/2 MT-DONE-1"
     assert output =~ "startup cleanup: issue markers 2/2 MT-TODO"
     assert output =~ "startup cleanup: done"
+    refute File.exists?(Path.join(marker_root, "started-MT-MISSING"))
+    refute File.exists?(Path.join(marker_root, "started-MT-TODO"))
+    assert File.dir?(Path.join(workspace_root, "MT-TODO"))
   end
 
   test "normal worker exit schedules active-state continuation retry" do
