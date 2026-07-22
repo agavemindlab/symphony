@@ -207,6 +207,7 @@ defmodule SymphonyElixir.AppServerTest do
       previous_linear_api_key = System.get_env("LINEAR_API_KEY")
       previous_linear_client_id = System.get_env("LINEAR_CLIENT_ID")
       previous_linear_client_secret = System.get_env("LINEAR_CLIENT_SECRET")
+      previous_custom_linear_secret = System.get_env("CUSTOM_LINEAR_SECRET")
 
       on_exit(fn ->
         if is_binary(previous_trace) do
@@ -221,6 +222,7 @@ defmodule SymphonyElixir.AppServerTest do
         restore_env("LINEAR_API_KEY", previous_linear_api_key)
         restore_env("LINEAR_CLIENT_ID", previous_linear_client_id)
         restore_env("LINEAR_CLIENT_SECRET", previous_linear_client_secret)
+        restore_env("CUSTOM_LINEAR_SECRET", previous_custom_linear_secret)
       end)
 
       File.mkdir_p!(workflow_dir)
@@ -236,10 +238,11 @@ defmodule SymphonyElixir.AppServerTest do
       LINEAR_API_KEY="child-api-key-probe"
       LINEAR_CLIENT_ID="child-client-id-probe"
       LINEAR_CLIENT_SECRET="child-client-secret-probe"
+      CUSTOM_LINEAR_SECRET="child-custom-secret-probe"
       """)
 
       File.write!(Path.join(workflow_dir, "project-for-linear-project.sh"), """
-      if [ -n "${LINEAR_API_KEY:-}${LINEAR_CLIENT_ID:-}${LINEAR_CLIENT_SECRET:-}" ]; then
+      if [ -n "${LINEAR_API_KEY:-}${LINEAR_CLIENT_ID:-}${LINEAR_CLIENT_SECRET:-}${CUSTOM_LINEAR_SECRET:-}" ]; then
         echo "Linear auth reached project routing hook" >&2
         exit 67
       fi
@@ -265,6 +268,7 @@ defmodule SymphonyElixir.AppServerTest do
         printf 'LINEAR_API_KEY=%s\\n' "${LINEAR_API_KEY-unset}"
         printf 'LINEAR_CLIENT_ID=%s\\n' "${LINEAR_CLIENT_ID-unset}"
         printf 'LINEAR_CLIENT_SECRET=%s\\n' "${LINEAR_CLIENT_SECRET-unset}"
+        printf 'CUSTOM_LINEAR_SECRET=%s\\n' "${CUSTOM_LINEAR_SECRET-unset}"
       } > "$trace_file"
 
       count=0
@@ -288,10 +292,12 @@ defmodule SymphonyElixir.AppServerTest do
       System.put_env("LINEAR_API_KEY", "parent-api-key-probe")
       System.put_env("LINEAR_CLIENT_ID", "parent-client-id-probe")
       System.put_env("LINEAR_CLIENT_SECRET", "parent-client-secret-probe")
+      System.put_env("CUSTOM_LINEAR_SECRET", "parent-custom-secret-probe")
       Workflow.set_workflow_file_path(workflow_file)
 
       write_workflow_file!(Workflow.workflow_file_path(),
         workspace_root: workspace_root,
+        tracker_client_secret: "$CUSTOM_LINEAR_SECRET",
         codex_command: "#{codex_binary} app-server"
       )
 
@@ -314,6 +320,7 @@ defmodule SymphonyElixir.AppServerTest do
                LINEAR_API_KEY=unset
                LINEAR_CLIENT_ID=unset
                LINEAR_CLIENT_SECRET=unset
+               CUSTOM_LINEAR_SECRET=unset
                """
     after
       Workflow.set_workflow_file_path(original_workflow_path)
@@ -1731,10 +1738,16 @@ defmodule SymphonyElixir.AppServerTest do
 
     previous_path = System.get_env("PATH")
     previous_trace = System.get_env("SYMP_TEST_SSH_TRACE")
+    previous_linear_api_key = System.get_env("LINEAR_API_KEY")
+    previous_linear_client_secret = System.get_env("LINEAR_CLIENT_SECRET")
+    previous_custom_linear_secret = System.get_env("CUSTOM_LINEAR_SECRET")
 
     on_exit(fn ->
       restore_env("PATH", previous_path)
       restore_env("SYMP_TEST_SSH_TRACE", previous_trace)
+      restore_env("LINEAR_API_KEY", previous_linear_api_key)
+      restore_env("LINEAR_CLIENT_SECRET", previous_linear_client_secret)
+      restore_env("CUSTOM_LINEAR_SECRET", previous_custom_linear_secret)
     end)
 
     try do
@@ -1744,6 +1757,9 @@ defmodule SymphonyElixir.AppServerTest do
 
       File.mkdir_p!(test_root)
       System.put_env("SYMP_TEST_SSH_TRACE", trace_file)
+      System.put_env("LINEAR_API_KEY", "remote-api-key-probe")
+      System.put_env("LINEAR_CLIENT_SECRET", "remote-client-secret-probe")
+      System.put_env("CUSTOM_LINEAR_SECRET", "remote-custom-secret-probe")
       System.put_env("PATH", test_root <> ":" <> (previous_path || ""))
 
       File.write!(fake_ssh, """
@@ -1751,6 +1767,7 @@ defmodule SymphonyElixir.AppServerTest do
       trace_file="${SYMP_TEST_SSH_TRACE:-/tmp/symphony-fake-ssh.trace}"
       count=0
       printf 'ARGV:%s\\n' "$*" >> "$trace_file"
+      printf 'AUTH:%s|%s|%s\\n' "${LINEAR_API_KEY-unset}" "${LINEAR_CLIENT_SECRET-unset}" "${CUSTOM_LINEAR_SECRET-unset}" >> "$trace_file"
 
       while IFS= read -r line; do
         count=$((count + 1))
@@ -1781,6 +1798,7 @@ defmodule SymphonyElixir.AppServerTest do
 
       write_workflow_file!(Workflow.workflow_file_path(),
         workspace_root: "/remote/workspaces",
+        tracker_client_secret: "$CUSTOM_LINEAR_SECRET",
         codex_command: "fake-remote-codex app-server"
       )
 
@@ -1807,6 +1825,7 @@ defmodule SymphonyElixir.AppServerTest do
 
       assert argv_line = Enum.find(lines, &String.starts_with?(&1, "ARGV:"))
       assert argv_line =~ "-T -p 2200 worker-01 bash -lc"
+      assert trace =~ "AUTH:unset|unset|unset"
       assert trace =~ "cd "
       assert trace =~ remote_workspace
       assert trace =~ "exec "

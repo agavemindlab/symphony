@@ -1665,6 +1665,30 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     end
   end
 
+  test "local workspace hooks do not inherit Linear credentials" do
+    test_root = Path.join(System.tmp_dir!(), "symphony-hook-auth-env-#{System.unique_integer([:positive])}")
+
+    previous =
+      Map.new(["LINEAR_API_KEY", "LINEAR_CLIENT_ID", "LINEAR_CLIENT_SECRET", "CUSTOM_LINEAR_SECRET"], &{&1, System.get_env(&1)})
+
+    on_exit(fn -> Enum.each(previous, fn {name, value} -> restore_env(name, value) end) end)
+
+    try do
+      Enum.each(Map.keys(previous), &System.put_env(&1, "#{&1}-probe"))
+
+      write_workflow_file!(Workflow.workflow_file_path(),
+        workspace_root: test_root,
+        tracker_client_secret: "$CUSTOM_LINEAR_SECRET",
+        hook_after_create: "printf '%s|%s|%s|%s' \"${LINEAR_API_KEY-unset}\" \"${LINEAR_CLIENT_ID-unset}\" \"${LINEAR_CLIENT_SECRET-unset}\" \"${CUSTOM_LINEAR_SECRET-unset}\" > auth-env.txt"
+      )
+
+      assert {:ok, workspace} = Workspace.create_for_issue("MT-NO-AUTH")
+      assert File.read!(Path.join(workspace, "auth-env.txt")) == "unset|unset|unset|unset"
+    after
+      File.rm_rf(test_root)
+    end
+  end
+
   test "startup terminal workspace cleanup preserves Linear project environment" do
     test_root =
       Path.join(
@@ -1830,46 +1854,6 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       assert is_binary(name), "#{skill_path} has non-string name metadata"
       assert is_binary(description), "#{skill_path} has non-string description metadata"
     end)
-  end
-
-  test "running marker script chooses a system CA bundle when Python has no default cafile" do
-    ca_bundle = first_existing_ca_bundle!()
-    test_root = Path.join(System.tmp_dir!(), "symphony-marker-ca-#{System.unique_integer([:positive])}")
-    fake_bin_dir = Path.join(test_root, "bin")
-    env_capture = Path.join(test_root, "env.txt")
-    script_path = Path.expand("../workflows/agavemindlab/mark-running-issue.sh", File.cwd!())
-    previous_path = System.get_env("PATH")
-
-    try do
-      File.mkdir_p!(fake_bin_dir)
-
-      File.write!(Path.join(fake_bin_dir, "python3"), """
-      #!/usr/bin/env sh
-      printf 'SSL_CERT_FILE=%s\\n' "${SSL_CERT_FILE:-}" > #{env_capture}
-      printf 'REQUESTS_CA_BUNDLE=%s\\n' "${REQUESTS_CA_BUNDLE:-}" >> #{env_capture}
-      printf 'CURL_CA_BUNDLE=%s\\n' "${CURL_CA_BUNDLE:-}" >> #{env_capture}
-      """)
-
-      File.chmod!(Path.join(fake_bin_dir, "python3"), 0o755)
-
-      assert {"", 0} =
-               System.cmd("sh", [script_path, "running"],
-                 env: [
-                   {"PATH", fake_bin_dir <> ":" <> (previous_path || "")},
-                   {"LINEAR_API_KEY", "test-token"},
-                   {"SYMPHONY_ISSUE_ID", "issue-1"},
-                   {"SYMPHONY_HOOK_EVENT", "running"},
-                   {"SSL_CERT_FILE", nil},
-                   {"REQUESTS_CA_BUNDLE", nil},
-                   {"CURL_CA_BUNDLE", nil}
-                 ],
-                 stderr_to_stdout: true
-               )
-
-      assert File.read!(env_capture) =~ "SSL_CERT_FILE=#{ca_bundle}\n"
-    after
-      File.rm_rf(test_root)
-    end
   end
 
   test "canonical workflow surfaces setup failures before installing shared skills" do
@@ -2348,10 +2332,18 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
 
     previous_path = System.get_env("PATH")
     previous_trace = System.get_env("SYMP_TEST_SSH_TRACE")
+    previous_linear_api_key = System.get_env("LINEAR_API_KEY")
+    previous_linear_client_id = System.get_env("LINEAR_CLIENT_ID")
+    previous_linear_client_secret = System.get_env("LINEAR_CLIENT_SECRET")
+    previous_custom_linear_secret = System.get_env("CUSTOM_LINEAR_SECRET")
 
     on_exit(fn ->
       restore_env("PATH", previous_path)
       restore_env("SYMP_TEST_SSH_TRACE", previous_trace)
+      restore_env("LINEAR_API_KEY", previous_linear_api_key)
+      restore_env("LINEAR_CLIENT_ID", previous_linear_client_id)
+      restore_env("LINEAR_CLIENT_SECRET", previous_linear_client_secret)
+      restore_env("CUSTOM_LINEAR_SECRET", previous_custom_linear_secret)
     end)
 
     try do
@@ -2362,12 +2354,17 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
 
       File.mkdir_p!(test_root)
       System.put_env("SYMP_TEST_SSH_TRACE", trace_file)
+      System.put_env("LINEAR_API_KEY", "remote-api-key-probe")
+      System.put_env("LINEAR_CLIENT_ID", "remote-client-id-probe")
+      System.put_env("LINEAR_CLIENT_SECRET", "remote-client-secret-probe")
+      System.put_env("CUSTOM_LINEAR_SECRET", "remote-custom-secret-probe")
       System.put_env("PATH", test_root <> ":" <> (previous_path || ""))
 
       File.write!(fake_ssh, """
       #!/bin/sh
       trace_file="${SYMP_TEST_SSH_TRACE:-/tmp/symphony-fake-ssh.trace}"
       printf 'ARGV:%s\\n' "$*" >> "$trace_file"
+      printf 'AUTH:%s|%s|%s|%s\\n' "${LINEAR_API_KEY-unset}" "${LINEAR_CLIENT_ID-unset}" "${LINEAR_CLIENT_SECRET-unset}" "${CUSTOM_LINEAR_SECRET-unset}" >> "$trace_file"
 
       case "$*" in
         *"__SYMPHONY_WORKSPACE__"*)
@@ -2382,6 +2379,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
 
       write_workflow_file!(Workflow.workflow_file_path(),
         workspace_root: workspace_root,
+        tracker_client_secret: "$CUSTOM_LINEAR_SECRET",
         worker_ssh_hosts: ["worker-01:2200"],
         hook_before_run: "echo before-run",
         hook_after_run: "echo after-run",
@@ -2405,6 +2403,8 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
 
       trace = File.read!(trace_file)
       assert trace =~ "-p 2200 worker-01 bash -lc"
+      assert trace =~ "AUTH:unset|unset|unset|unset"
+      assert trace =~ "unset LINEAR_API_KEY LINEAR_CLIENT_ID LINEAR_CLIENT_SECRET CUSTOM_LINEAR_SECRET"
       assert trace =~ "__SYMPHONY_WORKSPACE__"
       assert trace =~ "~/.symphony-remote-workspaces/MT-SSH-WS"
       assert trace =~ "${workspace#~/}"
@@ -2489,18 +2489,6 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     ["---" | lines] = File.read!(path) |> String.split(["\r\n", "\n", "\r"], trim: false)
     {front_matter_lines, _rest} = Enum.split_while(lines, &(&1 != "---"))
     YamlElixir.read_from_string(Enum.join(front_matter_lines, "\n"))
-  end
-
-  defp first_existing_ca_bundle! do
-    [
-      "/etc/ssl/cert.pem",
-      "/etc/ssl/certs/ca-certificates.crt",
-      "/etc/pki/tls/certs/ca-bundle.crt",
-      "/etc/ssl/ca-bundle.pem",
-      "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem"
-    ]
-    |> Enum.find(&File.regular?/1) ||
-      flunk("test host has no known system CA bundle path")
   end
 
   defp create_clone_source_repo!(path) do

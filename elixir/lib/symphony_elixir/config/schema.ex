@@ -80,6 +80,7 @@ defmodule SymphonyElixir.Config.Schema do
       field(:api_key, :string)
       field(:client_id, :string)
       field(:client_secret, :string)
+      field(:auth_env_names, {:array, :string}, virtual: true, default: [])
       field(:project_slug, :string)
       field(:project_slugs, StringOrStringList, default: [])
       field(:project_name, :string)
@@ -265,6 +266,7 @@ defmodule SymphonyElixir.Config.Schema do
       field(:before_run, :string)
       field(:after_run, :string)
       field(:before_remove, :string)
+      field(:linear_running_marker, :boolean, default: false)
       field(:issue_running, :string)
       field(:issue_stopped, :string)
       field(:timeout_ms, :integer, default: 60_000)
@@ -275,7 +277,16 @@ defmodule SymphonyElixir.Config.Schema do
       schema
       |> cast(
         attrs,
-        [:after_create, :before_run, :after_run, :before_remove, :issue_running, :issue_stopped, :timeout_ms],
+        [
+          :after_create,
+          :before_run,
+          :after_run,
+          :before_remove,
+          :linear_running_marker,
+          :issue_running,
+          :issue_stopped,
+          :timeout_ms
+        ],
         empty_values: []
       )
       |> validate_number(:timeout_ms, greater_than: 0)
@@ -471,7 +482,8 @@ defmodule SymphonyElixir.Config.Schema do
   defp finalize_settings(settings) do
     tracker = %{
       settings.tracker
-      | api_key: resolve_secret_setting(settings.tracker.api_key, System.get_env("LINEAR_API_KEY")),
+      | auth_env_names: tracker_auth_env_names(settings.tracker),
+        api_key: resolve_secret_setting(settings.tracker.api_key, System.get_env("LINEAR_API_KEY")),
         client_id: resolve_secret_setting(settings.tracker.client_id, System.get_env("LINEAR_CLIENT_ID")),
         client_secret: resolve_secret_setting(settings.tracker.client_secret, System.get_env("LINEAR_CLIENT_SECRET")),
         project_slug: settings.tracker.project_slug |> resolve_secret_setting(nil) |> normalize_project_slug(),
@@ -670,6 +682,17 @@ defmodule SymphonyElixir.Config.Schema do
   end
 
   defp env_reference_name(_value), do: :error
+
+  defp tracker_auth_env_names(tracker) do
+    [tracker.api_key, tracker.client_id, tracker.client_secret]
+    |> Enum.flat_map(fn value ->
+      case env_reference_name(value) do
+        {:ok, name} -> [name]
+        :error -> []
+      end
+    end)
+    |> Enum.uniq()
+  end
 
   defp resolve_env_token(env_name) do
     case System.get_env(env_name) do

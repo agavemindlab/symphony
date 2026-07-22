@@ -18,7 +18,7 @@ defmodule SymphonyElixir.Orchestrator do
     Workspace
   }
 
-  alias SymphonyElixir.Linear.Issue
+  alias SymphonyElixir.Linear.{Issue, RunningMarker}
 
   @continuation_retry_delay_ms 1_000
   @failure_retry_base_ms 10_000
@@ -1189,25 +1189,10 @@ defmodule SymphonyElixir.Orchestrator do
   defp cleanup_startup_issue_marker(_issue), do: :ok
 
   defp startup_marker_cleanup_issue?(%Issue{} = issue) do
-    issue_has_label?(issue, startup_running_marker_label())
+    issue_has_label?(issue, RunningMarker.label_name())
   end
 
   defp startup_marker_cleanup_issue?(_issue), do: false
-
-  defp startup_running_marker_label do
-    case System.get_env("SYMPHONY_RUNNING_LABEL") do
-      label when is_binary(label) and label != "" ->
-        label
-
-      _ ->
-        agent_id =
-          System.get_env("SYMPHONY_AGENT_ID") ||
-            System.get_env("SYMPHONY_PROFILE") ||
-            "default"
-
-        "symphony:running:#{agent_id}"
-    end
-  end
 
   defp issue_has_label?(%Issue{} = issue, label) when is_binary(label) do
     normalized_label = normalize_issue_label(label)

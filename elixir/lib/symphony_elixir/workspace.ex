@@ -604,7 +604,7 @@ defmodule SymphonyElixir.Workspace do
        when is_binary(worker_host) and is_binary(script) and is_integer(timeout_ms) and timeout_ms > 0 do
     task =
       Task.async(fn ->
-        SSH.run(worker_host, script, stderr_to_stdout: true)
+        SSH.run(worker_host, script, stderr_to_stdout: true, env: cleared_linear_auth_env())
       end)
 
     case Task.yield(task, timeout_ms) do
@@ -675,6 +675,7 @@ defmodule SymphonyElixir.Workspace do
       "SYMPHONY_LINEAR_PROJECT_NAME"
     ]
     |> Enum.map(&{&1, nil})
+    |> Kernel.++(cleared_linear_auth_env())
   end
 
   defp remote_hook_env_exports(issue_context) do
@@ -689,10 +690,19 @@ defmodule SymphonyElixir.Workspace do
         "#{name}=#{shell_escape(value)}\nexport #{name}"
       end)
 
+    unset_names =
+      (Config.linear_auth_env_names() ++
+         ["SYMPHONY_PROJECT_DIR", "SYMPHONY_LINEAR_PROJECT_ID", "SYMPHONY_LINEAR_PROJECT_SLUG", "SYMPHONY_LINEAR_PROJECT_NAME"])
+      |> Enum.join(" ")
+
     """
-    unset SYMPHONY_PROJECT_DIR SYMPHONY_LINEAR_PROJECT_ID SYMPHONY_LINEAR_PROJECT_SLUG SYMPHONY_LINEAR_PROJECT_NAME
+    unset #{unset_names}
     #{exports}
     """
+  end
+
+  defp cleared_linear_auth_env do
+    Enum.map(Config.linear_auth_env_names(), &{&1, nil})
   end
 
   defp project_hook_env(%{id: id, slug_id: slug_id, name: name}) do

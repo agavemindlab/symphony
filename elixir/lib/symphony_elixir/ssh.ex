@@ -21,6 +21,7 @@ defmodule SymphonyElixir.SSH do
           args: Enum.map(ssh_args(host, command), &String.to_charlist/1)
         ]
         |> maybe_put_line_option(line_bytes)
+        |> maybe_put_env(Keyword.get(opts, :env, []))
 
       {:ok, Port.open({:spawn_executable, String.to_charlist(executable)}, port_opts)}
     end
@@ -50,6 +51,14 @@ defmodule SymphonyElixir.SSH do
 
   defp maybe_put_line_option(port_opts, nil), do: port_opts
   defp maybe_put_line_option(port_opts, line_bytes), do: Keyword.put(port_opts, :line, line_bytes)
+
+  defp maybe_put_env(port_opts, []), do: port_opts
+
+  defp maybe_put_env(port_opts, env) when is_list(env) do
+    port_env = Enum.map(env, fn {name, nil} -> {String.to_charlist(name), false} end)
+
+    [{:env, port_env} | port_opts]
+  end
 
   defp maybe_put_config(args) do
     case System.get_env("SYMPHONY_SSH_CONFIG") do

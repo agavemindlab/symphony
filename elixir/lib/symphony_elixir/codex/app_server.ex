@@ -214,15 +214,21 @@ defmodule SymphonyElixir.Codex.AppServer do
 
   defp start_port(workspace, worker_host, issue) when is_binary(worker_host) do
     remote_command = remote_launch_command(workspace, issue)
-    SSH.start_port(worker_host, remote_command, line: @port_line_bytes)
+
+    SSH.start_port(worker_host, remote_command,
+      line: @port_line_bytes,
+      env: Enum.map(Config.linear_auth_env_names(), &{&1, nil})
+    )
   end
 
   defp launch_command(issue) do
+    unset_linear_auth = "unset " <> Enum.join(Config.linear_auth_env_names(), " ")
+
     [
       "set -e",
-      "unset LINEAR_API_KEY LINEAR_CLIENT_ID LINEAR_CLIENT_SECRET",
+      unset_linear_auth,
       project_env_source_prefix(issue),
-      "unset LINEAR_API_KEY LINEAR_CLIENT_ID LINEAR_CLIENT_SECRET",
+      unset_linear_auth,
       "exec #{Config.settings!().codex.command}"
     ]
     |> Enum.reject(&(&1 == ""))

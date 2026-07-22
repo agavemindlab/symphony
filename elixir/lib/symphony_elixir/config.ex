@@ -20,6 +20,8 @@ defmodule SymphonyElixir.Config do
   {% endif %}
   """
 
+  @linear_auth_env_names ["LINEAR_API_KEY", "LINEAR_CLIENT_ID", "LINEAR_CLIENT_SECRET"]
+
   @type codex_runtime_settings :: %{
           approval_policy: String.t() | map(),
           thread_sandbox: String.t(),
@@ -187,6 +189,11 @@ defmodule SymphonyElixir.Config do
       _ ->
         {:error, :missing_linear_auth}
     end
+  end
+
+  @spec linear_auth_env_names() :: [String.t()]
+  def linear_auth_env_names do
+    (@linear_auth_env_names ++ settings!().tracker.auth_env_names) |> Enum.uniq()
   end
 
   @spec configured_project_slugs() :: {:ok, [String.t()]} | {:error, term()}

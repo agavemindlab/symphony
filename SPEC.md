@@ -423,6 +423,10 @@ Fields:
 - `before_remove` (multiline shell script string, OPTIONAL)
   - Runs before workspace deletion if the directory exists.
   - Failure is logged but ignored; cleanup still proceeds.
+- `linear_running_marker` (boolean, OPTIONAL)
+  - Default: `false`
+  - Uses the host Linear client to add/remove the configured running label without exposing
+    Linear credentials to a child process.
 - `issue_running` (multiline shell script string, OPTIONAL)
   - Runs when an issue is claimed into the orchestrator's Running set.
   - Failure is logged but ignored.
@@ -620,6 +624,7 @@ not require recognizing or validating extension fields unless that extension is 
 - `hooks.before_run`: shell script or null
 - `hooks.after_run`: shell script or null
 - `hooks.before_remove`: shell script or null
+- `hooks.linear_running_marker`: boolean, default `false`
 - `hooks.issue_running`: shell script or null
 - `hooks.issue_stopped`: shell script or null
 - `hooks.timeout_ms`: integer, default `60000`
@@ -908,6 +913,7 @@ Supported hooks:
 - `hooks.before_run`
 - `hooks.after_run`
 - `hooks.before_remove`
+- `hooks.linear_running_marker`
 - `hooks.issue_running`
 - `hooks.issue_stopped`
 
@@ -920,6 +926,9 @@ Execution contract:
 - Hooks for a Linear issue receive project context when present:
   `SYMPHONY_LINEAR_PROJECT_ID`, `SYMPHONY_LINEAR_PROJECT_SLUG`, and
   `SYMPHONY_LINEAR_PROJECT_NAME`.
+- Hook child processes MUST NOT inherit `LINEAR_API_KEY`, `LINEAR_CLIENT_ID`,
+  `LINEAR_CLIENT_SECRET`, or environment variables referenced by the tracker's auth fields;
+  the native Linear running marker executes in the host process.
 - On POSIX systems, `sh -lc <script>` (or a stricter equivalent such as `bash -lc <script>`) is a
   conforming default.
 - Hook timeout uses `hooks.timeout_ms`; default: `60000 ms`.
@@ -931,7 +940,7 @@ Failure semantics:
 - `before_run` failure or timeout is fatal to the current run attempt.
 - `after_run` failure or timeout is logged and ignored.
 - `before_remove` failure or timeout is logged and ignored.
-- `issue_running` and `issue_stopped` failure or timeout is logged and ignored.
+- `linear_running_marker`, `issue_running`, and `issue_stopped` failure or timeout is logged and ignored.
 
 ### 9.5 Safety Invariants
 
