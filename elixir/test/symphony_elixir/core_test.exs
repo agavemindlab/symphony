@@ -487,6 +487,12 @@ defmodule SymphonyElixir.CoreTest do
       refute skill =~ "prefer surfacing it as a batched"
     end
 
+    requirements_skill =
+      File.read!(Path.expand("../workflows/agavemindlab/skills/phase-requirements/SKILL.md", File.cwd!()))
+
+    assert requirements_skill =~ "route it through Batched clarification below"
+    refute requirements_skill =~ "issue's `creator`, move the issue to `Human Review`, and stop"
+
     for missing_field <- [:question, :background, :options, :recommendation, :impacts] do
       calls =
         dry_run_artifact_calls(

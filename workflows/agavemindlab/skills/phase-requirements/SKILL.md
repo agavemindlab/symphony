@@ -188,8 +188,8 @@ Implementation produces the findings — see those skills' `Type:Spike` notes.
 
 **Bounce a pure question.** If the issue is a question or discussion with no
 investigation the agent can actually perform (only a human can answer), do not
-run the pipeline: state this in the `## Requirements` artifact, `@`-mention the
-issue's `creator`, move the issue to `Human Review`, and stop.
+run the pipeline: route it through Batched clarification below and apply the
+complete-gate test in When blocked.
 
 ## Batched clarification (`### NEEDS CLARIFICATION`)
 
