@@ -445,7 +445,7 @@ them first and auto-resumes the parent for integration.
 
 ## When blocked
 
-When a batched clarification block remains after analysis:
+When a batched clarification block remains after analysis, apply the workflow's complete-gate test: An incomplete clarification gate returns `stop` to Main Flow after publication for the standard review/rework handoff without moving the issue yourself; only a complete gate uses this blocked path:
 
 1. Write the batched block at the foot of the `## Design` artifact.
 2. Publish the artifact through the workflow artifact protocol.

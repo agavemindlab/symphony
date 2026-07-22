@@ -414,10 +414,22 @@ defmodule SymphonyElixir.CoreTest do
     complete_question = %{
       question: "Which retention window should apply?",
       background: "Only the product owner can choose the policy.",
-      options: ["A", "B"],
-      recommendation: "A",
-      impacts: %{"A" => "Lower storage cost", "B" => "Longer recovery window"}
+      options: ["30 days", "90 days"],
+      recommendation: "30 days",
+      impacts: %{"30 days" => "Lower storage cost", "90 days" => "Longer recovery window"}
     }
+
+    refute complete_clarification_question?(%{
+             complete_question
+             | options: ["30 days", ""],
+               impacts: %{"30 days" => "Lower storage cost", "" => "No concrete answer"}
+           })
+
+    refute complete_clarification_question?(%{
+             complete_question
+             | options: ["30 days", "30 days"],
+               impacts: %{"30 days" => "Lower storage cost"}
+           })
 
     complete_gate = %{
       unresolved?: true,
@@ -426,9 +438,12 @@ defmodule SymphonyElixir.CoreTest do
         %{
           question: "Who can override the retention window?",
           background: "Only the product owner can assign policy ownership.",
-          options: ["A", "B"],
-          recommendation: "B",
-          impacts: %{"A" => "Any admin can override it", "B" => "Only owners can override it"}
+          options: ["Any admin", "Product owner"],
+          recommendation: "Product owner",
+          impacts: %{
+            "Any admin" => "Any admin can override it",
+            "Product owner" => "Only owners can override it"
+          }
         }
       ]
     }
@@ -461,6 +476,7 @@ defmodule SymphonyElixir.CoreTest do
         )
 
       assert skill =~ "Every question states why it needs a human decision"
+      assert skill =~ ~r/An incomplete clarification gate\s+returns `stop` to Main Flow/
       refute skill =~ "prefer surfacing it as a batched"
     end
 
@@ -4130,7 +4146,8 @@ defmodule SymphonyElixir.CoreTest do
     recommendation = Map.get(question, :recommendation)
 
     present_text?(question[:question]) and present_text?(question[:background]) and
-      length(options) >= 2 and present_text?(recommendation) and recommendation in options and
+      length(options) >= 2 and Enum.all?(options, &present_text?/1) and Enum.uniq(options) == options and
+      present_text?(recommendation) and recommendation in options and
       Enum.all?(options, &present_text?(Map.get(impacts, &1)))
   end
 
