@@ -1476,6 +1476,7 @@ Minimum endpoints:
         {
           "issue_id": "abc123",
           "issue_identifier": "MT-649",
+          "issue_title": "Add dashboard observability",
           "issue_url": "https://tracker.example/issues/MT-649",
           "state": "In Progress",
           "session_id": "thread-1-turn-1",
@@ -1495,6 +1496,7 @@ Minimum endpoints:
         {
           "issue_id": "def456",
           "issue_identifier": "MT-650",
+          "issue_title": "Retry failed agent runs",
           "issue_url": "https://tracker.example/issues/MT-650",
           "attempt": 3,
           "due_at": "2026-02-24T20:16:00Z",

@@ -716,6 +716,10 @@ button.secondary:hover {
   min-width: 0;
 }
 
+.issue-stack {
+  max-width: 18rem;
+}
+
 .event-text {
   font-weight: 500;
   line-height: 1.45;
@@ -767,6 +771,12 @@ button.secondary:hover {
 .issue-id {
   font-weight: 600;
   letter-spacing: -0.01em;
+}
+
+.issue-title {
+  color: var(--muted);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
 }
 
 .issue-id-link {

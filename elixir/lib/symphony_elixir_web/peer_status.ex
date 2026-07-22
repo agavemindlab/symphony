@@ -79,6 +79,7 @@ defmodule SymphonyElixirWeb.PeerStatus do
     %{
       issue_id: string_or_nil(entry["issue_id"]),
       issue_identifier: string_or_nil(entry["issue_identifier"]),
+      issue_title: string_or_nil(entry["issue_title"]),
       issue_url: string_or_nil(entry["issue_url"]),
       state: string_or_nil(entry["state"]),
       session_id: string_or_nil(entry["session_id"]),
@@ -95,6 +96,7 @@ defmodule SymphonyElixirWeb.PeerStatus do
     %{
       issue_id: string_or_nil(entry["issue_id"]),
       issue_identifier: string_or_nil(entry["issue_identifier"]),
+      issue_title: string_or_nil(entry["issue_title"]),
       issue_url: string_or_nil(entry["issue_url"]),
       attempt: int_or_nil(entry["attempt"]),
       due_at: string_or_nil(entry["due_at"]),
@@ -106,6 +108,7 @@ defmodule SymphonyElixirWeb.PeerStatus do
     %{
       issue_id: string_or_nil(entry["issue_id"]),
       issue_identifier: string_or_nil(entry["issue_identifier"]),
+      issue_title: string_or_nil(entry["issue_title"]),
       issue_url: string_or_nil(entry["issue_url"]),
       state: string_or_nil(entry["state"]),
       error: string_or_nil(entry["error"]),

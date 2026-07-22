@@ -1622,6 +1622,34 @@ defmodule SymphonyElixir.CoreTest do
     refute Map.has_key?(updated_state.retry_attempts, issue_id)
   end
 
+  test "retry without capacity refreshes the issue title" do
+    issue_id = "retry-no-capacity"
+
+    state = %Orchestrator.State{
+      max_concurrent_agents: 0,
+      running: %{},
+      claimed: MapSet.new([issue_id]),
+      retry_attempts: %{}
+    }
+
+    issue = %Issue{
+      id: issue_id,
+      identifier: "MT-NO-CAPACITY",
+      title: "Fresh retry title",
+      state: "In Progress"
+    }
+
+    updated_state =
+      Orchestrator.handle_retry_issue_lookup_for_test(issue, state, issue_id, 1, %{
+        identifier: issue.identifier,
+        title: "Stale retry title",
+        error: "agent exited"
+      })
+
+    assert %{title: "Fresh retry title", error: "no available orchestrator slots"} =
+             updated_state.retry_attempts[issue_id]
+  end
+
   test "retry releases its claim when issue has a non-terminal blocker" do
     issue_id = "retry-blocked"
 
@@ -1751,6 +1779,28 @@ defmodule SymphonyElixir.CoreTest do
     assert Map.has_key?(updated_state.running, "issue-running-hook")
     assert MapSet.member?(updated_state.claimed, "issue-running-hook")
     assert File.read!(marker) == "running|dispatch|MT-RUNNING|"
+  end
+
+  test "dispatch failure preserves the issue title for retry" do
+    issue = %Issue{
+      id: "issue-spawn-failure",
+      identifier: "MT-SPAWN-FAIL",
+      title: "Spawn failure title",
+      state: "In Progress"
+    }
+
+    state = %Orchestrator.State{
+      running: %{},
+      claimed: MapSet.new(),
+      blocked: %{},
+      retry_attempts: %{}
+    }
+
+    updated_state =
+      Orchestrator.dispatch_issue_for_test(state, issue, fn _fun -> {:error, :boom} end)
+
+    assert %{title: "Spawn failure title", error: "failed to spawn agent: :boom"} =
+             updated_state.retry_attempts[issue.id]
   end
 
   test "dispatch triggers a phase event scan that lands derived events in the analytics file" do
@@ -2170,7 +2220,7 @@ defmodule SymphonyElixir.CoreTest do
       pid: self(),
       ref: ref,
       identifier: "MT-558",
-      issue: %Issue{id: issue_id, identifier: "MT-558", state: "In Progress"},
+      issue: %Issue{id: issue_id, identifier: "MT-558", title: "Continuation title", state: "In Progress"},
       started_at: DateTime.utc_now()
     }
 
@@ -2189,7 +2239,10 @@ defmodule SymphonyElixir.CoreTest do
 
     refute Map.has_key?(state.running, issue_id)
     assert MapSet.member?(state.completed, issue_id)
-    assert %{attempt: 1, due_at_ms: due_at_ms} = state.retry_attempts[issue_id]
+
+    assert %{attempt: 1, due_at_ms: due_at_ms, title: "Continuation title"} =
+             state.retry_attempts[issue_id]
+
     assert is_integer(due_at_ms)
     assert_due_in_range(due_at_ms, before_retry_ms, after_retry_ms, 500, 1_100)
   end
@@ -2213,7 +2266,7 @@ defmodule SymphonyElixir.CoreTest do
       ref: ref,
       identifier: "MT-559",
       retry_attempt: 2,
-      issue: %Issue{id: issue_id, identifier: "MT-559", state: "In Progress"},
+      issue: %Issue{id: issue_id, identifier: "MT-559", title: "Crash retry title", state: "In Progress"},
       started_at: DateTime.utc_now()
     }
 
@@ -2230,7 +2283,13 @@ defmodule SymphonyElixir.CoreTest do
     state = :sys.get_state(pid)
     after_retry_ms = System.monotonic_time(:millisecond)
 
-    assert %{attempt: 3, due_at_ms: due_at_ms, identifier: "MT-559", error: "agent exited: :boom"} =
+    assert %{
+             attempt: 3,
+             due_at_ms: due_at_ms,
+             identifier: "MT-559",
+             title: "Crash retry title",
+             error: "agent exited: :boom"
+           } =
              state.retry_attempts[issue_id]
 
     assert_due_in_range(due_at_ms, before_retry_ms, after_retry_ms, 39_500, 40_500)
@@ -2315,6 +2374,26 @@ defmodule SymphonyElixir.CoreTest do
              identifier: "MT-561",
              error: "agent exited: :boom"
            } = :sys.get_state(pid).retry_attempts[issue_id]
+  end
+
+  test "popping a retry preserves its title for tracker-error rescheduling" do
+    issue_id = "issue-retry-metadata"
+    retry_token = make_ref()
+
+    state = %Orchestrator.State{
+      retry_attempts: %{
+        issue_id => %{
+          attempt: 2,
+          retry_token: retry_token,
+          title: "Preserved retry title"
+        }
+      }
+    }
+
+    assert {:ok, 2, %{title: "Preserved retry title"}, updated_state} =
+             Orchestrator.pop_retry_attempt_state_for_test(state, issue_id, retry_token)
+
+    refute Map.has_key?(updated_state.retry_attempts, issue_id)
   end
 
   test "manual refresh coalesces repeated requests and ignores superseded ticks" do

@@ -375,6 +375,7 @@ defmodule SymphonyElixir.ExtensionsTest do
                %{
                  "issue_id" => "issue-http",
                  "issue_identifier" => "MT-HTTP",
+                 "issue_title" => "Render <running> title",
                  "issue_url" => "https://example.org/issues/MT-HTTP",
                  "state" => "In Progress",
                  "worker_host" => nil,
@@ -392,6 +393,7 @@ defmodule SymphonyElixir.ExtensionsTest do
                %{
                  "issue_id" => "issue-retry",
                  "issue_identifier" => "MT-RETRY",
+                 "issue_title" => "Retry title",
                  "issue_url" => "https://example.org/issues/MT-RETRY",
                  "attempt" => 2,
                  "due_at" => state_payload["retrying"] |> List.first() |> Map.fetch!("due_at"),
@@ -404,6 +406,7 @@ defmodule SymphonyElixir.ExtensionsTest do
                %{
                  "issue_id" => "issue-blocked",
                  "issue_identifier" => "MT-BLOCKED",
+                 "issue_title" => "Blocked title",
                  "issue_url" => "https://example.org/issues/MT-BLOCKED",
                  "state" => "In Progress",
                  "error" => "codex turn requires operator input",
@@ -697,6 +700,9 @@ defmodule SymphonyElixir.ExtensionsTest do
     assert html =~ "MT-HTTP"
     assert html =~ "MT-RETRY"
     assert html =~ "MT-BLOCKED"
+    assert html =~ "Render &lt;running&gt; title"
+    assert html =~ "Retry title"
+    assert html =~ "Blocked title"
     assert html =~ ~s(href="https://example.org/issues/MT-HTTP")
     assert html =~ ~s(href="https://example.org/issues/MT-RETRY")
     assert html =~ ~s(href="https://example.org/issues/MT-BLOCKED")
@@ -767,7 +773,10 @@ defmodule SymphonyElixir.ExtensionsTest do
       render(view) =~ "agent message content streaming: structured update"
     end)
 
-    refute render(view) =~ "javascript:alert"
+    fallback_html = render(view)
+    assert fallback_html =~ "MT-HTTP"
+    refute fallback_html =~ "Render &lt;running&gt; title"
+    refute fallback_html =~ "javascript:alert"
   end
 
   test "dashboard liveview renders the v1 analytics panels" do
@@ -1154,6 +1163,7 @@ defmodule SymphonyElixir.ExtensionsTest do
           %{
             "issue_id" => "issue-peer",
             "issue_identifier" => "PEER-77",
+            "issue_title" => "Peer issue title",
             "issue_url" => "https://example.org/issues/PEER-77",
             "state" => "In Progress",
             "session_id" => "thread-peer",
@@ -1232,6 +1242,7 @@ defmodule SymphonyElixir.ExtensionsTest do
     # Peer rows merge into the session tables with an instance chip column.
     assert html =~ ">Instance</th>"
     assert html =~ "PEER-77"
+    assert html =~ "Peer issue title"
     assert html =~ "peer working"
 
     # Peer-owned rows link JSON details at the peer's own API; local rows stay relative.
@@ -1269,6 +1280,7 @@ defmodule SymphonyElixir.ExtensionsTest do
         "running" => [
           %{
             "issue_identifier" => "MT-9",
+            "issue_title" => "Peer running title",
             "issue_url" => "https://example.org/issues/MT-9",
             "state" => "In Progress",
             "session_id" => "thread-9",
@@ -1279,8 +1291,8 @@ defmodule SymphonyElixir.ExtensionsTest do
           %{"issue_identifier" => "MT-10"},
           "not-a-map"
         ],
-        "retrying" => [%{"issue_identifier" => "MT-8", "attempt" => 2, "due_at" => "soon", "error" => "boom"}],
-        "blocked" => [%{"issue_identifier" => "MT-7", "error" => "stuck", "blocked_at" => "2026-07-05T00:00:00Z"}],
+        "retrying" => [%{"issue_identifier" => "MT-8", "issue_title" => "Peer retry title", "attempt" => 2, "due_at" => "soon", "error" => "boom"}],
+        "blocked" => [%{"issue_identifier" => "MT-7", "issue_title" => "Peer blocked title", "error" => "stuck", "blocked_at" => "2026-07-05T00:00:00Z"}],
         "codex_totals" => %{"total_tokens" => 20, "seconds_running" => 12.5},
         "rate_limits" => %{"primary" => %{"remaining" => 3}},
         "error" => %{"code" => "snapshot_timeout", "message" => "Snapshot timed out"},
@@ -1296,14 +1308,15 @@ defmodule SymphonyElixir.ExtensionsTest do
 
     assert [running, bare_running] = normalized.running
     assert running.issue_identifier == "MT-9"
+    assert running.issue_title == "Peer running title"
     assert running.turn_count == 4
     assert running.tokens == %{input_tokens: 7, output_tokens: 8, total_tokens: 15}
     refute Map.has_key?(running, :unexpected)
     assert bare_running.tokens == %{input_tokens: nil, output_tokens: nil, total_tokens: nil}
     assert bare_running.turn_count == 0
 
-    assert [%{issue_identifier: "MT-8", attempt: 2, due_at: "soon", error: "boom"}] = normalized.retrying
-    assert [%{issue_identifier: "MT-7", error: "stuck", state: nil, session_id: nil}] = normalized.blocked
+    assert [%{issue_identifier: "MT-8", issue_title: "Peer retry title", attempt: 2, due_at: "soon", error: "boom"}] = normalized.retrying
+    assert [%{issue_identifier: "MT-7", issue_title: "Peer blocked title", error: "stuck", state: nil, session_id: nil}] = normalized.blocked
     assert normalized.codex_totals.total_tokens == 20
     assert normalized.codex_totals.seconds_running == 12.5
     assert normalized.codex_totals.input_tokens == nil
@@ -1476,6 +1489,7 @@ defmodule SymphonyElixir.ExtensionsTest do
         %{
           issue_id: "issue-http",
           identifier: "MT-HTTP",
+          title: "Render <running> title",
           issue_url: "https://example.org/issues/MT-HTTP",
           state: "In Progress",
           session_id: "thread-http",
@@ -1494,6 +1508,7 @@ defmodule SymphonyElixir.ExtensionsTest do
         %{
           issue_id: "issue-retry",
           identifier: "MT-RETRY",
+          title: "Retry title",
           issue_url: "https://example.org/issues/MT-RETRY",
           attempt: 2,
           due_in_ms: 2_000,
@@ -1504,6 +1519,7 @@ defmodule SymphonyElixir.ExtensionsTest do
         %{
           issue_id: "issue-blocked",
           identifier: "MT-BLOCKED",
+          title: "Blocked title",
           issue_url: "https://example.org/issues/MT-BLOCKED",
           state: "In Progress",
           error: "codex turn requires operator input",
