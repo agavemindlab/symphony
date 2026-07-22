@@ -445,12 +445,13 @@ them first and auto-resumes the parent for integration.
 
 ## When blocked
 
-When a batched clarification block remains after analysis, apply the workflow's complete-gate test. An incomplete clarification gate returns `stop` to Main Flow after publication for the standard review/rework handoff without moving the issue yourself. Do not execute the complete-gate steps below. Only a complete gate uses this blocked path:
+When a batched clarification block remains after analysis:
 
 1. Write the batched block at the foot of the `## Design` artifact.
 2. Publish the artifact through the workflow artifact protocol.
-3. Move the issue to `Human Review`.
-4. Stop.
+3. Apply the workflow's complete-gate test:
+   - After publication, an incomplete clarification gate returns `stop` to Main Flow for the standard review/rework handoff without moving the issue yourself.
+   - Only for a complete gate, move the issue to `Human Review` and stop.
 
 ### Consent convention (how the human replies)
 
@@ -496,9 +497,9 @@ workpad `current_phase: Requirements`, and open `phase-requirements`.
 
 ## Exit
 
-### Completeness bar (required to post the artifact)
+### Clean-exit completeness bar
 
-The artifact is complete enough to post when all of these hold — this is
+The gate-free artifact is complete enough for a clean Exit when all of these hold — this is
 about form, not correctness:
 
 - `.symphony/design.md` written (scaled to the change), listed in workpad

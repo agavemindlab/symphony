@@ -412,6 +412,8 @@ defmodule SymphonyElixir.CoreTest do
     artifact = %{id: "dev-5549-requirements", created_at: ~U[2026-07-22 01:00:00Z]}
 
     assert workflow =~ "at least two distinct, nonblank concrete answer options"
+    assert workflow =~ "Only a complete unresolved Requirements or Design clarification gate"
+    assert workflow =~ "the phase published a clarification question rather than ordinary review"
 
     complete_question = %{
       question: "Which retention window should apply?",
@@ -478,9 +480,10 @@ defmodule SymphonyElixir.CoreTest do
         )
 
       assert skill =~ "Every question states why it needs a human decision"
-      assert skill =~ ~r/An incomplete clarification gate\s+returns `stop` to Main Flow/
-      assert skill =~ "Do not execute the complete-gate steps below"
+      assert skill =~ "After publication, an incomplete clarification gate returns `stop` to Main Flow"
+      refute skill =~ "Do not execute the complete-gate steps below"
       assert skill =~ "A complete unresolved `### NEEDS CLARIFICATION` gate moves to `Human Review` directly"
+      assert skill =~ "### Clean-exit completeness bar"
       refute skill =~ "prefer surfacing it as a batched"
     end
 
