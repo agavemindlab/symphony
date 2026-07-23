@@ -586,9 +586,10 @@ class ReplayCommandTest(unittest.TestCase):
             prompt,
         )
         self.assertIn(
-            "invalid_assumption → 失效的 Design assumption，"
-            "changed_boundary → 建议修改的机制或边界，required_proof → 下一轮 proof / acceptance criteria，"
-            "preserved_constraints → 不受影响的既有约束。",
+            "approved_design.assumptions[].marker → 失效的 Design assumption，"
+            "proposed_evidence.boundary_marker → 建议修改的机制或边界，"
+            "proposed_evidence.proof_marker → 下一轮 proof / acceptance criteria，"
+            "approved_design.preserved_constraints[].marker → 不受影响的既有约束。",
             prompt,
         )
         self.assertIn(
