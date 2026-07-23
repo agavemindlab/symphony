@@ -136,6 +136,12 @@ class ReplayFingerprintTest(unittest.TestCase):
 
         snapshot.assert_called_once_with(["codex"])
 
+    def test_runtime_snapshot_streams_files_instead_of_buffering_them(self) -> None:
+        with mock.patch.object(Path, "read_bytes", side_effect=AssertionError("buffered read")):
+            files = maestro_replay.replay_runtime_files([sys.executable])
+
+        self.assertIn(str(Path(sys.executable).resolve()), files)
+
 
 class ParseRecommendationTest(unittest.TestCase):
     def test_tolerates_markdown_decoration_and_case(self) -> None:
@@ -1314,7 +1320,7 @@ class FrozenRoutingFixtureTest(unittest.TestCase):
         path = Path(__file__).resolve().parent.parent / "fixtures" / "escalated-routing-cases.jsonl"
         cases = maestro_replay.read_jsonl(path)
 
-        self.assertEqual(len(cases), 21)
+        self.assertEqual(len(cases), 23)
         self.assertEqual(len({maestro_replay.case_id(case) for case in cases}), len(cases))
         families = {case["family"] for case in cases}
         self.assertEqual(
@@ -1337,7 +1343,9 @@ class FrozenRoutingFixtureTest(unittest.TestCase):
                 "card_wrong_id",
                 "card_missing_id",
                 "card_blank_id",
+                "card_wrong_app",
                 "card_bot_actor",
+                "missing_maestro_actor_config",
                 "malformed_card",
                 "oauth_app",
                 "bot_actor",
@@ -1351,6 +1359,7 @@ class FrozenRoutingFixtureTest(unittest.TestCase):
             "card_wrong_id",
             "card_missing_id",
             "card_blank_id",
+            "card_wrong_app",
             "card_bot_actor",
         }
         for case in cases:
@@ -1367,8 +1376,16 @@ class FrozenRoutingFixtureTest(unittest.TestCase):
         self.assertEqual(provenance_cases["card_wrong_id"]["case_context"]["maestro_card"]["user"]["id"], "other-app")
         self.assertNotIn("id", provenance_cases["card_missing_id"]["case_context"]["maestro_card"]["user"])
         self.assertEqual(provenance_cases["card_blank_id"]["case_context"]["maestro_card"]["user"]["id"], " ")
+        self.assertFalse(provenance_cases["card_wrong_app"]["case_context"]["maestro_card"]["user"]["app"])
         self.assertIsNotNone(provenance_cases["card_bot_actor"]["case_context"]["maestro_card"]["botActor"])
         self.assertTrue(all(case["expected_phase"] == "Human Review" for case in provenance_cases.values()))
+
+        missing_config = next(case for case in cases if case["family"] == "missing_maestro_actor_config")
+        self.assertEqual(missing_config["maestro_actor_id"], "")
+        self.assertIn(
+            "SYMPHONY_MAESTRO_ACTOR_ID=\n",
+            maestro_replay.compose_routing_prompt("## Phase Map\n\n## Main Flow", missing_config),
+        )
 
         accepted_status_cases = [
             case

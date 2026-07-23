@@ -218,7 +218,7 @@ def compose_routing_prompt(workflow_excerpt: str, case: dict) -> str:
     state = case.get("state") or "unknown"
     context = frozen_context_json(case)
     if context is not None:
-        maestro_actor_id = case.get("maestro_actor_id") or "maestro-app"
+        maestro_actor_id = case["maestro_actor_id"] if "maestro_actor_id" in case else "maestro-app"
         preamble = (
             f"回放路由决策：issue {issue} 在 {dispatch_at} 以状态 {state} 被派发。"
             "以下冻结的 case_context 是唯一可用事实；不得读取当前 Linear 或 GitHub，"
@@ -514,9 +514,14 @@ def replay_runtime_files(child_argv: list[str]) -> dict[str, str]:
         candidates.append(Path(executable).resolve())
     candidates.extend(Path(token).resolve() for token in child_argv[1:] if Path(token).is_file())
     return {
-        str(path): hashlib.sha256(path.read_bytes()).hexdigest()
+        str(path): file_sha256(path)
         for path in sorted(set(candidates))
     }
+
+
+def file_sha256(path: Path) -> str:
+    with path.open("rb") as handle:
+        return hashlib.file_digest(handle, "sha256").hexdigest()
 
 
 def replay_runtime_version(child_argv: list[str]) -> str:

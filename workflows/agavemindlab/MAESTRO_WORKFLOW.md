@@ -159,8 +159,11 @@ that prevents a higher score and link it to `依据` or `注意`.
   `不受影响的既有约束`; `ask clarification` requires one
   `待人工回答的问题` and its `回答判定标准`. The card contains no `/rework ...` draft,
   `建议回复方式: request changes`, or auto-Rework marker. Never change the issue
-  state for this branch: leave it in `Human Review`, remove
-  `symphony:maestro`, and wait for a newer human action.
+  state for this branch. After posting, re-read that reply by id and apply the
+  same authentication, artifact/Head binding, and complete unique-card checks
+  used for deduplication. Only after the reread proves the new card is
+  authenticated, complete, unique, and bound may you remove `symphony:maestro`
+  and wait for a newer human action; otherwise leave the label and stop.
 - When the recommendation is `approve`, reply in the current artifact thread
   with the reviewer-selected content, artifact id, Head, confidence, and short
   rationale. Only when all hold — `MAESTRO_AUTO_APPROVE` is `true`/`1`; the
