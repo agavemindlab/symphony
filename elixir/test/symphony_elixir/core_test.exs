@@ -351,6 +351,7 @@ defmodule SymphonyElixir.CoreTest do
     {auto_rework_position, _} = :binary.match(workflow, "Maestro auto-rework")
     {intent_position, _} = :binary.match(workflow, "Fast path — explicit commands")
     assert cleanup_position < clarification_position
+    assert clarification_position < gate_position
     assert cleanup_position < gate_position
     assert gate_position < auto_rework_position
     assert auto_rework_position < intent_position
@@ -430,10 +431,16 @@ defmodule SymphonyElixir.CoreTest do
     artifact = %{id: "dev-5549-requirements", created_at: ~U[2026-07-22 01:00:00Z]}
 
     assert workflow =~ "at least two distinct, nonblank concrete answer options"
+    assert workflow =~ "at least one unresolved question exists"
     assert workflow =~ "Only a complete unresolved Requirements or Design clarification gate"
     assert workflow =~ "the phase published a clarification question rather than ordinary review"
-    assert workflow =~ "With no new human reply, return the issue to `Human Review`"
-    assert workflow =~ "answer in that thread, then move the issue to `In Progress`"
+    assert workflow =~ "With no new human reply, never approve or close the artifact"
+    assert workflow =~ "Evaluate it in this order"
+    assert workflow =~ "if a qualifying auto-rework signal exists, route its `/rework <phase>` draft literally"
+    assert workflow =~ "continue to step 6"
+    assert workflow =~ "Immediately before the direct `Human Review` state update, re-read"
+    assert workflow =~ "the human answers in that thread and then moves the issue to `In Progress`"
+    assert workflow =~ "the agent stops with the issue in `Human Review`"
 
     complete_question = %{
       question: "Which retention window should apply?",
@@ -471,6 +478,45 @@ defmodule SymphonyElixir.CoreTest do
         }
       ]
     }
+
+    single_question_gate = %{unresolved?: true, questions: [complete_question]}
+
+    for phase <- ["Requirements", "Design"] do
+      calls =
+        dry_run_artifact_calls(
+          workflow,
+          :blocked_clarification,
+          phase,
+          artifact,
+          single_question_gate
+        )
+
+      assert {:issueUpdate, :state, "Human Review"} in calls
+      refute Enum.any?(calls, &match?({:start_maestro_session, _artifact_id}, &1))
+    end
+
+    assert dry_run_unanswered_clarification_calls(workflow, "Requirements", complete_gate, false) == [
+             {:issueUpdate, :state, "Human Review"}
+           ]
+
+    incomplete_gate =
+      update_in(complete_gate.questions, fn [first, second | rest] ->
+        [first, Map.delete(second, :impacts) | rest]
+      end)
+
+    assert dry_run_unanswered_clarification_calls(
+             workflow,
+             "Requirements",
+             incomplete_gate,
+             true
+           ) == [{:route, :maestro_auto_rework}]
+
+    assert dry_run_unanswered_clarification_calls(
+             workflow,
+             "Requirements",
+             incomplete_gate,
+             false
+           ) == [{:return, :stop_for_standard_handoff}]
 
     for phase <- ["Requirements", "Design"] do
       calls =
@@ -4237,6 +4283,34 @@ defmodule SymphonyElixir.CoreTest do
 
     Enum.map(artifacts_to_resolve, &{:commentResolve, &1.id}) ++
       [{:commentCreate, :top_level_phase_artifact, "## #{target_phase}"}]
+  end
+
+  defp dry_run_unanswered_clarification_calls(workflow, phase, gate, maestro_rework?) do
+    contract? =
+      Enum.all?(
+        [
+          "never approve or close the artifact",
+          "only a complete Requirements or Design gate uses the direct blocked exit",
+          "Evaluate it in this order",
+          "if a qualifying auto-rework signal exists, route its `/rework <phase>` draft literally",
+          "continue to step 6"
+        ],
+        &String.contains?(workflow, &1)
+      )
+
+    cond do
+      not contract? ->
+        [{:route, :generic_active_state_approval}]
+
+      phase in ["Requirements", "Design"] and complete_unresolved_clarification?(gate) ->
+        [{:issueUpdate, :state, "Human Review"}]
+
+      maestro_rework? ->
+        [{:route, :maestro_auto_rework}]
+
+      true ->
+        [{:return, :stop_for_standard_handoff}]
+    end
   end
 
   defp phase_artifact_invalidated_between?(artifact, target_phase, awaiting_phase) do
