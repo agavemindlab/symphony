@@ -148,7 +148,7 @@ Flow impact by kind:
   ```
   Move the issue to `Human Review` and stop (no `Blocked` state exists). This
   is a **hard stop**, like a phase's "When blocked" path: it short-circuits
-  the phase skill's normal advance/stop handback to Main Flow. Once the
+  the phase skill's normal clean `stop` handback to Main Flow. Once the
   blocker is created on consent, fulfill mode re-parks the current issue at
   `Todo`: Symphony's blocked-by gate holds it there and auto-dispatches it
   when the blocker reaches a terminal state — no human nudge needed.
