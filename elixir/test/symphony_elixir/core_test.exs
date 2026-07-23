@@ -490,8 +490,15 @@ defmodule SymphonyElixir.CoreTest do
     requirements_skill =
       File.read!(Path.expand("../workflows/agavemindlab/skills/phase-requirements/SKILL.md", File.cwd!()))
 
+    design_skill =
+      File.read!(Path.expand("../workflows/agavemindlab/skills/phase-design/SKILL.md", File.cwd!()))
+
     assert requirements_skill =~ "route it through Batched clarification below"
     refute requirements_skill =~ "issue's `creator`, move the issue to `Human Review`, and stop"
+    assert design_skill =~ "route it through When blocked's complete-gate test"
+    refute design_skill =~ "and move to Human\nReview"
+    assert workflow =~ "For Requirements or Design, use that phase skill's batched format and complete-gate test"
+    assert workflow =~ "For Implementation or Deployment, use the fallback block below"
 
     for missing_field <- [:question, :background, :options, :recommendation, :impacts] do
       calls =

@@ -321,8 +321,10 @@ Symphony only starts the agent when the issue is in an active state (`Todo`, `In
 
 The phase skills under `.agents/skills/` refer back to **your workflow instructions** (e.g. "the Workpad template in your workflow instructions", "the cross-phase rework protocol in your workflow instructions"). That is this prompt — every referenced section is here; find it by its heading. There is no separate file to open.
 
-This workflow runs unattended — no interactive UI. When any invoked skill needs
-a human decision, put a visible clarification gate in the phase artifact,
+This workflow runs unattended — no interactive UI.
+For Requirements or Design, use that phase skill's batched format and complete-gate test.
+For Implementation or Deployment, use the fallback block below when its phase
+skill does not define more detailed handling: put it in the phase artifact,
 publish it through the protocol below, move the issue to `Human Review`, and
 stop. Keep the question expanded and out of collapsible sections:
 

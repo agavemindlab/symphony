@@ -274,10 +274,10 @@ Apply the emphasis matching `Primary:` from the Requirements artifact.
 ## High-impact decision protocol
 
 If the approach has a **high-impact unresolved decision**, do not pick
-unilaterally — surface it as a batched `### NEEDS CLARIFICATION` block tagged
-`🔴 〔影响：高 · 需明确回答〕` (see Batched clarification below) and move to Human
-Review. The tag means a blanket `同意默认` never resolves it — the human must
-answer it explicitly.
+unilaterally — surface it as a batched `### NEEDS CLARIFICATION` block
+tagged `🔴 〔影响：高 · 需明确回答〕` (see Batched clarification below) and
+route it through When blocked's complete-gate test. The tag means a blanket
+`同意默认` never resolves it — the human must answer it explicitly.
 
 High-impact categories: schema/data migrations; dependency changes with
 breaking changes; production/shared infrastructure; security/privacy
