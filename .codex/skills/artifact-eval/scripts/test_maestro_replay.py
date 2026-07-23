@@ -473,25 +473,42 @@ class ReplayCommandTest(unittest.TestCase):
             "case_context": {"review_verdict": "ESCALATED", "trend_marker": "family-auth-decreasing"},
         }
         self.cases_path.write_text(json.dumps(frozen) + "\n")
-        codex_cmd = self.fake_codex(
-            "import sys, pathlib\n"
-            f"log = pathlib.Path({str(self.calls_log)!r})\n"
-            "log.write_text(sys.stdin.read())\n"
-            "print('RECOMMENDATION: continue implementation')\n"
-            "print('收敛判断: continue implementation')\n"
-            "print('执行状态: awaiting human action')\n"
-            "print('CONSUMED_CONTEXT: family-auth-decreasing')\n",
+        output = (
+            "RECOMMENDATION: continue implementation\n"
+            "收敛判断: continue implementation\n"
+            "执行状态: awaiting human action\n"
+            "CONSUMED_CONTEXT: family-auth-decreasing\n"
+        )
+        completed = maestro_replay.subprocess.CompletedProcess(
+            [],
+            0,
+            stdout=json.dumps(
+                {"type": "item.completed", "item": {"type": "agent_message", "text": output}},
+            ),
+            stderr="",
         )
 
-        self.assertEqual(self.run_replay(codex_cmd), 0)
+        with (
+            mock.patch.object(maestro_replay, "preflight_strict_replay"),
+            mock.patch.object(maestro_replay.subprocess, "run", return_value=completed) as run,
+        ):
+            self.assertEqual(self.run_replay(maestro_replay.DEFAULT_CODEX_CMD), 0)
 
         result = self.read_predictions()[0]
         self.assertEqual(result["prediction"], "continue implementation")
         self.assertEqual(result["observed_output_markers"], frozen["required_output_markers"])
         self.assertEqual(result["consumed_context"], frozen["required_context_markers"])
-        prompt = self.calls_log.read_text()
+        prompt = run.call_args.kwargs["input"]
         self.assertIn(json.dumps(frozen["case_context"], ensure_ascii=False, indent=2, sort_keys=True), prompt)
         self.assertIn("不得读取当前 Linear 或 GitHub", prompt)
+        self.assertIn("每个字段必须各自单独成行", prompt)
+        self.assertIn(
+            "判断理由: <finding families, trend, attempted-fix effects, remaining Design assumptions>\n"
+            "下一轮建议方向: <next direction>\n"
+            "Reviewed Implementation artifact id: <artifact id>\n"
+            "PR Head: <head>",
+            prompt,
+        )
         self.assertNotIn("OUTPUT_MARKERS", prompt)
         self.assertNotIn("只允许 linear / gh", prompt)
         self.assertEqual(
@@ -515,6 +532,18 @@ class ReplayCommandTest(unittest.TestCase):
         self.assertIn("mcp_servers={}", argv)
         self.assertIn('model_reasoning_summary="none"', argv)
         self.assertIn('shell_environment_policy.inherit="none"', argv)
+
+    def test_frozen_replay_rejects_custom_codex_command_before_output(self) -> None:
+        frozen = {
+            **case("FIXTURE-CONTINUE", "decision-continue", phase="Implementation", label="escalated"),
+            "case_context": {},
+        }
+        self.cases_path.write_text(json.dumps(frozen) + "\n")
+        custom = self.fake_codex("raise AssertionError('must not execute')\n")
+
+        self.assertEqual(self.run_replay(custom), 1)
+
+        self.assertFalse(self.output_dir.exists())
 
     def test_strict_preflight_precedes_output_creation_and_resume_loading(self) -> None:
         frozen = {
@@ -619,6 +648,117 @@ class ReplayCommandTest(unittest.TestCase):
             self.assertEqual(self.run_replay(maestro_replay.DEFAULT_CODEX_CMD), 1)
 
         self.assertFalse(self.output_dir.exists())
+
+    def test_preflight_rejects_manufactured_command_strings(self) -> None:
+        def manufactured(_argv, **kwargs):
+            fields = dict(
+                line.split(": ", 1)
+                for line in kwargs["input"].splitlines()
+                if ": " in line
+            )
+            events = []
+            for name in ("DIRECT", "SYMLINK"):
+                events.append(
+                    {
+                        "type": "item.completed",
+                        "item": {
+                            "type": "command_execution",
+                            "command": f"echo {fields[name + '_COMMAND']}",
+                            "aggregated_output": f"{fields[name + '_PATH']}: Operation not permitted",
+                            "exit_code": 1,
+                            "status": "failed",
+                        },
+                    },
+                )
+            return maestro_replay.subprocess.CompletedProcess(
+                [],
+                0,
+                stdout="\n".join(json.dumps(event) for event in events),
+                stderr="",
+            )
+
+        with (
+            mock.patch.object(maestro_replay.subprocess, "run", side_effect=manufactured),
+            self.assertRaises(maestro_replay.ReplayError),
+        ):
+            maestro_replay.preflight_strict_replay(
+                shlex.split(maestro_replay.HERMETIC_CODEX_CMD),
+                5,
+            )
+
+    def test_preflight_requires_runtime_environment_and_descriptor_proof(self) -> None:
+        def filesystem_only(_argv, **kwargs):
+            fields = dict(
+                line.split(": ", 1)
+                for line in kwargs["input"].splitlines()
+                if ": " in line
+            )
+            events = [
+                {
+                    "type": "item.completed",
+                    "item": {
+                        "type": "command_execution",
+                        "command": fields[name + "_COMMAND"],
+                        "aggregated_output": f"{fields[name + '_PATH']}: Operation not permitted",
+                        "exit_code": 1,
+                        "status": "failed",
+                    },
+                }
+                for name in ("DIRECT", "SYMLINK")
+            ]
+            return maestro_replay.subprocess.CompletedProcess(
+                [],
+                0,
+                stdout="\n".join(json.dumps(event) for event in events),
+                stderr="",
+            )
+
+        with (
+            mock.patch.object(maestro_replay.subprocess, "run", side_effect=filesystem_only),
+            self.assertRaises(maestro_replay.ReplayError),
+        ):
+            maestro_replay.preflight_strict_replay(
+                shlex.split(maestro_replay.HERMETIC_CODEX_CMD),
+                5,
+            )
+
+    def test_preflight_accepts_exact_commands_and_runtime_proofs(self) -> None:
+        def proven(_argv, **kwargs):
+            fields = dict(
+                line.split(": ", 1)
+                for line in kwargs["input"].splitlines()
+                if ": " in line
+            )
+            events = [
+                {
+                    "type": "item.completed",
+                    "item": {
+                        "type": "command_execution",
+                        "command": fields[name + "_COMMAND"],
+                        "aggregated_output": output,
+                        "exit_code": exit_code,
+                        "status": "completed" if exit_code == 0 else "failed",
+                    },
+                }
+                for name, output, exit_code in (
+                    ("DIRECT", f"{fields['DIRECT_PATH']}: Operation not permitted", 1),
+                    ("SYMLINK", f"{fields['SYMLINK_PATH']}: Operation not permitted", 1),
+                    ("ENVIRONMENT", "PARENT_ENV_ABSENT", 0),
+                    ("DESCRIPTOR", "INHERITED_FD_CLOSED:9", 0),
+                )
+            ]
+            return maestro_replay.subprocess.CompletedProcess(
+                [],
+                0,
+                stdout="\n".join(json.dumps(event) for event in events),
+                stderr="",
+            )
+
+        with mock.patch.object(maestro_replay.subprocess, "run", side_effect=proven):
+            maestro_replay.preflight_strict_replay(
+                shlex.split(maestro_replay.HERMETIC_CODEX_CMD),
+                5,
+            )
 
     def test_child_subprocess_closes_inherited_descriptors(self) -> None:
         completed = maestro_replay.subprocess.CompletedProcess(

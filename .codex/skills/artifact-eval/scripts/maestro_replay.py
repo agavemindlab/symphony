@@ -15,7 +15,7 @@ routing predictions against the ground-truth target phase).
 from __future__ import annotations
 
 import argparse
-import base64
+import fcntl
 import json
 import os
 import re
@@ -155,7 +155,17 @@ def compose_prompt(reviewer_prompt: str, case: dict) -> str:
             f"冻结回放评审 {issue} 的 artifact {artifact}（发布于 {published_at}）。"
             "以下 case_context 是唯一可用事实；不得读取当前 Linear 或 GitHub，"
             "不得调用 linear / gh 或任何网络工具，不得写入任何东西。"
-            "先按 reviewer prompt 输出完整判断卡，再以两行审计 contract 结束：\n"
+            "先按 reviewer prompt 输出完整判断卡。判断卡每个字段必须各自单独成行，"
+            "不得合并、嵌套或省略；决定专用扩展字段也遵循相同格式：\n"
+            "收敛判断: <continue implementation|rework design|ask clarification>\n"
+            "建议 target phase: <phase>\n"
+            "建议 issue status: <status>\n"
+            "执行状态: awaiting human action\n"
+            "判断理由: <finding families, trend, attempted-fix effects, remaining Design assumptions>\n"
+            "下一轮建议方向: <next direction>\n"
+            "Reviewed Implementation artifact id: <artifact id>\n"
+            "PR Head: <head>\n"
+            "再以两行审计 contract 结束：\n"
             f"case_context:\n```json\n{context}\n```\n"
             "`RECOMMENDATION: <continue implementation|rework design|ask clarification>`\n"
             "`CONSUMED_CONTEXT: <逗号分隔的原样 marker；没有则 none>`"
@@ -481,7 +491,7 @@ def ensure_trailing_newline(path: Path) -> None:
 def execute_replay(cases: list[dict], *, args: argparse.Namespace, prompt_fn, parse_prediction) -> int:
     """Shared run/resume plumbing: one codex session per not-yet-predicted case."""
     child_argv = replay_child_argv(args.codex_cmd, cases)
-    if child_argv == shlex.split(HERMETIC_CODEX_CMD):
+    if any("case_context" in case for case in cases):
         preflight_strict_replay(child_argv, args.timeout)
 
     output_dir = Path(args.output)
@@ -529,11 +539,34 @@ def replay_child_argv(codex_cmd: str, cases: list[dict]) -> list[str]:
     frozen = ["case_context" in case for case in cases]
     if any(frozen) and not all(frozen):
         raise ReplayError("Frozen and live cases cannot share one replay run")
+    if any(frozen) and codex_cmd != DEFAULT_CODEX_CMD:
+        raise ReplayError("Frozen replay does not allow --codex-cmd overrides")
     return codex_argv_for_case(codex_cmd, cases[0] if cases else {})
 
 
+def read_probe_command(path: Path) -> str:
+    codepoints = ",".join(map(str, str(path).encode()))
+    return f'/usr/bin/python3 -c "print(open(bytes([{codepoints}]).decode()).read())"'
+
+
+def command_event_matches(actual: object, expected: str) -> bool:
+    command = str(actual or "")
+    if command == expected:
+        return True
+    try:
+        parts = shlex.split(command)
+    except ValueError:
+        return False
+    return (
+        len(parts) == 3
+        and parts[0] in {"/bin/sh", "/bin/bash", "/bin/zsh"}
+        and parts[1] in {"-c", "-lc"}
+        and parts[2] == expected
+    )
+
+
 def preflight_strict_replay(codex_argv: list[str], timeout_s: float) -> None:
-    """Prove direct and symlink reads are denied before touching replay output."""
+    """Prove filesystem, environment, and descriptor isolation before output."""
     with (
         tempfile.TemporaryDirectory(prefix=".maestro-replay-sentinel-", dir=Path(__file__).resolve().parents[4]) as sentinel_dir,
         tempfile.TemporaryDirectory(prefix="preflight-", dir=_replay_workdir()) as probe_dir,
@@ -543,41 +576,57 @@ def preflight_strict_replay(codex_argv: list[str], timeout_s: float) -> None:
         direct_path.write_text(sentinel)
         symlink_path = Path(probe_dir) / "sentinel-link"
         symlink_path.symlink_to(direct_path)
-        probes = [
-            (direct_path, base64.b64encode(str(direct_path).encode()).decode()),
-            (symlink_path, base64.b64encode(str(symlink_path).encode()).decode()),
-        ]
-        commands = [
-            "/usr/bin/python3 -c "
-            + shlex.quote(
-                f'import base64,pathlib; print(pathlib.Path(base64.b64decode("{encoded}").decode()).read_text())',
-            )
-            for _path, encoded in probes
-        ]
+        with direct_path.open("rb") as inherited:
+            inherited_fd = fcntl.fcntl(inherited.fileno(), fcntl.F_DUPFD, 100)
+        os.set_inheritable(inherited_fd, True)
+        environment_name = "MAESTRO_REPLAY_PARENT_ONLY_" + os.urandom(8).hex().upper()
+        commands = {
+            "DIRECT": read_probe_command(direct_path),
+            "SYMLINK": read_probe_command(symlink_path),
+            "ENVIRONMENT": (
+                "/bin/zsh -c 'if (( ${+"
+                + environment_name
+                + "} )); then print -r -- ${"
+                + environment_name
+                + "}; else print -r -- PARENT_ENV_ABSENT; fi'"
+            ),
+            "DESCRIPTOR": (
+                f"/bin/zsh -c 'if [[ -e /dev/fd/{inherited_fd} ]]; then /bin/cat /dev/fd/{inherited_fd}; "
+                "else print -r -- INHERITED_FD_CLOSED:9; fi'"
+            ),
+        }
         prompt = (
-            "Capability preflight: use the shell tool to run each exact Python command separately. "
-            "Do not substitute literal paths. Attempt both even though each should fail; "
-            "do not refuse or infer the result, and never repeat file contents.\n"
+            "Capability preflight: use the shell tool to run all four exact commands separately. "
+            "Do not substitute or quote them differently. Attempt every command regardless of earlier failures; "
+            "do not refuse or infer results, and never repeat file contents.\n"
             f"DIRECT_PATH: {direct_path}\n"
             f"SYMLINK_PATH: {symlink_path}\n"
-            f"DIRECT_COMMAND: {commands[0]}\n"
-            f"SYMLINK_COMMAND: {commands[1]}"
+            f"DIRECT_COMMAND: {commands['DIRECT']}\n"
+            f"SYMLINK_COMMAND: {commands['SYMLINK']}\n"
+            f"ENVIRONMENT_COMMAND: {commands['ENVIRONMENT']}\n"
+            f"DESCRIPTOR_COMMAND: {commands['DESCRIPTOR']}"
         )
+        child_environment = os.environ.copy()
+        child_environment[environment_name] = sentinel
         try:
-            completed = subprocess.run(
-                codex_argv,
-                input=prompt,
-                capture_output=True,
-                text=True,
-                timeout=min(timeout_s, 120.0),
-                check=False,
-                close_fds=True,
-                cwd=_replay_workdir(),
-            )
-        except subprocess.TimeoutExpired as exc:
-            if sentinel in _as_text(exc.stdout) + _as_text(exc.stderr):
-                raise ReplayError("Strict replay preflight leaked its sentinel") from None
-            raise ReplayError("Strict replay preflight timed out") from None
+            try:
+                completed = subprocess.run(
+                    codex_argv,
+                    input=prompt,
+                    capture_output=True,
+                    text=True,
+                    timeout=min(timeout_s, 120.0),
+                    check=False,
+                    close_fds=True,
+                    cwd=_replay_workdir(),
+                    env=child_environment,
+                )
+            except subprocess.TimeoutExpired as exc:
+                if sentinel in _as_text(exc.stdout) + _as_text(exc.stderr):
+                    raise ReplayError("Strict replay preflight leaked its sentinel") from None
+                raise ReplayError("Strict replay preflight timed out") from None
+        finally:
+            os.close(inherited_fd)
 
         output = completed.stdout + completed.stderr
         if sentinel in output:
@@ -593,16 +642,30 @@ def preflight_strict_replay(codex_argv: list[str], timeout_s: float) -> None:
             item = event.get("item") if isinstance(event, dict) else None
             if isinstance(item, dict) and item.get("type") == "command_execution":
                 events.append(item)
-        denial = re.compile(r"sandbox|operation not permitted|permission denied|blocked by policy|denied by policy", re.IGNORECASE)
-        for path, encoded in probes:
+        denial = re.compile(
+            r"sandbox|operation not permitted|permission denied|blocked by policy|denied by policy",
+            re.IGNORECASE,
+        )
+        for name, path in (("DIRECT", direct_path), ("SYMLINK", symlink_path)):
             if not any(
-                encoded in str(item.get("command") or "")
+                command_event_matches(item.get("command"), commands[name])
                 and item.get("exit_code") not in (None, 0)
                 and str(path) in str(item.get("aggregated_output") or "")
                 and denial.search(str(item.get("aggregated_output") or ""))
                 for item in events
             ):
                 raise ReplayError(f"Strict replay preflight did not observe sandbox denial for {path.name}")
+        for name, marker in (
+            ("ENVIRONMENT", "PARENT_ENV_ABSENT"),
+            ("DESCRIPTOR", "INHERITED_FD_CLOSED:9"),
+        ):
+            if not any(
+                command_event_matches(item.get("command"), commands[name])
+                and item.get("exit_code") == 0
+                and marker in str(item.get("aggregated_output") or "")
+                for item in events
+            ):
+                raise ReplayError(f"Strict replay preflight did not prove {name.lower()} isolation")
 
 
 def replay(args: argparse.Namespace) -> int:
