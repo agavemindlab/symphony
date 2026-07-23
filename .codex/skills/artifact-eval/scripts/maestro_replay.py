@@ -21,6 +21,7 @@ import json
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -35,6 +36,7 @@ DEFAULT_CODEX_CMD = (
 )
 HERMETIC_CODEX_CMD = (
     "codex exec --strict-config --json --ignore-user-config --ignore-rules --ephemeral "
+    "-m gpt-5.6-sol "
     "-c 'default_permissions=\"replay\"' "
     "-c 'permissions.replay.filesystem={\":minimal\"=\"read\"}' "
     "-c 'permissions.replay.network.enabled=false' "
@@ -78,25 +80,6 @@ CONSUMED_CONTEXT_LINE_RE = re.compile(
     CONTRACT_PREFIX + r"consumed[ _]?context" + CONTRACT_FIELD_END,
     re.IGNORECASE,
 )
-CONTRACT_FIELD_LABELS = {
-    "收敛判断",
-    "建议 target phase",
-    "建议 issue status",
-    "执行状态",
-    "Implementation artifact id",
-    "Reviewed Implementation artifact id",
-    "PR Head",
-    "判断理由",
-    "下一轮建议方向",
-    "失效的 Design assumption",
-    "建议修改的机制或边界",
-    "下一轮 proof / acceptance criteria",
-    "不受影响的既有约束",
-    "待人工回答的问题",
-    "回答判定标准",
-    "RECOMMENDATION",
-    "CONSUMED_CONTEXT",
-}
 JUDGMENT_ENUMS = {
     "收敛判断": {
         "continue implementation": "continue_implementation",
@@ -234,11 +217,13 @@ def compose_routing_prompt(workflow_excerpt: str, case: dict) -> str:
     state = case.get("state") or "unknown"
     context = frozen_context_json(case)
     if context is not None:
+        maestro_actor_id = case.get("maestro_actor_id") or "maestro-app"
         preamble = (
             f"回放路由决策：issue {issue} 在 {dispatch_at} 以状态 {state} 被派发。"
             "以下冻结的 case_context 是唯一可用事实；不得读取当前 Linear 或 GitHub，"
             "不得调用 linear / gh 或任何网络工具，不得写入任何东西。"
             "只做步骤 3-5 的路由判断，不执行任何阶段工作。\n"
+            f"冻结环境：SYMPHONY_MAESTRO_ACTOR_ID={maestro_actor_id}\n"
             f"case_context:\n```json\n{context}\n```\n"
             "最后三行输出且仅输出：\n"
             "`TARGET_PHASE: <Requirements|Design|Implementation|Deployment|Human Review>`\n"
@@ -512,9 +497,47 @@ def replay_fingerprint(
         "case": case,
         "prompt": prompt,
         "child_argv": child_argv,
+        "runtime_files": replay_runtime_files(child_argv),
     }
     canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode()).hexdigest()
+
+
+def replay_runtime_files(child_argv: list[str]) -> dict[str, str]:
+    """Hash the evaluator and executable inputs referenced by the child argv."""
+    candidates = [Path(__file__).resolve()]
+    if child_argv and (executable := shutil.which(child_argv[0])):
+        candidates.append(Path(executable).resolve())
+    candidates.extend(Path(token).resolve() for token in child_argv[1:] if Path(token).is_file())
+    return {
+        str(path): hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in sorted(set(candidates))
+    }
+
+
+def matching_fingerprint_predictions(
+    cases: list[dict],
+    predictions: list[dict],
+    *,
+    prompt_fn,
+    child_argv: list[str],
+    parser_schema_version: str,
+) -> list[dict]:
+    """Keep only frozen predictions produced from the current replay inputs."""
+    expected = {
+        case_id(case): replay_fingerprint(
+            case=case,
+            prompt=prompt_fn(case),
+            child_argv=child_argv,
+            parser_schema_version=parser_schema_version,
+        )
+        for case in cases
+    }
+    return [
+        prediction
+        for prediction in predictions
+        if prediction.get("replay_fingerprint") == expected.get(case_id(prediction))
+    ]
 
 
 def load_done_ids(predictions_path: Path, expected_fingerprints: dict[str, str]) -> set[str]:
@@ -780,6 +803,12 @@ def default_workflow_path() -> Path:
     return Path(__file__).resolve().parents[4] / WORKFLOW_RELPATH
 
 
+def require_text(path: Path, label: str) -> str:
+    if not path.is_file():
+        raise ReplayError(f"Missing {label}: {path}")
+    return path.read_text()
+
+
 def empty_stats() -> dict:
     return {"total": 0, "agreed": 0, "disagreed": 0}
 
@@ -977,7 +1006,19 @@ def render_report(result: dict, *, title: str = "# Maestro Reviewer Replay Repor
 
 def score(args: argparse.Namespace) -> int:
     predictions_path = Path(args.predictions)
+    cases = read_jsonl(Path(args.cases))
+    predictions = read_jsonl(predictions_path)
     if getattr(args, "field", "label") == "expected_phase":
+        if any("case_context" in case for case in cases):
+            workflow_path = Path(args.workflow) if args.workflow else default_workflow_path()
+            excerpt = routing_excerpt(require_text(workflow_path, "workflow prompt"))
+            predictions = matching_fingerprint_predictions(
+                cases,
+                predictions,
+                prompt_fn=lambda case: compose_routing_prompt(excerpt, case),
+                child_argv=replay_child_argv(DEFAULT_CODEX_CMD, cases),
+                parser_schema_version=ROUTING_PARSER_SCHEMA_VERSION,
+            )
         scoring = {
             "expected_fn": lambda case: case.get("expected_phase"),
             "label_fn": lambda case: case.get("state") or "unknown",
@@ -986,9 +1027,19 @@ def score(args: argparse.Namespace) -> int:
         }
         title = "# Routing Replay Report"
     else:
+        if any("case_context" in case for case in cases):
+            reviewer_path = Path(args.reviewer_prompt) if args.reviewer_prompt else default_reviewer_prompt_path()
+            reviewer_prompt = require_text(reviewer_path, "reviewer prompt")
+            predictions = matching_fingerprint_predictions(
+                cases,
+                predictions,
+                prompt_fn=lambda case: compose_prompt(reviewer_prompt, case),
+                child_argv=replay_child_argv(DEFAULT_CODEX_CMD, cases),
+                parser_schema_version=REVIEW_PARSER_SCHEMA_VERSION,
+            )
         scoring = {}
         title = "# Maestro Reviewer Replay Report"
-    result = score_predictions(read_jsonl(Path(args.cases)), read_jsonl(predictions_path), **scoring)
+    result = score_predictions(cases, predictions, **scoring)
     report_path = Path(args.report) if args.report else predictions_path.parent / "report.md"
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(render_report(result, title=title))
@@ -1031,6 +1082,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     score_parser.add_argument("--predictions", required=True)
     score_parser.add_argument("--report", help="Report path (default: <predictions dir>/report.md)")
     score_parser.add_argument("--field", choices=["label", "expected_phase"], default="label", help="Case field holding the expected value: label (reviews) or expected_phase (routing)")
+    score_parser.add_argument("--reviewer-prompt", help="Reviewer prompt used by frozen predictions")
+    score_parser.add_argument("--workflow", help="Workflow prompt used by frozen routing predictions")
     score_parser.set_defaults(func=score)
     return parser.parse_args(argv)
 

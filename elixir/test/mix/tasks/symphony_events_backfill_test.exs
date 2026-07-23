@@ -31,8 +31,12 @@ defmodule Mix.Tasks.Symphony.Events.BackfillTest do
 
   setup do
     previous_linear_client_module = Application.get_env(:symphony_elixir, :linear_client_module)
+    previous_maestro_actor_id = System.get_env("SYMPHONY_MAESTRO_ACTOR_ID")
+    System.put_env("SYMPHONY_MAESTRO_ACTOR_ID", "maestro-app")
 
     on_exit(fn ->
+      restore_env("SYMPHONY_MAESTRO_ACTOR_ID", previous_maestro_actor_id)
+
       if is_nil(previous_linear_client_module) do
         Application.delete_env(:symphony_elixir, :linear_client_module)
       else
@@ -194,6 +198,10 @@ defmodule Mix.Tasks.Symphony.Events.BackfillTest do
           "🤖 Maestro 预审核: 本轮交付还需修改。\n\n建议回复方式: request changes\n置信度 7/10",
           parent_id: "impl-1",
           created_at: "2026-07-01T11:00:00Z",
+          author_id: "maestro-app",
+          author_name: "Maestro",
+          author_app: true,
+          bot_actor_present: false,
           author_is_bot: true
         ),
         comment("impl-1-human", "同意 Maestro，请修改。", parent_id: "impl-1", created_at: "2026-07-01T11:30:00Z", author_name: "Alice"),
@@ -225,6 +233,9 @@ defmodule Mix.Tasks.Symphony.Events.BackfillTest do
       created_at: Keyword.fetch!(opts, :created_at),
       parent_id: Keyword.get(opts, :parent_id),
       author_name: Keyword.get(opts, :author_name),
+      author_id: Keyword.get(opts, :author_id),
+      author_app: Keyword.get(opts, :author_app, :unknown),
+      bot_actor_present: Keyword.get(opts, :bot_actor_present, :unknown),
       author_is_bot: Keyword.get(opts, :author_is_bot, false),
       resolved_at: Keyword.get(opts, :resolved_at)
     }

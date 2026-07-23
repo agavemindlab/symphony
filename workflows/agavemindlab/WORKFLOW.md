@@ -269,9 +269,10 @@ Symphony only starts the agent when the issue is in an active state (`Todo`, `In
    - Gather the auto-rework signal separately from human feedback. It qualifies only when the issue is `Rework`, the Maestro-authored reply matches the current reviewed artifact/head, contains both `建议回复方式: request changes` and `🤖 auto: 已自动将 issue 置为 Rework`, and its `建议回复` starts with `/rework <phase>`. All other Maestro replies are advisory. An awaiting Implementation artifact with `Review verdict: ESCALATED` can never qualify, even if a legacy reply carries that marker.
    - For an awaiting Implementation artifact with `Review verdict: ESCALATED`,
      select the newest judgment card attributed by Linear to the configured
-     Maestro OAuth app: require a complete `user.id`, `user.app == true`, no
-     `botActor`, and `user.name == "Maestro"`; a matching body from any other
-     principal is not a Maestro card. It must also match the current
+     Maestro OAuth app: require non-empty `SYMPHONY_MAESTRO_ACTOR_ID`,
+     `user.id == SYMPHONY_MAESTRO_ACTOR_ID`, `user.app == true`, no `botActor`,
+     and `user.name == "Maestro"`; a matching body from any other principal is
+     not a Maestro card. Missing configuration fails closed. The card must also match the current
      Implementation artifact id and PR Head. The card qualifies only when
      `收敛判断`, `建议 target phase`, `建议 issue status`,
      `执行状态: awaiting human action`, `判断理由`, and

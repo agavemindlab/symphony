@@ -364,6 +364,9 @@ defmodule SymphonyElixir.CoreTest do
   test "ESCALATED Maestro emits an advisory judgment and routes only an attributable human state action" do
     workflow = shared_workflow_prompt()
 
+    project_defaults =
+      File.read!(Path.expand("../workflows/agavemindlab/project.env.defaults", File.cwd!()))
+
     maestro_workflow =
       File.read!(Path.expand("../workflows/agavemindlab/MAESTRO_WORKFLOW.md", File.cwd!()))
 
@@ -411,6 +414,8 @@ defmodule SymphonyElixir.CoreTest do
 
     assert workflow =~ "Issue.history"
     assert normalized_workflow =~ "configured Maestro OAuth app"
+    assert workflow =~ "`user.id == SYMPHONY_MAESTRO_ACTOR_ID`"
+    assert workflow =~ "Missing configuration fails closed"
     assert workflow =~ "`user.app == true`"
     assert workflow =~ "`user.name == \"Maestro\"`"
     assert normalized_workflow =~ "a matching body from any other"
@@ -421,6 +426,7 @@ defmodule SymphonyElixir.CoreTest do
     assert workflow =~ "final live re-read"
     refute workflow =~ "differs from the Maestro card author's actor id"
     refute workflow =~ "differs from the current Implementation artifact author's actor id"
+    assert project_defaults =~ ~r/SYMPHONY_MAESTRO_ACTOR_ID="[0-9a-f-]{36}"/
     assert workflow =~ "using a user-actor token"
     assert normalized_workflow =~ "match the current Implementation artifact id and PR Head"
     assert workflow =~ "exactly once"

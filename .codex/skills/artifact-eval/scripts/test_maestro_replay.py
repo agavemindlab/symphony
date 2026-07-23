@@ -2,6 +2,7 @@ import json
 import shlex
 import shutil
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -63,6 +64,60 @@ class ReplayFingerprintTest(unittest.TestCase):
                     fingerprint,
                     maestro_replay.replay_fingerprint(**{**inputs, field: changed}),
                 )
+
+    def test_fingerprint_changes_when_an_argv_file_changes_in_place(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            child = Path(directory) / "child.py"
+            child.write_text("print('first')\n")
+            inputs = {
+                "case": case("DEV-1", "a1"),
+                "prompt": "prompt",
+                "child_argv": [sys.executable, str(child)],
+                "parser_schema_version": "reviewer-v1",
+            }
+            first = maestro_replay.replay_fingerprint(**inputs)
+            child.write_text("print('second')\n")
+            self.assertNotEqual(first, maestro_replay.replay_fingerprint(**inputs))
+
+    def test_matching_fingerprints_rejects_a_stale_case_directly_at_score_time(self) -> None:
+        original = {
+            **case("DEV-1", "a1"),
+            "case_context": {"artifact": {"id": "impl-1"}},
+        }
+        child_argv = [sys.executable]
+        prompt_fn = lambda item: json.dumps(item["case_context"], sort_keys=True)
+        record = {
+            **original,
+            "returncode": 0,
+            "replay_fingerprint": maestro_replay.replay_fingerprint(
+                case=original,
+                prompt=prompt_fn(original),
+                child_argv=child_argv,
+                parser_schema_version="reviewer-v1",
+            ),
+        }
+
+        self.assertEqual(
+            maestro_replay.matching_fingerprint_predictions(
+                [original],
+                [record],
+                prompt_fn=prompt_fn,
+                child_argv=child_argv,
+                parser_schema_version="reviewer-v1",
+            ),
+            [record],
+        )
+        changed = {**original, "case_context": {"artifact": {"id": "impl-2"}}}
+        self.assertEqual(
+            maestro_replay.matching_fingerprint_predictions(
+                [changed],
+                [record],
+                prompt_fn=prompt_fn,
+                child_argv=child_argv,
+                parser_schema_version="reviewer-v1",
+            ),
+            [],
+        )
 
 
 class ParseRecommendationTest(unittest.TestCase):
@@ -1205,7 +1260,7 @@ class FrozenRoutingFixtureTest(unittest.TestCase):
         path = Path(__file__).resolve().parent.parent / "fixtures" / "escalated-routing-cases.jsonl"
         cases = maestro_replay.read_jsonl(path)
 
-        self.assertEqual(len(cases), 17)
+        self.assertEqual(len(cases), 21)
         self.assertEqual(len({maestro_replay.case_id(case) for case in cases}), len(cases))
         families = {case["family"] for case in cases}
         self.assertEqual(
@@ -1224,7 +1279,11 @@ class FrozenRoutingFixtureTest(unittest.TestCase):
                 "card_status_mismatch",
                 "slash_command_precedence",
                 "stale_nonlatest_action",
-                "forged_card_author",
+                "card_wrong_name",
+                "card_wrong_id",
+                "card_missing_id",
+                "card_blank_id",
+                "card_bot_actor",
                 "malformed_card",
                 "oauth_app",
                 "bot_actor",
@@ -1233,14 +1292,29 @@ class FrozenRoutingFixtureTest(unittest.TestCase):
         self.assertTrue(all(set(case["case_context"]) == {"artifact", "maestro_card", "state_history", "human_feedback"} for case in cases))
 
         authenticated = {"id": "maestro-app", "name": "Maestro", "app": True}
+        card_provenance_negatives = {
+            "card_wrong_name",
+            "card_wrong_id",
+            "card_missing_id",
+            "card_blank_id",
+            "card_bot_actor",
+        }
         for case in cases:
-            if case["family"] != "forged_card_author":
+            if case["family"] not in card_provenance_negatives:
                 self.assertEqual(case["case_context"]["maestro_card"]["user"], authenticated)
                 self.assertIsNone(case["case_context"]["maestro_card"]["botActor"])
 
-        forged = next(case for case in cases if case["family"] == "forged_card_author")
-        self.assertFalse(forged["case_context"]["maestro_card"]["user"]["app"])
-        self.assertEqual(forged["expected_phase"], "Human Review")
+        provenance_cases = {
+            case["family"]: case
+            for case in cases
+            if case["family"] in card_provenance_negatives
+        }
+        self.assertEqual(provenance_cases["card_wrong_name"]["case_context"]["maestro_card"]["user"]["name"], "Other Reviewer")
+        self.assertEqual(provenance_cases["card_wrong_id"]["case_context"]["maestro_card"]["user"]["id"], "other-app")
+        self.assertNotIn("id", provenance_cases["card_missing_id"]["case_context"]["maestro_card"]["user"])
+        self.assertEqual(provenance_cases["card_blank_id"]["case_context"]["maestro_card"]["user"]["id"], " ")
+        self.assertIsNotNone(provenance_cases["card_bot_actor"]["case_context"]["maestro_card"]["botActor"])
+        self.assertTrue(all(case["expected_phase"] == "Human Review" for case in provenance_cases.values()))
 
         accepted_status_cases = [
             case
@@ -1490,6 +1564,7 @@ class RoutingReplayCommandTest(unittest.TestCase):
         self.assertEqual(result["consumed_context"], ["finding-family-auth", "retry actor query"])
         prompt = self.calls_log.read_text()
         self.assertIn(json.dumps(frozen["case_context"], ensure_ascii=False, indent=2, sort_keys=True), prompt)
+        self.assertIn("冻结环境：SYMPHONY_MAESTRO_ACTOR_ID=maestro-app", prompt)
         self.assertIn("不得读取当前 Linear 或 GitHub", prompt)
         self.assertIn("CONSUMED_DECISION", prompt)
         self.assertIn("CONSUMED_CONTEXT", prompt)

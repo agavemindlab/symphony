@@ -2,6 +2,7 @@ defmodule SymphonyElixir.PhaseEventsTest do
   use ExUnit.Case, async: true
 
   alias SymphonyElixir.PhaseEvents
+  @maestro_actor_id "maestro-app"
 
   test "phase_of_artifact recognizes phase headings with leading whitespace and rejects everything else" do
     assert PhaseEvents.phase_of_artifact("## Requirements\n\n目标") == "Requirements"
@@ -484,6 +485,30 @@ defmodule SymphonyElixir.PhaseEventsTest do
     end
   end
 
+  test "emits Maestro analytics only for the configured OAuth actor" do
+    artifact = comment("impl-1", "## Implementation\n\nPR", created_at: "2026-07-01T10:00:00Z")
+    body = render_card(continue_card_fields())
+
+    for provenance <- [
+          [author_id: "human-1", author_name: "Mallory", author_app: false, bot_actor_present: false],
+          [author_id: "other-app", author_name: "Maestro", author_app: true, bot_actor_present: false]
+        ] do
+      reply =
+        comment(
+          "forged",
+          body,
+          [
+            parent_id: "impl-1",
+            created_at: "2026-07-01T11:00:00Z",
+            author_is_bot: provenance[:author_app]
+          ] ++ provenance
+        )
+
+      events = PhaseEvents.derive_all([artifact, reply], maestro_actor_id: @maestro_actor_id)
+      refute Enum.any?(events, &(&1.event_type == "maestro_review"))
+    end
+  end
+
   test "keeps blockquoted, mixed-delimiter, and shorter-closer fence content excluded" do
     for body <- [
           """
@@ -617,10 +642,18 @@ defmodule SymphonyElixir.PhaseEventsTest do
   defp derive_maestro_event(reply_body) do
     comments = [
       comment("impl-1", "## Implementation\n\nPR", created_at: "2026-07-01T10:00:00Z"),
-      comment("maestro-reply", reply_body, parent_id: "impl-1", created_at: "2026-07-01T11:00:00Z", author_is_bot: true)
+      comment("maestro-reply", reply_body,
+        parent_id: "impl-1",
+        created_at: "2026-07-01T11:00:00Z",
+        author_id: @maestro_actor_id,
+        author_name: "Maestro",
+        author_app: true,
+        bot_actor_present: false,
+        author_is_bot: true
+      )
     ]
 
-    assert [_published, event] = PhaseEvents.derive(comments)
+    assert [_published, event] = PhaseEvents.derive(comments, maestro_actor_id: @maestro_actor_id)
     event
   end
 
@@ -683,6 +716,9 @@ defmodule SymphonyElixir.PhaseEventsTest do
       created_at: Keyword.fetch!(opts, :created_at),
       parent_id: Keyword.get(opts, :parent_id),
       author_name: Keyword.get(opts, :author_name),
+      author_id: Keyword.get(opts, :author_id),
+      author_app: Keyword.get(opts, :author_app, :unknown),
+      bot_actor_present: Keyword.get(opts, :bot_actor_present, :unknown),
       author_is_bot: Keyword.get(opts, :author_is_bot, false),
       resolved_at: Keyword.get(opts, :resolved_at)
     }

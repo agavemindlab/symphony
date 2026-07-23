@@ -77,6 +77,9 @@ defmodule SymphonyElixir.PhaseEvents do
   ]
 
   @type comment :: %{
+          optional(:author_id) => String.t() | nil,
+          optional(:author_app) => boolean() | :unknown,
+          optional(:bot_actor_present) => boolean() | :unknown,
           id: String.t(),
           body: String.t(),
           created_at: DateTime.t() | String.t() | nil,
@@ -87,9 +90,10 @@ defmodule SymphonyElixir.PhaseEvents do
         }
   @type event :: map()
 
-  @spec derive([comment()]) :: [event()]
-  def derive(comments) when is_list(comments) do
-    derive_sorted(comments, &comment_events/2)
+  @spec derive([comment()], keyword()) :: [event()]
+  def derive(comments, opts \\ []) when is_list(comments) do
+    maestro_actor_id = Keyword.get(opts, :maestro_actor_id, System.get_env("SYMPHONY_MAESTRO_ACTOR_ID"))
+    derive_sorted(comments, &comment_events(&1, &2, maestro_actor_id))
   end
 
   @doc """
@@ -98,10 +102,12 @@ defmodule SymphonyElixir.PhaseEvents do
   from `derive/1`, whose phase-events-only contract other consumers
   (routing brief, agreement stats) rely on.
   """
-  @spec derive_all([comment()]) :: [event()]
-  def derive_all(comments) when is_list(comments) do
+  @spec derive_all([comment()], keyword()) :: [event()]
+  def derive_all(comments, opts \\ []) when is_list(comments) do
+    maestro_actor_id = Keyword.get(opts, :maestro_actor_id, System.get_env("SYMPHONY_MAESTRO_ACTOR_ID"))
+
     derive_sorted(comments, fn comment, artifact_phases ->
-      comment_events(comment, artifact_phases) ++ human_comment_events(comment)
+      comment_events(comment, artifact_phases, maestro_actor_id) ++ human_comment_events(comment)
     end)
   end
 
@@ -169,29 +175,48 @@ defmodule SymphonyElixir.PhaseEvents do
         do: {id, phase}
   end
 
-  defp comment_events(%{parent_id: nil} = comment, _artifact_phases) do
+  defp comment_events(%{parent_id: nil} = comment, _artifact_phases, _maestro_actor_id) do
     case phase_of_artifact(comment.body) do
       nil -> []
       phase -> [published_event(comment, phase)]
     end
   end
 
-  defp comment_events(%{parent_id: parent_id} = comment, artifact_phases) do
+  defp comment_events(%{parent_id: parent_id} = comment, artifact_phases, maestro_actor_id) do
     case Map.fetch(artifact_phases, parent_id) do
-      {:ok, phase} -> reply_events(comment, phase)
+      {:ok, phase} -> reply_events(comment, phase, maestro_actor_id)
       :error -> []
     end
   end
 
-  defp reply_events(comment, phase) do
+  defp reply_events(comment, phase, maestro_actor_id) do
     case reply_marker(comment.body) do
-      :maestro_review -> [maestro_review_event(comment, phase)]
-      :approved -> [closing_event(comment, phase, "phase_approved")]
-      :auto_advanced -> [closing_event(comment, phase, "phase_auto_advanced")]
-      :reworked -> [rework_event(comment, phase)]
-      :rollback -> [rollback_event(comment, phase)]
-      nil -> []
+      :maestro_review ->
+        if maestro_comment?(comment, maestro_actor_id), do: [maestro_review_event(comment, phase)], else: []
+
+      :approved ->
+        [closing_event(comment, phase, "phase_approved")]
+
+      :auto_advanced ->
+        [closing_event(comment, phase, "phase_auto_advanced")]
+
+      :reworked ->
+        [rework_event(comment, phase)]
+
+      :rollback ->
+        [rollback_event(comment, phase)]
+
+      nil ->
+        []
     end
+  end
+
+  defp maestro_comment?(comment, maestro_actor_id) do
+    is_binary(maestro_actor_id) and String.trim(maestro_actor_id) != "" and
+      Map.get(comment, :author_id) == maestro_actor_id and
+      Map.get(comment, :author_name) == "Maestro" and
+      Map.get(comment, :author_app) == true and
+      Map.get(comment, :bot_actor_present) == false
   end
 
   defp human_comment_events(%{author_is_bot: false} = comment) do
