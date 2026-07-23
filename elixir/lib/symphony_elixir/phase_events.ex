@@ -16,8 +16,37 @@ defmodule SymphonyElixir.PhaseEvents do
   @confidence_label_regex ~r/置信度\s*[:：]?\s*(\d+(?:\.\d+)?)/u
   @marker_decoration_regex ~r/\A[\s>#*_`~-]+/u
   @needs_clarification_regex ~r/(?:\A|\n)\s*###\s+NEEDS CLARIFICATION\b|\[NEEDS CLARIFICATION/iu
-  @convergence_label_regex ~r/\A\s*(?:[-*>+]\s*)*(?:[`*_]+\s*)*收敛判断(?:\s*[`*_]+)?\s*[:：]/iu
-  @convergence_decision_regex ~r/\A\s*(?:[-*>+]\s*)*(?:[`*_]+\s*)*收敛判断(?:\s*[`*_]+)?\s*[:：]\s*[*_`]*(continue[ _\/-]+implementation|rework[ _\/-]+design|ask[ _\/-]+clarification)[*_`]*\s*\z/iu
+  @judgment_labels ["收敛判断", "建议 target phase", "建议 issue status", "执行状态"]
+  @judgment_label_source Enum.join(@judgment_labels, "|")
+  @judgment_field_regex Regex.compile!(
+                          "\\A\\s*(?:[-+>]\\s+)*(?<label>#{@judgment_label_source}|\\*(?:#{@judgment_label_source})\\*|\\*\\*(?:#{@judgment_label_source})\\*\\*)\\s*[:：]\\s*(?<value>.*?)\\s*\\z",
+                          "iu"
+                        )
+  @fence_regex ~r/\A\s*(?:`{3,}|~{3,})/u
+  @judgment_values %{
+    "收敛判断" => %{
+      "continue implementation" => "continue_implementation",
+      "rework design" => "rework_design",
+      "ask clarification" => "ask_clarification"
+    },
+    "建议 target phase" => %{
+      "requirements" => "Requirements",
+      "design" => "Design",
+      "implementation" => "Implementation",
+      "deployment" => "Deployment"
+    },
+    "建议 issue status" => %{
+      "in progress" => "In Progress",
+      "rework" => "Rework",
+      "unchanged" => "unchanged"
+    },
+    "执行状态" => %{"awaiting human action" => "awaiting_human_action"}
+  }
+  @convergence_contracts %{
+    "continue_implementation" => {"Implementation", "In Progress"},
+    "rework_design" => {"Design", "Rework"},
+    "ask_clarification" => {"Implementation", "unchanged"}
+  }
 
   @recommendation_markers [
     {"continue implementation", "continue_implementation"},
@@ -215,48 +244,79 @@ defmodule SymphonyElixir.PhaseEvents do
   end
 
   defp maestro_review_event(comment, phase) do
+    judgment_fields = judgment_fields(comment.body)
+
     Map.merge(
       %{
         event_type: "maestro_review",
         event_id: "maestro_review:" <> comment.id,
         phase: phase,
         artifact_comment_id: comment.parent_id,
-        recommendation: maestro_recommendation(comment.body),
+        recommendation: maestro_recommendation(comment.body, judgment_fields),
         confidence: maestro_confidence(comment.body),
         auto: String.contains?(comment.body, "🤖 auto"),
         comment_id: comment.id,
         occurred_at: occurred_at(comment.created_at)
       },
-      maestro_judgment_fields(comment.body)
+      maestro_judgment_fields(judgment_fields)
     )
   end
 
-  defp maestro_judgment_fields(body) do
-    if String.contains?(body, "收敛判断") do
+  defp maestro_judgment_fields(fields) do
+    if Enum.any?(fields, &match?({"收敛判断", _value}, &1)) do
       %{
-        target_phase: labeled_value(body, "建议\\s+target\\s+phase", "Requirements|Design|Implementation|Deployment"),
-        target_status: labeled_value(body, "建议\\s+issue\\s+status", "In Progress|Rework|unchanged"),
-        execution_state: if(labeled_value(body, "执行状态", "awaiting human action"), do: "awaiting_human_action")
+        target_phase: judgment_value(fields, "建议 target phase"),
+        target_status: judgment_value(fields, "建议 issue status"),
+        execution_state: judgment_value(fields, "执行状态")
       }
     else
       %{}
     end
   end
 
-  defp labeled_value(body, label, values) do
-    pattern = "^\\s*(?:[-*>]\\s*)*(?:[`*_]+\\s*)*#{label}(?:\\s*[`*_]+)?\\s*[:：]\\s*[*_`]*(#{values})(?:\\s*[*_`]+)?\\s*$"
+  defp judgment_fields(body) do
+    body
+    |> String.split("\n")
+    |> Enum.reduce({false, []}, fn line, {in_fence?, fields} ->
+      cond do
+        Regex.match?(@fence_regex, line) ->
+          {!in_fence?, fields}
 
-    case Regex.scan(Regex.compile!(pattern, "imu"), body, capture: :all_but_first) do
-      [[value]] -> value
-      _other -> nil
+        in_fence? ->
+          {true, fields}
+
+        captures = Regex.named_captures(@judgment_field_regex, line) ->
+          label = String.trim(captures["label"], "*")
+          {false, [{label, captures["value"]} | fields]}
+
+        true ->
+          {false, fields}
+      end
+    end)
+    |> elem(1)
+    |> Enum.reverse()
+  end
+
+  defp judgment_value(fields, label) do
+    case Enum.filter(fields, &match?({^label, _value}, &1)) do
+      [{^label, value}] ->
+        @judgment_values
+        |> Map.fetch!(label)
+        |> Map.get(String.downcase(value))
+
+      _other ->
+        nil
     end
   end
 
-  defp maestro_recommendation(body) do
-    lines = String.split(body, "\n")
-    convergence_lines = Enum.filter(lines, &Regex.match?(@convergence_label_regex, &1))
-    candidate_lines = if convergence_lines == [], do: lines, else: convergence_lines
-    recommendations = candidate_lines |> Enum.map(&recommendation_from_line/1) |> Enum.reject(&is_nil/1)
+  defp maestro_recommendation(body, fields) do
+    recommendations =
+      if Enum.any?(fields, &match?({"收敛判断", _value}, &1)) do
+        [convergence_recommendation(fields)]
+      else
+        body |> String.split("\n") |> Enum.map(&recommendation_from_line/1)
+      end
+      |> Enum.reject(&is_nil/1)
 
     case recommendations do
       [recommendation] -> recommendation
@@ -264,16 +324,18 @@ defmodule SymphonyElixir.PhaseEvents do
     end
   end
 
+  defp convergence_recommendation(fields) do
+    recommendation = judgment_value(fields, "收敛判断")
+
+    if Map.get(@convergence_contracts, recommendation) ==
+         {judgment_value(fields, "建议 target phase"), judgment_value(fields, "建议 issue status")} and
+         judgment_value(fields, "执行状态") == "awaiting_human_action",
+       do: recommendation
+  end
+
   defp recommendation_from_line(line) do
-    if Regex.match?(@convergence_label_regex, line) do
-      case Regex.run(@convergence_decision_regex, line, capture: :all_but_first) do
-        [decision] -> decision |> String.downcase() |> String.replace(~r/[ _\/-]+/u, " ") |> match_recommendation()
-        nil -> "unknown"
-      end
-    else
-      if String.contains?(line, "建议回复方式") do
-        line |> String.downcase() |> String.replace(~r/[_\/-]/u, " ") |> match_recommendation()
-      end
+    if String.contains?(line, "建议回复方式") do
+      line |> String.downcase() |> String.replace(~r/[_\/-]/u, " ") |> match_recommendation()
     end
   end
 

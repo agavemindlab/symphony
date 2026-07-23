@@ -274,6 +274,9 @@ defmodule SymphonyElixir.PhaseEventsTest do
              derive_maestro_event("""
              🤖 Maestro 预审核
              > **收敛判断**: continue implementation
+             > **建议 target phase**: Implementation
+             > **建议 issue status**: In Progress
+             > **执行状态**: awaiting human action
              """)
 
     assert %{recommendation: "continue_implementation"} =
@@ -281,6 +284,9 @@ defmodule SymphonyElixir.PhaseEventsTest do
              🤖 Maestro 预审核
              建议回复方式: continue implementation
              收敛判断: continue implementation
+             建议 target phase: Implementation
+             建议 issue status: In Progress
+             执行状态: awaiting human action
              """)
 
     assert %{recommendation: "rework_design", target_phase: "Design", target_status: "Rework"} =
@@ -301,7 +307,7 @@ defmodule SymphonyElixir.PhaseEventsTest do
              执行状态: awaiting human action
              """)
 
-    assert %{target_phase: nil, target_status: nil} =
+    assert %{recommendation: "unknown", target_phase: nil, target_status: nil} =
              derive_maestro_event("""
              🤖 Maestro 预审核
              收敛判断: continue implementation
@@ -309,7 +315,7 @@ defmodule SymphonyElixir.PhaseEventsTest do
              建议 issue status: unknown
              """)
 
-    assert %{target_phase: nil, target_status: nil, execution_state: nil} =
+    assert %{recommendation: "unknown", target_phase: nil, target_status: nil, execution_state: nil} =
              derive_maestro_event("""
              🤖 Maestro 预审核
              收敛判断: continue implementation
@@ -329,6 +335,63 @@ defmodule SymphonyElixir.PhaseEventsTest do
              建议 issue status: Rework
              执行状态: awaiting human action
              """)
+  end
+
+  test "parses every judgment label in plain, single-emphasis, and double-emphasis forms" do
+    fields = [
+      {"收敛判断", "continue implementation"},
+      {"建议 target phase", "Implementation"},
+      {"建议 issue status", "In Progress"},
+      {"执行状态", "awaiting human action"}
+    ]
+
+    expected = %{
+      recommendation: "continue_implementation",
+      target_phase: "Implementation",
+      target_status: "In Progress",
+      execution_state: "awaiting_human_action"
+    }
+
+    for {selected_label, _value} <- fields, wrapper <- [& &1, &"*#{&1}*", &"**#{&1}**"] do
+      body =
+        fields
+        |> Enum.map_join("\n", fn {label, value} ->
+          rendered_label = if label == selected_label, do: wrapper.(label), else: label
+          "#{rendered_label}: #{value}"
+        end)
+
+      event = derive_maestro_event("🤖 Maestro 预审核\n#{body}")
+      assert ^expected = Map.take(event, Map.keys(expected))
+    end
+  end
+
+  test "rejects non-exact, fenced, empty, contradictory, and duplicate convergence fields" do
+    valid_fields = [
+      {"收敛判断", "continue implementation", "rework design"},
+      {"建议 target phase", "Implementation", "Design"},
+      {"建议 issue status", "In Progress", "Rework"},
+      {"执行状态", "awaiting human action", "completed"}
+    ]
+
+    for {selected_label, value, contradictory_value} <- valid_fields,
+        replacement <- [
+          "***#{selected_label}***: #{value}",
+          "\\*#{selected_label}\\*: #{value}",
+          "*#{selected_label}: #{value}",
+          "* #{selected_label} *: #{value}",
+          "```\n#{selected_label}: #{value}\n```",
+          "#{selected_label}:",
+          "#{selected_label}: #{value}\n#{selected_label}: #{contradictory_value}",
+          "#{selected_label}: #{value}\n*#{selected_label}*: #{value}\n**#{selected_label}**: #{value}"
+        ] do
+      fields =
+        Enum.map_join(valid_fields, "\n", fn
+          {^selected_label, _value, _contradictory_value} -> replacement
+          {label, field_value, _contradictory_value} -> "#{label}: #{field_value}"
+        end)
+
+      assert %{recommendation: "unknown"} = derive_maestro_event("🤖 Maestro 预审核\n#{fields}")
+    end
   end
 
   test "maestro reviews without a recognizable recommendation are unknown" do

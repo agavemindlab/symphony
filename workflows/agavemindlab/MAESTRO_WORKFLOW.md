@@ -103,13 +103,19 @@ Maestro OAuth app identity.
    If checkout fails, remove `symphony:maestro` if Linear auth works, then stop.
 3. Identify the current awaiting-review phase artifact and current PR/head when
    one exists. Record that artifact/head and the latest human feedback/state
-   activity as the pre-review snapshot. A prior reply qualifies for
-   deduplication only when it is a Maestro preflight reply, matches the same
-   artifact/head, and no newer human feedback or human-authored state action
-   exists. For a qualifying reply, write no second review. If it carries the
-   auto-rework marker below but the issue is still in `Human Review`, retry the
-   `Rework` state update before removing `symphony:maestro`; otherwise keep
-   `Human Review`, remove the label, and stop.
+   activity as the pre-review snapshot. For ESCALATED judgment cards, select the
+   newest authenticated matching card for that artifact/head, then require each
+   decision, routing, rationale, direction, and decision-specific field below
+   exactly once, non-empty, and internally consistent. Complete unique card validation precedes deduplication
+   and `symphony:maestro` removal. Never fall
+   back to an older valid card. A malformed newest card remains retryable: keep
+   the trigger label and continue with a fresh review that can post a corrected
+   newer card. A completely valid prior reply qualifies for deduplication only
+   when no newer human feedback or human-authored state action exists. For a
+   qualifying reply, write no second review. If it carries the auto-rework
+   marker below but the issue is still in `Human Review`, retry the `Rework`
+   state update before removing `symphony:maestro`; otherwise keep `Human Review`,
+   remove the label, and stop.
 4. Read `.agents/skills/maestro/agents/maestro-reviewer.md` and apply it directly
    in this fresh preflight session, collecting Linear / GitHub / repository
    evidence plus Codex session transcripts referenced by phase artifact

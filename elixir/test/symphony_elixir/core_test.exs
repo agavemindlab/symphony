@@ -391,12 +391,13 @@ defmodule SymphonyElixir.CoreTest do
     refute maestro_reviewer =~ "/rework design"
 
     assert workflow =~ "Issue.history"
-    assert workflow =~ "actor.app == false"
-    assert workflow =~ "newest row that produced the current state"
+    assert workflow =~ "`actor.app == false`"
     assert workflow =~ "has no `botActor`"
-    assert workflow =~ "differs from the Maestro card author's actor id"
-    assert workflow =~ "differs from the current Implementation artifact author's actor id"
-    assert workflow =~ "direct `Human Review` → current-state transition"
+    assert workflow =~ "Do not compare `actor.id`"
+    assert workflow =~ "latest direct `Human Review` → current-state transition"
+    assert workflow =~ "final live re-read"
+    refute workflow =~ "differs from the Maestro card author's actor id"
+    refute workflow =~ "differs from the current Implementation artifact author's actor id"
     assert workflow =~ "using a user-actor token"
     assert normalized_workflow =~ "matching the current Implementation artifact id and PR Head"
     assert workflow =~ "exactly once"
@@ -406,6 +407,9 @@ defmodule SymphonyElixir.CoreTest do
     assert workflow =~ "copy the card's `判断理由` and `下一轮建议方向`"
     assert normalized_workflow =~ "existing Cross-phase rework protocol"
     assert workflow =~ "Missing or ambiguous provenance fails closed"
+    assert maestro_workflow =~ "Complete unique card validation precedes deduplication"
+    assert maestro_workflow =~ "newest authenticated matching card"
+    assert maestro_workflow =~ "A malformed newest card remains retryable"
 
     assert normalized_workflow =~
              "Never treat a Maestro or integration state write as human approval"
