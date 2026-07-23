@@ -443,6 +443,7 @@ defmodule SymphonyElixir.CoreTest do
     assert maestro_workflow =~ "`user.app == true`"
     assert maestro_workflow =~ "no `botActor`"
     assert maestro_workflow =~ "A malformed newest card remains retryable"
+
     assert maestro_workflow =~
              ~r/Only after the reread proves the new card is\s+authenticated, complete, unique, and bound/
 
