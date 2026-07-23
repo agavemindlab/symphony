@@ -596,6 +596,10 @@ class ReplayCommandTest(unittest.TestCase):
             "Reviewed Implementation artifact id: <artifact id>\nPR Head: <head>",
             prompt,
         )
+        self.assertIn(
+            "ask clarification 还须逐行输出待人工回答的问题、回答判定标准。",
+            prompt,
+        )
         self.assertNotIn("OUTPUT_MARKERS", prompt)
         self.assertNotIn("只允许 linear / gh", prompt)
         self.assertEqual(
