@@ -432,6 +432,8 @@ defmodule SymphonyElixir.CoreTest do
     assert workflow =~ "at least two distinct, nonblank concrete answer options"
     assert workflow =~ "Only a complete unresolved Requirements or Design clarification gate"
     assert workflow =~ "the phase published a clarification question rather than ordinary review"
+    assert workflow =~ "With no new human reply, return the issue to `Human Review`"
+    assert workflow =~ "answer in that thread, then move the issue to `In Progress`"
 
     complete_question = %{
       question: "Which retention window should apply?",
@@ -502,6 +504,7 @@ defmodule SymphonyElixir.CoreTest do
       assert skill =~ "After publication, an incomplete clarification gate returns `stop` to Main Flow"
       refute skill =~ "Do not execute the complete-gate steps below"
       assert skill =~ "A complete unresolved `### NEEDS CLARIFICATION` gate moves to `Human Review` directly"
+      assert skill =~ "回答后，将 issue 置为 `In Progress`"
       assert skill =~ "### Clean-exit completeness bar"
       refute skill =~ "prefer surfacing it as a batched"
     end
