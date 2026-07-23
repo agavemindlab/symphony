@@ -18,11 +18,15 @@ defmodule SymphonyElixir.PhaseEvents do
   @needs_clarification_regex ~r/(?:\A|\n)\s*###\s+NEEDS CLARIFICATION\b|\[NEEDS CLARIFICATION/iu
   @judgment_labels ["收敛判断", "建议 target phase", "建议 issue status", "执行状态"]
   @judgment_label_source Enum.join(@judgment_labels, "|")
+  @line_prefix_source "\\s*(?:[-+>]\\s+)*"
   @judgment_field_regex Regex.compile!(
-                          "\\A\\s*(?:[-+>]\\s+)*(?<label>#{@judgment_label_source}|\\*(?:#{@judgment_label_source})\\*|\\*\\*(?:#{@judgment_label_source})\\*\\*)\\s*[:：]\\s*(?<value>.*?)\\s*\\z",
+                          "\\A#{@line_prefix_source}(?<label>#{@judgment_label_source}|\\*(?:#{@judgment_label_source})\\*|\\*\\*(?:#{@judgment_label_source})\\*\\*)\\s*[:：]\\s*(?<value>.*?)\\s*\\z",
                           "iu"
                         )
-  @fence_regex ~r/\A\s*(?:`{3,}|~{3,})/u
+  @fence_regex Regex.compile!(
+                 "\\A#{@line_prefix_source}(?<delimiter>`{3,}|~{3,})(?<suffix>.*)\\z",
+                 "u"
+               )
   @judgment_values %{
     "收敛判断" => %{
       "continue implementation" => "continue_implementation",
@@ -277,25 +281,43 @@ defmodule SymphonyElixir.PhaseEvents do
   defp judgment_fields(body) do
     body
     |> String.split("\n")
-    |> Enum.reduce({false, []}, fn line, {in_fence?, fields} ->
+    |> Enum.reduce({nil, []}, fn line, {open_fence, fields} ->
       cond do
-        Regex.match?(@fence_regex, line) ->
-          {!in_fence?, fields}
+        fence = fence(line) ->
+          if fence_closes?(open_fence, fence),
+            do: {nil, fields},
+            else: {open_fence || opening_fence(fence), fields}
 
-        in_fence? ->
-          {true, fields}
+        open_fence ->
+          {open_fence, fields}
 
         captures = Regex.named_captures(@judgment_field_regex, line) ->
           label = String.trim(captures["label"], "*")
-          {false, [{label, captures["value"]} | fields]}
+          {nil, [{label, captures["value"]} | fields]}
 
         true ->
-          {false, fields}
+          {nil, fields}
       end
     end)
     |> elem(1)
     |> Enum.reverse()
   end
+
+  defp fence(line) do
+    case Regex.named_captures(@fence_regex, line) do
+      %{"delimiter" => delimiter, "suffix" => suffix} ->
+        {String.first(delimiter), String.length(delimiter), suffix}
+
+      nil ->
+        nil
+    end
+  end
+
+  defp fence_closes?({character, minimum_length}, {character, length, suffix}),
+    do: length >= minimum_length and String.trim(suffix) == ""
+
+  defp fence_closes?(_open_fence, _fence), do: false
+  defp opening_fence({character, length, _suffix}), do: {character, length}
 
   defp judgment_value(fields, label) do
     case Enum.filter(fields, &match?({^label, _value}, &1)) do
@@ -311,7 +333,7 @@ defmodule SymphonyElixir.PhaseEvents do
 
   defp maestro_recommendation(body, fields) do
     recommendations =
-      if Enum.any?(fields, &match?({"收敛判断", _value}, &1)) do
+      if Enum.any?(@judgment_labels, &String.contains?(body, &1)) do
         [convergence_recommendation(fields)]
       else
         body |> String.split("\n") |> Enum.map(&recommendation_from_line/1)

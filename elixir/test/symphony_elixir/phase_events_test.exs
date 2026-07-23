@@ -394,6 +394,58 @@ defmodule SymphonyElixir.PhaseEventsTest do
     end
   end
 
+  test "keeps blockquoted, mixed-delimiter, and shorter-closer fence content excluded" do
+    for body <- [
+          """
+          > ````
+          > 收敛判断: continue implementation
+          > 建议 target phase: Implementation
+          > 建议 issue status: In Progress
+          > 执行状态: awaiting human action
+          > ````
+          """,
+          """
+          ~~~~
+          收敛判断: continue implementation
+          ```
+          建议 target phase: Implementation
+          建议 issue status: In Progress
+          执行状态: awaiting human action
+          建议回复方式: continue implementation
+          ~~~~
+          """,
+          """
+          ````
+          收敛判断: continue implementation
+          ```
+          建议 target phase: Implementation
+          建议 issue status: In Progress
+          执行状态: awaiting human action
+          建议回复方式: continue implementation
+          ````
+          """
+        ] do
+      assert %{recommendation: "unknown"} = derive_maestro_event("🤖 Maestro 预审核\n#{body}")
+    end
+  end
+
+  test "malformed or fenced judgment attempts cannot fall back to an ordinary recommendation" do
+    for decision_attempt <- [
+          "***收敛判断***: continue implementation",
+          "```\n收敛判断: continue implementation\n```"
+        ] do
+      assert %{recommendation: "unknown"} =
+               derive_maestro_event("""
+               🤖 Maestro 预审核
+               #{decision_attempt}
+               建议 target phase: Implementation
+               建议 issue status: In Progress
+               执行状态: awaiting human action
+               建议回复方式: continue implementation
+               """)
+    end
+  end
+
   test "maestro reviews without a recognizable recommendation are unknown" do
     assert %{recommendation: "unknown"} = derive_maestro_event("🤖 Maestro 预审核:\n建议回复方式: hold off for now")
     assert %{recommendation: "unknown", confidence: nil} = derive_maestro_event("🤖 Maestro 预审核: 只留了一句话，没有建议行。")
