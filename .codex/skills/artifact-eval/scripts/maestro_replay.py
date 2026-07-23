@@ -174,6 +174,7 @@ def compose_prompt(reviewer_prompt: str, case: dict) -> str:
     published_at = case.get("published_at") or "unknown"
     context = frozen_context_json(case)
     if context is not None:
+        required_context = ",".join(case.get("required_context_markers") or []) or "none"
         preamble = (
             f"冻结回放评审 {issue} 的 artifact {artifact}（发布于 {published_at}）。"
             "以下 case_context 是唯一可用事实；不得读取当前 Linear 或 GitHub，"
@@ -197,6 +198,7 @@ def compose_prompt(reviewer_prompt: str, case: dict) -> str:
             "PR Head: <head>\n"
             "再以两行审计 contract 结束：\n"
             f"case_context:\n```json\n{context}\n```\n"
+            f"本 case 的 required_context_markers: {required_context}\n"
             "`RECOMMENDATION: <continue implementation|rework design|ask clarification>`\n"
             "`CONSUMED_CONTEXT: <逐一使用并原样列出 required_context_markers 的每个值，逗号分隔；没有则 none>`"
         )

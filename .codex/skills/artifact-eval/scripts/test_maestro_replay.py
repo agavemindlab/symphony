@@ -604,6 +604,10 @@ class ReplayCommandTest(unittest.TestCase):
             "逐一使用并原样列出 required_context_markers 的每个值",
             prompt,
         )
+        self.assertIn(
+            "本 case 的 required_context_markers: family-auth-decreasing",
+            prompt,
+        )
         self.assertNotIn("OUTPUT_MARKERS", prompt)
         self.assertNotIn("只允许 linear / gh", prompt)
         self.assertEqual(
