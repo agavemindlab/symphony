@@ -35,8 +35,9 @@ DEFAULT_CODEX_CMD = (
     "codex exec --sandbox workspace-write "
     "-c sandbox_workspace_write.network_access=true --skip-git-repo-check"
 )
+FROZEN_MODEL = "gpt-5.5"
 HERMETIC_CODEX_CMD = (
-    "codex exec --strict-config --json --ignore-user-config --ignore-rules --ephemeral "
+    f"codex exec --strict-config --json --ignore-user-config --ignore-rules --ephemeral --model {FROZEN_MODEL} "
     "-c 'default_permissions=\"replay\"' "
     "-c 'permissions.replay.filesystem={\":minimal\"=\"read\"}' "
     "-c 'permissions.replay.network.enabled=false' "
@@ -489,16 +490,18 @@ def replay_fingerprint(
     prompt: str,
     child_argv: list[str],
     parser_schema_version: str,
+    runtime_snapshot: dict | None = None,
 ) -> str:
     """Bind a reusable prediction to every deterministic replay input."""
+    runtime = runtime_snapshot or replay_runtime_snapshot(child_argv)
     payload = {
         "fingerprint_schema_version": REPLAY_FINGERPRINT_SCHEMA_VERSION,
         "parser_schema_version": parser_schema_version,
         "case": case,
         "prompt": prompt,
         "child_argv": child_argv,
-        "runtime_files": replay_runtime_files(child_argv),
-        "runtime_version": replay_runtime_version(child_argv),
+        "runtime_files": runtime["files"],
+        "runtime_version": runtime["version"],
     }
     canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode()).hexdigest()
@@ -519,6 +522,13 @@ def replay_runtime_files(child_argv: list[str]) -> dict[str, str]:
 def replay_runtime_version(child_argv: list[str]) -> str:
     executable = shutil.which(child_argv[0]) if child_argv else None
     return executable_version(str(Path(executable).resolve())) if executable else "unresolved"
+
+
+def replay_runtime_snapshot(child_argv: list[str]) -> dict:
+    return {
+        "files": replay_runtime_files(child_argv),
+        "version": replay_runtime_version(child_argv),
+    }
 
 
 @functools.lru_cache(maxsize=None)
@@ -542,12 +552,14 @@ def matching_fingerprint_predictions(
     parser_schema_version: str,
 ) -> list[dict]:
     """Keep only frozen predictions produced from the current replay inputs."""
+    runtime_snapshot = replay_runtime_snapshot(child_argv)
     expected = {
         case_id(case): replay_fingerprint(
             case=case,
             prompt=prompt_fn(case),
             child_argv=child_argv,
             parser_schema_version=parser_schema_version,
+            runtime_snapshot=runtime_snapshot,
         )
         for case in cases
     }
@@ -592,6 +604,7 @@ def execute_replay(
     if any("case_context" in case for case in cases):
         preflight_strict_replay(child_argv, args.timeout)
 
+    runtime_snapshot = replay_runtime_snapshot(child_argv)
     jobs = []
     for case in cases:
         prompt = prompt_fn(case)
@@ -600,6 +613,7 @@ def execute_replay(
             prompt=prompt,
             child_argv=child_argv,
             parser_schema_version=parser_schema_version,
+            runtime_snapshot=runtime_snapshot,
         )
         jobs.append((case, prompt, fingerprint))
 

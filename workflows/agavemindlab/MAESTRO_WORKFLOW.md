@@ -106,7 +106,11 @@ Maestro OAuth app identity.
    activity as the pre-review snapshot. A prior reply is a deduplication
    candidate only when it is a Maestro preflight reply, matches the same
    artifact/head, and no newer human feedback or human-authored state action
-   exists. For an ESCALATED judgment card, first select the newest authenticated matching card
+   exists. For an ESCALATED judgment card, authenticated means a non-empty
+   `SYMPHONY_MAESTRO_ACTOR_ID`, `user.id == SYMPHONY_MAESTRO_ACTOR_ID`,
+   `user.name == "Maestro"`, `user.app == true`, and no `botActor`; any missing
+   or mismatched provenance is not a deduplication candidate. First select the
+   newest authenticated matching card
    and require every decision, routing, rationale, direction, and
    decision-specific field below exactly once, non-empty, and internally
    consistent. Complete unique card validation precedes deduplication and

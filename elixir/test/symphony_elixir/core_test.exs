@@ -438,6 +438,10 @@ defmodule SymphonyElixir.CoreTest do
     assert workflow =~ "Missing or ambiguous provenance fails closed"
     assert maestro_workflow =~ "Complete unique card validation precedes deduplication"
     assert maestro_workflow =~ "newest authenticated matching card"
+    assert maestro_workflow =~ ~r/non-empty\s+`SYMPHONY_MAESTRO_ACTOR_ID`/
+    assert maestro_workflow =~ "`user.id == SYMPHONY_MAESTRO_ACTOR_ID`"
+    assert maestro_workflow =~ "`user.app == true`"
+    assert maestro_workflow =~ "no `botActor`"
     assert maestro_workflow =~ "A malformed newest card remains retryable"
 
     assert normalized_workflow =~

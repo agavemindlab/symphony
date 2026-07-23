@@ -490,8 +490,10 @@ defmodule SymphonyElixir.PhaseEventsTest do
     body = render_card(continue_card_fields())
 
     for provenance <- [
-          [author_id: "human-1", author_name: "Mallory", author_app: false, bot_actor_present: false],
-          [author_id: "other-app", author_name: "Maestro", author_app: true, bot_actor_present: false]
+          [author_id: "other-app", author_name: "Maestro", author_app: true, bot_actor_present: false],
+          [author_id: @maestro_actor_id, author_name: "Mallory", author_app: true, bot_actor_present: false],
+          [author_id: @maestro_actor_id, author_name: "Maestro", author_app: false, bot_actor_present: false],
+          [author_id: @maestro_actor_id, author_name: "Maestro", author_app: true, bot_actor_present: true]
         ] do
       reply =
         comment(
@@ -505,6 +507,22 @@ defmodule SymphonyElixir.PhaseEventsTest do
         )
 
       events = PhaseEvents.derive_all([artifact, reply], maestro_actor_id: @maestro_actor_id)
+      refute Enum.any?(events, &(&1.event_type == "maestro_review"))
+    end
+
+    for configured_id <- [nil, ""] do
+      reply =
+        comment("maestro", body,
+          parent_id: "impl-1",
+          created_at: "2026-07-01T11:00:00Z",
+          author_id: @maestro_actor_id,
+          author_name: "Maestro",
+          author_app: true,
+          author_is_bot: true,
+          bot_actor_present: false
+        )
+
+      events = PhaseEvents.derive_all([artifact, reply], maestro_actor_id: configured_id)
       refute Enum.any?(events, &(&1.event_type == "maestro_review"))
     end
   end

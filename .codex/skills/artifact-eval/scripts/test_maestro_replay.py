@@ -119,6 +119,23 @@ class ReplayFingerprintTest(unittest.TestCase):
             [],
         )
 
+    def test_matching_fingerprints_hashes_the_runtime_once(self) -> None:
+        cases = [case("DEV-1", "a1"), case("DEV-2", "a2")]
+        with mock.patch.object(
+            maestro_replay,
+            "replay_runtime_snapshot",
+            return_value={"files": {"codex": "hash"}, "version": "codex-cli test"},
+        ) as snapshot:
+            maestro_replay.matching_fingerprint_predictions(
+                cases,
+                [],
+                prompt_fn=lambda item: item["issue_identifier"],
+                child_argv=["codex"],
+                parser_schema_version="reviewer-v1",
+            )
+
+        snapshot.assert_called_once_with(["codex"])
+
 
 class ParseRecommendationTest(unittest.TestCase):
     def test_tolerates_markdown_decoration_and_case(self) -> None:
@@ -677,6 +694,7 @@ class ReplayCommandTest(unittest.TestCase):
         self.assertIn("--ignore-user-config", argv)
         self.assertIn("--ignore-rules", argv)
         self.assertIn("--ephemeral", argv)
+        self.assertEqual(argv[argv.index("--model") + 1], "gpt-5.5")
         self.assertIn('default_permissions="replay"', argv)
         self.assertIn('permissions.replay.filesystem={":minimal"="read"}', argv)
         self.assertIn("permissions.replay.network.enabled=false", argv)
@@ -1097,9 +1115,14 @@ class ReplayCommandTest(unittest.TestCase):
             "expected_decision": "rework_design",
             "required_output_markers": ["收敛判断", "不受影响的既有约束"],
             "required_context_markers": ["family-session-persisted"],
-            "case_context": {},
+            "case_context": {"artifact": {"id": "decision-rework", "pr_head": "head-current"}},
         }
         self.cases_path.write_text(json.dumps(frozen) + "\n")
+        reviewer_prompt = maestro_replay.require_text(
+            maestro_replay.default_reviewer_prompt_path(),
+            "reviewer prompt",
+        )
+        child_argv = maestro_replay.replay_child_argv(maestro_replay.DEFAULT_CODEX_CMD, [frozen])
         predictions_path = self.tmp / "predictions.jsonl"
         predictions_path.write_text(
             json.dumps(
@@ -1108,13 +1131,44 @@ class ReplayCommandTest(unittest.TestCase):
                     "prediction": "rework design",
                     "observed_output_markers": ["收敛判断"],
                     "consumed_context": ["family-session-persisted"],
+                    "replay_fingerprint": maestro_replay.replay_fingerprint(
+                        case=frozen,
+                        prompt=maestro_replay.compose_prompt(reviewer_prompt, frozen),
+                        child_argv=child_argv,
+                        parser_schema_version=maestro_replay.REVIEW_PARSER_SCHEMA_VERSION,
+                    ),
                 },
             )
             + "\n",
         )
 
         self.assertEqual(maestro_replay.main(["score", "--cases", str(self.cases_path), "--predictions", str(predictions_path)]), 0)
-        self.assertIn("| all cases | 1 | 0 | 1 | 0.0% |", (self.tmp / "report.md").read_text())
+        report = (self.tmp / "report.md").read_text()
+        self.assertIn("1 scored prediction(s); 0 excluded", report)
+        self.assertIn("| all cases | 1 | 0 | 1 | 0.0% |", report)
+
+        record = json.loads(predictions_path.read_text())
+        predictions_path.write_text(
+            json.dumps(
+                {
+                    **record,
+                    "observed_output_markers": frozen["required_output_markers"],
+                    "consumed_context": frozen["required_context_markers"],
+                    "card_decision": "rework_design",
+                    "card_target_phase": "Design",
+                    "card_target_status": "Rework",
+                    "card_execution_state": "awaiting_human_action",
+                    "card_artifact_id": "decision-rework",
+                    "card_pr_head": "head-current",
+                    "replay_fingerprint": "stale",
+                },
+            )
+            + "\n",
+        )
+        self.assertEqual(maestro_replay.main(["score", "--cases", str(self.cases_path), "--predictions", str(predictions_path)]), 0)
+        stale_report = (self.tmp / "report.md").read_text()
+        self.assertIn("| all cases | 1 | 0 | 1 | 0.0% |", stale_report)
+        self.assertIn("predicted unparsed", stale_report)
 
     def test_missing_cases_file_fails_cleanly(self) -> None:
         exit_code = maestro_replay.main(
@@ -1644,8 +1698,13 @@ class RoutingReplayCommandTest(unittest.TestCase):
             **routing_case("FIXTURE-ESC-1", "frozen", expected="Implementation"),
             "expected_decision": "continue_implementation",
             "required_context_markers": ["finding-family-auth", "retry actor query"],
+            "case_context": {},
         }
         self.cases_path.write_text(json.dumps(frozen) + "\n")
+        excerpt = maestro_replay.routing_excerpt(
+            maestro_replay.require_text(maestro_replay.default_workflow_path(), "workflow prompt"),
+        )
+        child_argv = maestro_replay.replay_child_argv(maestro_replay.DEFAULT_CODEX_CMD, [frozen])
         predictions_path = self.tmp / "predictions.jsonl"
         predictions_path.write_text(
             json.dumps(
@@ -1654,6 +1713,12 @@ class RoutingReplayCommandTest(unittest.TestCase):
                     "prediction": "Implementation",
                     "consumed_decision": "continue_implementation",
                     "consumed_context": ["finding-family-auth"],
+                    "replay_fingerprint": maestro_replay.replay_fingerprint(
+                        case=frozen,
+                        prompt=maestro_replay.compose_routing_prompt(excerpt, frozen),
+                        child_argv=child_argv,
+                        parser_schema_version=maestro_replay.ROUTING_PARSER_SCHEMA_VERSION,
+                    ),
                 },
             )
             + "\n",
@@ -1665,7 +1730,30 @@ class RoutingReplayCommandTest(unittest.TestCase):
             ),
             0,
         )
-        self.assertIn("| all cases | 1 | 0 | 1 | 0.0% |", (self.tmp / "report.md").read_text())
+        report = (self.tmp / "report.md").read_text()
+        self.assertIn("1 scored prediction(s); 0 excluded", report)
+        self.assertIn("| all cases | 1 | 0 | 1 | 0.0% |", report)
+
+        record = json.loads(predictions_path.read_text())
+        predictions_path.write_text(
+            json.dumps(
+                {
+                    **record,
+                    "consumed_context": frozen["required_context_markers"],
+                    "replay_fingerprint": "stale",
+                },
+            )
+            + "\n",
+        )
+        self.assertEqual(
+            maestro_replay.main(
+                ["score", "--field", "expected_phase", "--cases", str(self.cases_path), "--predictions", str(predictions_path)],
+            ),
+            0,
+        )
+        stale_report = (self.tmp / "report.md").read_text()
+        self.assertIn("| all cases | 1 | 0 | 1 | 0.0% |", stale_report)
+        self.assertIn("predicted unparsed", stale_report)
 
     def test_missing_workflow_file_fails_cleanly(self) -> None:
         exit_code = maestro_replay.main(
