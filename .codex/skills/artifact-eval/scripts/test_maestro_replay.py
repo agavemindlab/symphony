@@ -1234,6 +1234,17 @@ class RoutingReplayCommandTest(unittest.TestCase):
             ],
         )
 
+    def run_frozen_routing_replay(self, codex_cmd: str) -> int:
+        with (
+            mock.patch.object(
+                maestro_replay,
+                "replay_child_argv",
+                return_value=shlex.split(codex_cmd),
+            ),
+            mock.patch.object(maestro_replay, "preflight_strict_replay"),
+        ):
+            return self.run_routing_replay(maestro_replay.DEFAULT_CODEX_CMD)
+
     def read_predictions(self) -> list[dict]:
         return maestro_replay.read_jsonl(self.output_dir / "predictions.jsonl")
 
@@ -1289,7 +1300,7 @@ class RoutingReplayCommandTest(unittest.TestCase):
             "print('CONSUMED_CONTEXT: finding-family-auth, retry actor query')\n",
         )
 
-        self.assertEqual(self.run_routing_replay(codex_cmd), 0)
+        self.assertEqual(self.run_frozen_routing_replay(codex_cmd), 0)
 
         result = self.read_predictions()[0]
         self.assertEqual(result["prediction"], "Implementation")
@@ -1328,7 +1339,7 @@ class RoutingReplayCommandTest(unittest.TestCase):
             "print(answer, file=sys.stderr)\n",
         )
 
-        self.assertEqual(self.run_routing_replay(codex_cmd), 0)
+        self.assertEqual(self.run_frozen_routing_replay(codex_cmd), 0)
         result = self.read_predictions()[0]
         self.assertEqual(result["prediction"], "Implementation")
         self.assertEqual(result["consumed_decision"], "continue_implementation")
