@@ -23,8 +23,9 @@ the reviewer subagent must collect evidence itself from the issue key.
    pass current conversation history, issue title/state, artifact text, comment
    summaries, PR facts, prior `$maestro` results, your expected answer, or the
    reviewer prompt as a skill/file reference.
-4. Wait for the subagent result. If required output fields are missing, ask the
-   same subagent once to fix only the format; do not supply issue facts.
+4. Wait for the subagent result. If required output fields are missing, or a
+   below-10 confidence lacks a concrete reason matched to `依据` or `注意`, ask
+   the same subagent once to fix only the format; do not supply issue facts.
 5. For ordinary reviews, return the subagent's concise Chinese recommendation with:
    - `建议回复方式`: approve / request changes / ask
      clarification / merge nudge / completion confirmation / no reply yet.
@@ -37,6 +38,8 @@ the reviewer subagent must collect evidence itself from the issue key.
      agent and write it as the human's review note for the next run. For ask
      clarification and no reply yet, set `回复对象` to human and write it for the
      human, explaining what Maestro cannot decide.
+   - `置信度`: `N/10`; when below 10/10, name the concrete evidence gap, ambiguity,
+     or risk that prevents a higher score and match it to `依据` or `注意`.
    - `依据`: 2-5 evidence bullets.
    - `注意`: only if there is uncertainty or missing evidence.
    For `Review verdict: ESCALATED`, relay the reviewer's advisory card instead:

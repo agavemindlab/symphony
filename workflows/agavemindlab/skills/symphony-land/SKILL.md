@@ -14,9 +14,9 @@ description:
 - Ensure the PR commit history is organized before merge, rewriting only when
   the history is scattered or fixup-heavy.
 - Keep PR CI and post-merge verification runs green.
-- Use the approved `## Implementation` artifact — its `风险/注意` (merge
-  safety) and `Merge 后验证` (post-merge verification plan) sections — as the
-  Merging gate.
+- Use the approved `## Implementation` artifact's `Acceptance mapping` and
+  `合并风险判断` as the Merging gate, plus `Merge 后验证` when any criterion is
+  `延迟验收`.
 - Squash-merge the PR once checks pass, then watch the `main` workflows for
   the merge commit.
 - Do not yield to the user until the PR is merged and the post-merge runs are
@@ -33,9 +33,11 @@ description:
 
 1. Locate the PR for the current branch.
 2. Confirm the human approved Merging (the issue is in the `Merging` state)
-   and read the approved `## Implementation` artifact before merging. It must
-   supply both gate elements:
-   - A merge-safety read: the `验收对照` and `风险/注意` sections establish
+   and read the approved `## Requirements` and `## Implementation` artifacts
+   before merging. Use Requirements' `关键假设` as the source of truth for
+   `延迟验收`; Implementation must supply a merge-safety read plus a matching
+   post-merge verification plan for each such criterion:
+   - A merge-safety read: the `Acceptance mapping` and `合并风险判断` sections establish
      whether the PR is safe to merge and whether any remaining issue could
      crash services, corrupt/lose data, break background jobs, or only affect
      a bounded path.
@@ -43,8 +45,10 @@ description:
      exact runnable checks to run after merge (required when any acceptance
      criterion is `延迟验收` — see phase-requirements' Verifiability
      classification).
-   If either element is missing, do not merge; note the gap in the
-   `## Implementation` thread and return the issue to `Human Review`.
+   A missing merge-safety read always blocks merging. A missing post-merge
+   verification plan blocks merging only when an acceptance criterion is
+   `延迟验收`. Note the gap in the `## Implementation` thread and return the
+   issue to `Human Review`.
 3. Confirm the relevant `AGENTS.md` validation is green locally before any push.
 4. If the working tree has uncommitted changes, commit with the `symphony-commit` skill
    and push with the `symphony-pr` skill before proceeding.

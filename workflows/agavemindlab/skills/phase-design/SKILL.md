@@ -3,9 +3,8 @@ name: phase-design
 description:
   Run the Design phase of the Symphony workflow. Produce the `## Design`
   Linear artifact with the chosen approach, rationale, and a diagram for
-  non-trivial designs. Use after `## Requirements` is accepted (human
-  approval or agent auto-advance). Exit by posting the artifact; Main Flow
-  then auto-advances to Implementation or stops for human review.
+  non-trivial designs. Use after `## Requirements` is accepted. Exit by posting
+  the artifact and handing back `stop`.
 ---
 
 # Phase: Design
@@ -33,10 +32,9 @@ Produce **two paired outputs** — they serve different readers (see
 
 ## At phase start
 
-Main Flow has already closed `## Requirements` (a `✅` human approval or a
-`⏩` agent auto-advance reply) and set `current_phase: Design` before opening
-this skill. Just read the `## Requirements` artifact to extract `Primary:`,
-`验收标准 S<N>`, and `关键假设` before designing the approach.
+Main Flow has already closed `## Requirements` and set `current_phase: Design`
+before opening this skill. Just read the `## Requirements` artifact to extract
+`Primary:`, `验收标准 S<N>`, and `关键假设` before designing the approach.
 
 Treat the current `## Requirements` artifact as the close-test source of truth.
 Design may explain how each `S<N>` will be proven, but must not narrow, split,
@@ -316,7 +314,7 @@ Lifecycle: `.symphony/design.md` — and `.symphony/prototype/` when present —
 lives in the workspace, is listed in the workpad `cleanup` field, and is
 persisted through the `Symphony agent state` Linear issue attachment — it is a
 dev-cycle spec, not durable repo documentation, and never enters the PR
-branch. Keep the two in sync; the human only reviewed the artifact, so
+branch. Keep the two in sync; review covers only the artifact, so
 on any conflict the
 **approved artifact and its thread govern** and the doc is reconciled toward
 them.
@@ -519,38 +517,7 @@ about form, not correctness:
 
 Publish the `## Design` artifact through the workflow artifact protocol and set the workpad
 `current_phase: Design`. Do **not** move the issue yourself on a clean exit —
-hand back one of two outcomes (`advance` / `stop`) for Main Flow to execute.
-The decision is yours; Main Flow only carries it out.
-
-### Exit decision: advance or stop
-
-Choose **`advance`** only when **all** of these hold:
-
-- **Fresh run** — not a rework, and the artifact carries no prior human reply.
-- **State `In Progress`** — not `Rework`.
-- **Confident** — answer honestly: *Will this approach actually solve the
-  problem, and is it clearly the right direction, such that a human reviewer
-  would very likely approve it as-is?* Yes only if this is the standard or
-  clearly-best approach, with no contentious architectural fork, no risky
-  bet, and no non-obvious risk a reviewer would balk at.
-
-On `advance`, record `confidence: advance` in the workpad notes; Main Flow
-writes the `⏩` reply, sets `current_phase: Implementation`, persists state,
-and stops this agent run. The next Symphony dispatch opens
-`phase-implementation`.
-
-Otherwise choose **`stop`** — Main Flow adds `symphony:maestro`, then moves the issue to `Human Review`.
-This is the right outcome for a rework, for a human already in the thread,
-for the `Rework` state, and for the **complete-but-not-confident** case:
-there is a real architectural fork a reasonable reviewer might decide
-differently, an uncertain bet, or a non-obvious risk worth a human's eyes
-before you build on it. When you stop for a specific fork, prefer surfacing it
-as a batched `### NEEDS CLARIFICATION` block carrying your recommended
-direction (so the human can one-click `同意默认`) rather than only a passive
-`风险/注意` note; record `confidence: review` in the notes. Because a stop now
-costs the human a single approval, **when in doubt, stop** — auto-advance is
-for the clearly-right design. After a stop, the human approves by moving the
-issue back to an active state and the next session advances to Implementation.
+hand back **`stop`** for Main Flow to execute.
 
 (The "When blocked" path above is the harder stop: an unresolved
 `### NEEDS CLARIFICATION` means the artifact is not even safe to build on, so

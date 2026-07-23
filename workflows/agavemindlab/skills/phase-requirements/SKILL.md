@@ -5,8 +5,8 @@ description:
   a `## Requirements` Linear artifact with problem statement, motivation,
   and acceptance criteria locked down. Main Flow opens this skill only when
   Requirements is the target phase (a fresh Todo / In Progress ticket, or a
-  Rework that routes back here). Exit by posting the artifact; Main Flow then
-  auto-advances to Design or stops for human review.
+  Rework that routes back here). Exit by posting the artifact and handing back
+  `stop`.
 ---
 
 # Phase: Requirements
@@ -392,43 +392,7 @@ about form, not correctness:
 
 Publish the `## Requirements` artifact through the workflow artifact protocol
 and set the workpad `current_phase: Requirements`. Do **not** move the issue
-yourself on a clean exit — hand back one of two outcomes (`advance` / `stop`)
-for Main Flow to execute. The decision is yours; Main Flow only carries it out.
-
-### Exit decision: advance or stop
-
-Choose **`advance`** only when **all** of these hold:
-
-- **Fresh run** — not a rework, and the artifact carries no prior human reply.
-- **State `In Progress`** — not `Rework`.
-- **Confident** — answer honestly: *Did I actually understand the intent? Is
-  this the only reasonable reading of the issue, such that a human reviewer
-  would very likely approve it as-is?* Yes only if the problem statement and
-  acceptance criteria follow directly from the issue, with no material
-  ambiguity resolved by guessing.
-
-A declared `S<N> 验证：…` classification does **not** by itself block `advance`
-— it is a verifiability caveat, orthogonal to whether the intent was
-understood. As long as it is stated in `关键假设`, it stays visible on the
-posted artifact for a human to revisit later (a `⏩` artifact remains
-reviewable).
-
-On `advance`, record `confidence: advance` in the workpad notes; Main Flow
-writes the `⏩` reply, sets `current_phase: Design`, persists state, and stops
-this agent run. The next Symphony dispatch opens `phase-design`.
-
-Otherwise choose **`stop`** — Main Flow adds `symphony:maestro`, then moves the issue to `Human Review`.
-This is the right outcome for a rework, for a human already in the thread,
-for the `Rework` state, and for the **complete-but-not-confident** case: a
-key interpretation could reasonably go another way, or you resolved a
-material ambiguity with a judgment call a human might overturn. When you stop
-for a specific uncertain interpretation, prefer surfacing it as a batched
-`### NEEDS CLARIFICATION` block carrying your recommended reading (so the
-human can one-click `同意默认`) rather than only a passive `风险/注意` note;
-record `confidence: review` in the notes. Because a stop now costs the human a
-single approval, **when in doubt, stop** — auto-advance is for the unambiguous
-case. After a stop, the human approves by moving the issue back to an active
-state and the next session advances to Design.
+yourself on a clean exit — hand back **`stop`** for Main Flow to execute.
 
 (The "When blocked" path above is the harder stop: an unresolved
 `### NEEDS CLARIFICATION` means the artifact is not even safe to build on, so

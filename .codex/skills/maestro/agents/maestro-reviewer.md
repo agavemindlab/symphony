@@ -63,6 +63,11 @@ artifact. Return:
 - `建议 issue status`: the Linear state the human should set after sending the
   reply, or `unchanged`.
 - `建议回复`: a ready-to-send Chinese draft.
+- `置信度`: `N/10`; when below 10/10, name the concrete evidence gap, ambiguity,
+  or risk that prevents a higher score and match it to `依据` or `注意`; never
+  return a bare score. This explanation changes neither the verdict nor
+  recommended issue status, so approve may still carry low-risk gaps in `依据`
+  or `注意`.
 - `依据`: 2-5 evidence bullets.
 - `注意`: only if evidence is missing, ambiguous, or risky.
 

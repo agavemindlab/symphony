@@ -176,8 +176,8 @@ defmodule SymphonyElixir.CoreTest do
     assert prompt =~ "| Deployment | `phase-deployment` |"
     assert prompt =~ "## Main Flow"
     assert prompt =~ "Open and follow `.agents/skills/symphony-linear/SKILL.md`"
-    assert prompt =~ "create `.symphony/stop-after-turn`"
-    assert prompt =~ "Do **not** open the next phase skill in this session"
+    refute prompt =~ "create `.symphony/stop-after-turn`"
+    refute prompt =~ "Do **not** open the next phase skill in this session"
     assert prompt =~ "### Rework cycle (same phase)"
     assert prompt =~ "Requirements rework must also state"
     assert prompt =~ "reachable only via `Merging`"
@@ -191,11 +191,21 @@ defmodule SymphonyElixir.CoreTest do
     refute prompt =~ "exactly one top-level comment"
     refute prompt =~ "updates the existing one in place via `commentUpdate`"
     assert prompt =~ "## Workpad"
-    assert prompt =~ "⏩ 自动进入 [Next Phase]"
     assert prompt =~ "✅ 已批准，进入 [Next Phase]"
+    assert prompt =~ "Requirements and Design clean exits always hand back `stop`"
+    refute prompt =~ "Requirements and Design do not self-approve"
+    refute prompt =~ "**`advance`** →"
+    refute prompt =~ "Requirements and Design skills ever choose `advance`"
     assert prompt =~ ">>> 🛠️ 本次激活的 skills"
-    assert prompt =~ "Implementation never auto-advances"
+    assert prompt =~ "Implementation waits for `Merging` before Deployment"
     assert prompt =~ "Deployment only via `Merging`"
+    assert prompt =~ "must **not** advance to Deployment"
+    assert prompt =~ "remove `symphony:maestro` before intent routing"
+    refute prompt =~ "Maestro/human collision"
+    refute prompt =~ "Incomplete Maestro handoff"
+    refute prompt =~ "`comment.user.app = false`"
+    refute prompt =~ "`issueHistory.actor.app = false`"
+
     assert prompt =~ "## 建议新建 issue"
     assert prompt =~ "Do **not** use GitHub-style"
     assert prompt =~ "Phase Artifact Protocol"
@@ -204,7 +214,11 @@ defmodule SymphonyElixir.CoreTest do
     assert prompt =~ "Agent never moves to `Done`"
     assert prompt =~ "**`Human Review` is not an agent state for the normal workflow**"
     assert prompt =~ "`symphony:maestro`"
-    assert prompt =~ "add the `symphony:maestro` label before moving the issue to `Human Review`"
+
+    assert prompt =~
+             "one `issueUpdate` mutation that sets the `Human Review` state and full label set together"
+
+    assert prompt =~ "retry that mutation once"
     assert prompt =~ "collapsible sections (`>>>`)"
     assert prompt =~ "Skills-activated footer"
     assert prompt =~ "Codex session id"
@@ -255,7 +269,8 @@ defmodule SymphonyElixir.CoreTest do
     assert prompt =~ "judgment card"
     assert prompt =~ "收敛判断"
     assert prompt =~ "执行状态: awaiting human action"
-    assert prompt =~ "Auto-rework ordinary request changes"
+    assert prompt =~ "Apply review state transitions"
+    assert prompt =~ "MAESTRO_AUTO_APPROVE"
     assert prompt =~ "MAESTRO_AUTO_REWORK"
     assert prompt =~ "🤖 auto: 已自动将 issue 置为 Rework"
     assert prompt =~ "Review verdict: ESCALATED"
@@ -331,12 +346,16 @@ defmodule SymphonyElixir.CoreTest do
     assert workflow =~ "Maestro auto-rework"
     assert workflow =~ "🤖 auto: 已自动将 issue 置为 Rework"
 
+    {cleanup_position, _} = :binary.match(workflow, "Completed Maestro transition cleanup")
+    {clarification_position, _} = :binary.match(workflow, "If the awaiting-review artifact")
     {gate_position, _} = :binary.match(workflow, "ESCALATED human gate")
     {auto_rework_position, _} = :binary.match(workflow, "Maestro auto-rework")
     {intent_position, _} = :binary.match(workflow, "Fast path — explicit commands")
+    assert cleanup_position < clarification_position
+    assert cleanup_position < gate_position
     assert gate_position < auto_rework_position
     assert auto_rework_position < intent_position
-    assert maestro_workflow =~ "Auto-rework ordinary request changes"
+    assert maestro_workflow =~ "Apply review state transitions"
     assert maestro_workflow =~ "except an `ESCALATED` Implementation review"
     assert maestro_reviewer =~ "current-turn Codex session"
     assert maestro_reviewer =~ "Missing optional reviewer output is an"
@@ -480,19 +499,31 @@ defmodule SymphonyElixir.CoreTest do
     end
   end
 
-  test "DEV-5338 style question discussion fixture replies without rewriting artifacts" do
+  test "DEV-5536 question handoff skips Maestro while fresh rework activates it once" do
     workflow = shared_workflow_prompt()
     artifact = %{id: "requirements-question-thread", created_at: ~U[2026-06-23 01:00:00Z]}
 
-    calls = dry_run_artifact_calls(workflow, :question_discussion, "Requirements", artifact)
+    question_calls = dry_run_artifact_calls(workflow, :question_discussion, "Requirements", artifact)
 
-    assert calls == [{:commentCreate, {:reply_to_artifact, artifact.id}, "answer Requirements question"}]
-    refute Enum.any?(calls, fn {operation, _, _} -> operation in [:commentResolve, :commentUpdate] end)
+    assert {:commentCreate, {:reply_to_artifact, artifact.id}, "answer Requirements question"} in question_calls
 
-    refute Enum.any?(calls, fn
-             {:commentCreate, :top_level_phase_artifact, _body} -> true
+    assert {:issueUpdate, :state, "Human Review"} in question_calls
+    refute Enum.any?(question_calls, &match?({:issueUpdate, :add_label, "symphony:maestro"}, &1))
+    refute Enum.any?(question_calls, &match?({operation, _, _} when operation in [:commentResolve, :commentUpdate], &1))
+    refute Enum.any?(question_calls, &match?({:commentCreate, :top_level_phase_artifact, _body}, &1))
+
+    rework_calls = dry_run_artifact_calls(workflow, :same_phase_rework, "Implementation", artifact)
+
+    assert {:commentResolve, artifact.id} in rework_calls
+    assert {:commentCreate, :top_level_phase_artifact, "## Implementation"} in rework_calls
+
+    assert Enum.count(rework_calls, fn
+             {:issueUpdate, :state_and_labels, {"Human Review", "symphony:maestro"}} -> true
              _ -> false
-           end)
+           end) == 1
+
+    refute Enum.any?(rework_calls, &match?({:issueUpdate, :state, _}, &1))
+    refute Enum.any?(rework_calls, &match?({:issueUpdate, :add_label, _}, &1))
   end
 
   test "aggregate dispatch ordering interleaves projects" do
@@ -526,8 +557,29 @@ defmodule SymphonyElixir.CoreTest do
     design_skill =
       File.read!(Path.join(repo_root, "workflows/agavemindlab/skills/phase-design/SKILL.md"))
 
-    refute requirements_skill =~ "opens `phase-design` in the same session"
-    refute design_skill =~ "opens `phase-implementation` in the same session"
+    for skill <- [requirements_skill, design_skill] do
+      assert skill =~ "hand back **`stop`** for Main Flow to execute"
+      refute skill =~ "`advance`"
+    end
+  end
+
+  @tag :prompt_contract
+  test "merging routes legacy implementation artifacts through contract repair" do
+    workflow = shared_workflow_prompt() |> String.replace(~r/\s+/, " ")
+
+    assert workflow =~
+             "Evaluate in this order: no Implementation artifact → `Human Review`; artifact not for the current PR Head → `Rework`; for a current-Head artifact, `CLEAN` → Deployment, `ESCALATED` → `Human Review`, and absent or malformed verdict → Implementation"
+
+    assert workflow =~
+             "first move the issue to `In Progress` before re-reviewing or publishing the replacement artifact"
+
+    assert workflow =~ "same session"
+    assert workflow =~ "resolve the legacy artifact"
+    assert workflow =~ "publish a replacement artifact with the current verdict contract"
+    assert workflow =~ "workflow metadata/contract repair"
+    assert workflow =~ "does not imply a product or code-scope change"
+    assert workflow =~ "must not merge or enter Deployment"
+    assert workflow =~ "fresh human move to `Merging`"
   end
 
   @tag :prompt_contract
@@ -573,6 +625,35 @@ defmodule SymphonyElixir.CoreTest do
   end
 
   @tag :prompt_contract
+  test "DEV-5517 Maestro confidence explains why a higher score is unsupported without changing verdict routing" do
+    repo_root = Path.expand("..", File.cwd!())
+
+    maestro_workflow =
+      File.read!(Path.join(repo_root, "workflows/agavemindlab/MAESTRO_WORKFLOW.md"))
+
+    reviewer =
+      File.read!(Path.join(repo_root, ".codex/skills/maestro/agents/maestro-reviewer.md"))
+
+    launcher = File.read!(Path.join(repo_root, ".codex/skills/maestro/SKILL.md"))
+
+    maestro_workflow = String.replace(maestro_workflow, ~r/\s+/, " ")
+    reviewer = String.replace(reviewer, ~r/\s+/, " ")
+    launcher = String.replace(launcher, ~r/\s+/, " ")
+
+    for contract <- ["below 10/10", "concrete evidence gap, ambiguity, or risk", "`依据` or `注意`"] do
+      for prompt <- [maestro_workflow, reviewer, launcher], do: assert(prompt =~ contract)
+    end
+
+    refute maestro_workflow =~ "(when available)"
+    assert reviewer =~ "prevents a higher score"
+    assert reviewer =~ "never return a bare score"
+    assert reviewer =~ "changes neither the verdict nor"
+    assert reviewer =~ "recommended issue status"
+    assert reviewer =~ "approve may still carry low-risk gaps in `依据` or `注意`"
+    assert launcher =~ "below-10 confidence lacks a concrete reason"
+  end
+
+  @tag :prompt_contract
   test "shared workflow renders a visible expanded clarification gate" do
     repo_root = Path.expand("..", File.cwd!())
     workflow_path = Path.join(repo_root, "workflows/agavemindlab/WORKFLOW.md")
@@ -611,6 +692,17 @@ defmodule SymphonyElixir.CoreTest do
     maestro_workflow =
       File.read!(Path.join(repo_root, "workflows/agavemindlab/MAESTRO_WORKFLOW.md"))
 
+    workflow = File.read!(Path.join(repo_root, "workflows/agavemindlab/WORKFLOW.md"))
+
+    linear_skill =
+      File.read!(Path.join(repo_root, "workflows/agavemindlab/skills/symphony-linear/SKILL.md"))
+
+    requirements_skill =
+      File.read!(Path.join(repo_root, "workflows/agavemindlab/skills/phase-requirements/SKILL.md"))
+
+    design_skill =
+      File.read!(Path.join(repo_root, "workflows/agavemindlab/skills/phase-design/SKILL.md"))
+
     reviewer =
       File.read!(Path.join(repo_root, ".codex/skills/maestro/agents/maestro-reviewer.md"))
 
@@ -627,9 +719,98 @@ defmodule SymphonyElixir.CoreTest do
       assert land_skill =~ contract
     end
 
+    assert land_skill =~
+             ~r/A missing post-merge\s+verification plan blocks merging only when an acceptance criterion is\s+`延迟验收`\./
+
+    assert land_skill =~ "A missing merge-safety read always blocks merging"
+    assert land_skill =~ "Use Requirements' `关键假设` as the source of truth"
+    refute land_skill =~ "If either element is missing"
+    assert land_skill =~ "`Acceptance mapping` and `合并风险判断`"
+    refute land_skill =~ "`验收对照` and `风险/注意`"
+
     assert reviewer =~ "clean logical"
     assert reviewer =~ "same logical scope"
     assert maestro_workflow =~ "must not rewrite history"
+    assert maestro_workflow =~ "`MAESTRO_AUTO_APPROVE` is `true`/`1`"
+    assert maestro_workflow =~ "MAESTRO_AUTO_APPROVE_MIN_CONFIDENCE"
+
+    assert maestro_workflow =~
+             ~r/confidence >= `MAESTRO_AUTO_APPROVE_MIN_CONFIDENCE`\s+\(default 9\)/
+
+    assert maestro_workflow =~ "no unresolved clarification gate or high-impact open question"
+    assert maestro_workflow =~ "🤖 auto: 已自动批准，置为 In Progress"
+    assert maestro_workflow =~ ~r/never Implementation, Deployment,\s+or Spike findings/
+
+    assert maestro_workflow =~
+             ~r/auto: 已自动将 issue 置为 Rework.*move the issue to `Rework`.*leave\s+`symphony:maestro` for Main Flow to consume/s
+
+    assert maestro_workflow =~
+             ~r/auto: 已自动批准，置为 In Progress.*move the issue to\s+`In Progress` and leave `symphony:maestro` for Main Flow to consume/s
+
+    refute maestro_workflow =~ ~r/move the issue to\s+`In Progress`, then remove `symphony:maestro`/
+    assert maestro_workflow =~ ~r/Otherwise leave it in\s+`Human Review` and remove the label/
+    assert maestro_workflow =~ "retry the `Rework` state update and leave `symphony:maestro`"
+    assert maestro_workflow =~ "retry the `In Progress` state update and leave `symphony:maestro`"
+    assert maestro_workflow =~ "artifact is not `Review verdict: ESCALATED`"
+    assert maestro_workflow =~ "Immediately before an automatic state transition, re-read Linear"
+    assert workflow =~ "remove `symphony:maestro` before intent routing"
+    assert workflow =~ "If removal fails, retry once and stop before intent routing"
+    assert workflow =~ "**review approval**"
+    assert workflow =~ "human or qualifying Maestro approval"
+    assert workflow =~ "| Design | `phase-design` | Main Flow confirmed Requirements has a closing reply |"
+
+    assert workflow =~
+             "| Implementation | `phase-implementation` | Main Flow confirmed Design has a closing reply |"
+
+    assert workflow =~ "Requirements and Design clean exits always stop"
+    assert workflow =~ "Deployment only via `Merging`"
+
+    closing_replies =
+      workflow
+      |> String.split("### Phase-closing replies", parts: 2)
+      |> List.last()
+      |> String.split("### Identifying the current artifact", parts: 2)
+      |> List.first()
+
+    assert length(Regex.scan(~r/✅/, closing_replies)) == 1
+
+    for skill <- [requirements_skill, design_skill] do
+      assert skill =~ "hand back **`stop`** for Main Flow to execute"
+      refute skill =~ "⏩"
+      refute skill =~ "`advance`"
+    end
+
+    assert workflow =~
+             "Historical `⏩ 自动进入` replies count as closing replies for routing but are never written on new artifacts."
+
+    for forbidden <- [
+          "**`advance`** →",
+          "(advance, stop for review, blocked",
+          "`comment.user.app = false`",
+          "`issueHistory.actor.app = false`",
+          "history(first: 50)",
+          "Maestro/human collision",
+          "Incomplete Maestro handoff",
+          "collision recovery",
+          "pre/post state-write checks",
+          "After the state write, re-read Linear history"
+        ] do
+      refute workflow =~ forbidden
+      refute maestro_workflow =~ forbidden
+      refute linear_skill =~ forbidden
+    end
+
+    assert maestro_workflow =~
+             ~r/Every reply starts with `🤖 Maestro 预审核:`, records the reviewed artifact id\s+and Head, and includes `置信度：<N>\/10`/
+
+    assert maestro_workflow =~ "Ordinary replies include"
+    assert maestro_workflow =~ "ESCALATED replies use the judgment card"
+
+    refute maestro_workflow =~ "(when available) `置信度：<N>/10`"
+    assert reviewer =~ "`置信度`: `N/10`"
+    assert linear_skill =~ "Clean phase handoff sets `stateId` and the full `labelIds` in one `issueUpdate`"
+    assert linear_skill =~ "Main Flow removes it after an automatic transition"
+    refute linear_skill =~ "Add `symphony:maestro` before moving the issue to `Human Review`"
   end
 
   test "workflow defines the status card as a non-routing digest" do
@@ -666,7 +847,7 @@ defmodule SymphonyElixir.CoreTest do
     assert maestro_workflow =~ "{{ routing_brief }}"
     assert maestro_workflow =~ "🤖 Maestro 预审核"
     assert maestro_workflow =~ "建议回复方式"
-    assert maestro_workflow =~ "Auto-rework ordinary request changes"
+    assert maestro_workflow =~ "Apply review state transitions"
     assert maestro_workflow =~ "MAESTRO_AUTO_REWORK"
     assert maestro_workflow =~ "🤖 auto: 已自动将 issue 置为 Rework"
     assert maestro_workflow =~ "except an `ESCALATED` Implementation review"
@@ -2031,14 +2212,15 @@ defmodule SymphonyElixir.CoreTest do
     end)
 
     before_retry_ms = System.monotonic_time(:millisecond)
+    parent = self()
 
     log =
       capture_log(fn ->
         send(pid, {:DOWN, ref, :process, self(), :normal})
-        Process.sleep(50)
+        send(parent, {:hook_failure_state, :sys.get_state(pid)})
       end)
 
-    state = :sys.get_state(pid)
+    assert_receive {:hook_failure_state, state}
     after_retry_ms = System.monotonic_time(:millisecond)
 
     refute Map.has_key?(state.running, issue_id)
@@ -2844,7 +3026,7 @@ defmodule SymphonyElixir.CoreTest do
     assert prompt =~ "When the target phase is a rework of its own artifact"
     assert prompt =~ "Requirements rework must also state"
     assert prompt =~ "reachable only via `Merging`"
-    assert prompt =~ ".symphony/stop-after-turn"
+    refute prompt =~ ".symphony/stop-after-turn"
     assert prompt =~ "Codex session id"
     assert prompt =~ "CODEX_THREAD_ID"
     refute prompt =~ "symphony_session_context"
@@ -3889,9 +4071,38 @@ defmodule SymphonyElixir.CoreTest do
     ]
 
     if Enum.all?(required_contracts, &String.contains?(workflow, &1)) do
-      [{:commentCreate, {:reply_to_artifact, artifact.id}, "answer #{phase} question"}]
+      maestro_handoff =
+        if String.contains?(
+             workflow,
+             "Return the issue to `Human Review` without adding `symphony:maestro`"
+           ) do
+          []
+        else
+          [{:issueUpdate, :add_label, "symphony:maestro"}]
+        end
+
+      [{:commentCreate, {:reply_to_artifact, artifact.id}, "answer #{phase} question"}] ++
+        maestro_handoff ++ [{:issueUpdate, :state, "Human Review"}]
     else
       [{:commentUpdate, artifact.id, "## #{phase}"}]
+    end
+  end
+
+  defp dry_run_artifact_calls(workflow, :same_phase_rework, phase, old_artifact) do
+    required_contracts = [
+      "### Rework cycle (same phase)",
+      "Post a fresh artifact comment",
+      "one `issueUpdate` mutation that sets the `Human Review` state and full label set together"
+    ]
+
+    if Enum.all?(required_contracts, &String.contains?(workflow, &1)) do
+      [
+        {:commentResolve, old_artifact.id},
+        {:commentCreate, :top_level_phase_artifact, "## #{phase}"},
+        {:issueUpdate, :state_and_labels, {"Human Review", "symphony:maestro"}}
+      ]
+    else
+      []
     end
   end
 

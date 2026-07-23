@@ -284,9 +284,7 @@ defmodule SymphonyElixir.PhaseEvents do
     |> Enum.reduce({nil, []}, fn line, {open_fence, fields} ->
       cond do
         fence = fence(line) ->
-          if fence_closes?(open_fence, fence),
-            do: {nil, fields},
-            else: {open_fence || opening_fence(fence), fields}
+          {next_open_fence(open_fence, fence), fields}
 
         open_fence ->
           {open_fence, fields}
@@ -318,6 +316,9 @@ defmodule SymphonyElixir.PhaseEvents do
 
   defp fence_closes?(_open_fence, _fence), do: false
   defp opening_fence({character, length, _suffix}), do: {character, length}
+
+  defp next_open_fence(open_fence, fence),
+    do: if(fence_closes?(open_fence, fence), do: nil, else: open_fence || opening_fence(fence))
 
   defp judgment_value(fields, label) do
     case Enum.filter(fields, &match?({^label, _value}, &1)) do

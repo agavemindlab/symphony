@@ -18,9 +18,9 @@ artifact.
 
 ## At phase start
 
-Main Flow has already closed `## Design` (a `✅` human approval or a `⏩`
-agent auto-advance reply) and set `current_phase: Implementation` before
-opening this skill. Build from three sources — not the Linear summary alone:
+Main Flow has already closed `## Design` and set `current_phase: Implementation`
+before opening this skill. Build from three sources — not the Linear summary
+alone:
 
 - **`.symphony/design.md`** — the detailed, agent-facing design doc Design
   wrote for you to implement from. This is your primary spec: the full approach,
@@ -28,22 +28,22 @@ opening this skill. Build from three sources — not the Linear summary alone:
   matrix / call-site survey / failure modes, and the verification approach. A
   fresh session has no other memory of Design's reasoning, so read this doc;
   do not work off the one-line Linear summary.
-- The **approved Linear `## Requirements` and `## Design`** — what the human
-  actually signed off on: `S<N>` IDs, the `验收方案`, the approved approach, and
+- The **approved Linear `## Requirements` and `## Design`** — what the review
+  actually approved: `S<N>` IDs, the `验收方案`, the approved approach, and
   risks. These and their later human replies are **authoritative on scope and
   commitments**; once Requirements exists, the issue description is intake
   context only and must not select the review budget or override this chain.
 - The **workpad** (`.symphony/workpad.md`) — execution continuation: the plan
   checklist, spawned/proposed issues that bound scope, and progress notes.
 
-Keep the design doc and the approved artifact consistent; the human reviewed
-only the artifact, so on any conflict the **approved artifact and its thread
+Keep the design doc and the approved artifact consistent; review covers only
+the artifact, so on any conflict the **approved artifact and its thread
 govern** and the doc is reconciled toward them. If the design doc itself reveals
 the approved design is actually wrong, that is a **cross-phase rework** (see
 below), never a silent deviation.
 
-Implementation never auto-advances: it always ends at `Human Review` with
-the PR up, and Deployment is reachable only via the `Merging` state.
+Implementation always ends at `Human Review` with the PR up, and Deployment is
+reachable only via the `Merging` state.
 
 ## Type:Spike — findings, not a PR
 
