@@ -169,6 +169,7 @@ defmodule SymphonyElixir.Linear.Client do
             id
             name
             displayName
+            app
           }
           botActor {
             id
@@ -740,6 +741,19 @@ defmodule SymphonyElixir.Linear.Client do
   defp normalize_issue(_issue, _assignee_filter), do: nil
 
   defp normalize_comment(comment) when is_map(comment) do
+    author_app =
+      case comment["user"] do
+        %{"app" => value} when is_boolean(value) -> value
+        _ -> :unknown
+      end
+
+    bot_actor_present =
+      case Map.fetch(comment, "botActor") do
+        {:ok, nil} -> false
+        {:ok, value} when is_map(value) -> true
+        _ -> :unknown
+      end
+
     %{
       id: comment["id"],
       body: comment["body"],
@@ -747,7 +761,9 @@ defmodule SymphonyElixir.Linear.Client do
       resolved_at: parse_datetime(comment["resolvedAt"]),
       parent_id: comment_field(comment["parent"], "id"),
       author_name: comment_author_name(comment),
-      author_is_bot: comment_author_is_bot?(comment)
+      author_app: author_app,
+      bot_actor_present: bot_actor_present,
+      author_is_bot: not (author_app == false and bot_actor_present == false)
     }
   end
 
@@ -763,10 +779,6 @@ defmodule SymphonyElixir.Linear.Client do
       ],
       &present_author_name?/1
     )
-  end
-
-  defp comment_author_is_bot?(comment) do
-    is_map(comment["botActor"]) and not is_map(comment["user"])
   end
 
   defp comment_field(%{} = author, field) when is_binary(field), do: author[field]

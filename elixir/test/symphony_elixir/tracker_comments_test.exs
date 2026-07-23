@@ -64,7 +64,12 @@ defmodule SymphonyElixir.TrackerCommentsTest do
         "body" => "Looks good",
         "createdAt" => "2026-01-01T00:00:00Z",
         "resolvedAt" => "2026-01-02T00:00:00Z",
-        "user" => %{"id" => "user-1", "name" => "Ada Lovelace", "displayName" => "ada"},
+        "user" => %{
+          "id" => "user-1",
+          "name" => "Ada Lovelace",
+          "displayName" => "ada",
+          "app" => false
+        },
         "botActor" => nil,
         "parent" => %{"id" => "comment-0"}
       })
@@ -76,6 +81,8 @@ defmodule SymphonyElixir.TrackerCommentsTest do
              resolved_at: ~U[2026-01-02 00:00:00Z],
              parent_id: "comment-0",
              author_name: "ada",
+             author_app: false,
+             bot_actor_present: false,
              author_is_bot: false
            }
   end
@@ -85,11 +92,16 @@ defmodule SymphonyElixir.TrackerCommentsTest do
       Client.normalize_comment_for_test(%{
         "id" => "comment-2",
         "body" => "Name only",
-        "user" => %{"id" => "user-1", "name" => "Ada Lovelace", "displayName" => ""}
+        "user" => %{
+          "id" => "user-1",
+          "name" => "Ada Lovelace",
+          "displayName" => "",
+          "app" => false
+        }
       })
 
     assert named_user.author_name == "Ada Lovelace"
-    refute named_user.author_is_bot
+    assert named_user.author_is_bot
     assert named_user.parent_id == nil
     assert named_user.created_at == nil
     assert named_user.resolved_at == nil
@@ -109,18 +121,37 @@ defmodule SymphonyElixir.TrackerCommentsTest do
       Client.normalize_comment_for_test(%{
         "id" => "comment-4",
         "body" => "App acting for a user",
-        "user" => %{"id" => "user-2", "name" => nil, "displayName" => nil},
+        "user" => %{"id" => "user-2", "name" => nil, "displayName" => nil, "app" => false},
         "botActor" => %{"id" => "bot-1", "name" => "Maestro"}
       })
 
     assert user_backed_bot.author_name == "Maestro"
-    refute user_backed_bot.author_is_bot
+    assert user_backed_bot.author_is_bot
 
     anonymous =
       Client.normalize_comment_for_test(%{"id" => "comment-5", "body" => "No author"})
 
     assert anonymous.author_name == nil
-    refute anonymous.author_is_bot
+    assert anonymous.author_is_bot
+  end
+
+  test "linear client preserves strict comment actor provenance" do
+    [
+      {%{"user" => %{"id" => "human-a", "app" => false}, "botActor" => nil}, false, false, false},
+      {%{"user" => %{"id" => "human-b", "app" => false}, "botActor" => nil}, false, false, false},
+      {%{"user" => %{"id" => "maestro", "app" => true}, "botActor" => nil}, true, false, true},
+      {%{"user" => nil, "botActor" => %{"id" => "bot"}}, :unknown, true, true},
+      {%{"user" => %{"id" => "user-bot", "app" => false}, "botActor" => %{"id" => "bot"}}, false, true, true},
+      {%{"user" => %{"id" => "missing-app"}, "botActor" => nil}, :unknown, false, true},
+      {%{"user" => %{"id" => "missing-bot-key", "app" => false}}, false, :unknown, true}
+    ]
+    |> Enum.each(fn {input, author_app, bot_actor_present, author_is_bot} ->
+      comment = Client.normalize_comment_for_test(input)
+
+      assert comment.author_app == author_app
+      assert comment.bot_actor_present == bot_actor_present
+      assert comment.author_is_bot == author_is_bot
+    end)
   end
 
   test "linear client paginates issue comments and sorts ascending by created_at" do
@@ -167,6 +198,7 @@ defmodule SymphonyElixir.TrackerCommentsTest do
 
     assert_receive {:issue_comments_page, query, %{issueId: "issue-1", first: 100, after: nil}}
     assert query =~ "SymphonyIssueComments"
+    assert query =~ ~r/user\s*\{[^}]*\bapp\b/s
 
     assert_receive {:issue_comments_page, ^query, %{issueId: "issue-1", first: 100, after: "cursor-1"}}
   end
@@ -233,7 +265,12 @@ defmodule SymphonyElixir.TrackerCommentsTest do
       "body" => "Comment #{comment_id}",
       "createdAt" => created_at,
       "resolvedAt" => nil,
-      "user" => %{"id" => "user-1", "name" => "Ada Lovelace", "displayName" => "ada"},
+      "user" => %{
+        "id" => "user-1",
+        "name" => "Ada Lovelace",
+        "displayName" => "ada",
+        "app" => false
+      },
       "botActor" => nil,
       "parent" => nil
     }
