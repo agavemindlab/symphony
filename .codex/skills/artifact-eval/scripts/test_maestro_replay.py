@@ -600,6 +600,10 @@ class ReplayCommandTest(unittest.TestCase):
             "ask clarification 还须逐行输出待人工回答的问题、回答判定标准。",
             prompt,
         )
+        self.assertIn(
+            "逐一使用并原样列出 required_context_markers 的每个值",
+            prompt,
+        )
         self.assertNotIn("OUTPUT_MARKERS", prompt)
         self.assertNotIn("只允许 linear / gh", prompt)
         self.assertEqual(

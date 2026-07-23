@@ -198,7 +198,7 @@ def compose_prompt(reviewer_prompt: str, case: dict) -> str:
             "再以两行审计 contract 结束：\n"
             f"case_context:\n```json\n{context}\n```\n"
             "`RECOMMENDATION: <continue implementation|rework design|ask clarification>`\n"
-            "`CONSUMED_CONTEXT: <逗号分隔的原样 marker；没有则 none>`"
+            "`CONSUMED_CONTEXT: <逐一使用并原样列出 required_context_markers 的每个值，逗号分隔；没有则 none>`"
         )
         return reviewer_prompt.rstrip() + "\n\n" + preamble + "\n"
     preamble = (
