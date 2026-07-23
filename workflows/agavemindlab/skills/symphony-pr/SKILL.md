@@ -39,6 +39,19 @@ variable. If it is non-empty, request review from that account after every PR
 create/update with a code, test, or documentation diff. If it is empty, skip
 the automated review request and proceed directly to human handoff.
 
+When the caller requests `publish/request-only`, require
+`validatedHead=<full HEAD SHA>`. You may reuse the caller's current-Head green
+validation evidence and skip step 2 only when `validatedHead` equals
+`git rev-parse HEAD`; otherwise run step 2. Complete the remaining steps and the
+review-request portion of step 8, then return the PR URL immediately without
+polling or fixing feedback. The caller owns the wait and feedback disposition.
+Before requesting review, require `validatedHead`, local Head, origin branch
+Head, and PR `headRefOid` to be identical, but allow a short bounded PR-Head
+propagation retry. On mismatch, stop and restart sync, validation, and
+publication for the new Head. Run this check before any existing PR metadata
+mutation and recheck after create/update. In `publish/request-only` mode,
+preserving a pending human reviewer returns the PR URL successfully.
+
 ## Related Skills
 
 - `symphony-pull`: use this when push is rejected or sync is not clean
@@ -241,6 +254,41 @@ if [ "$pr_state" = "MERGED" ] || [ "$pr_state" = "CLOSED" ]; then
   exit 1
 fi
 
+require_validated_published_head() {
+  if [ -z "${validatedHead:-}" ]; then
+    pr_head_sha=$(gh pr view "$pr_number" --repo "$upstream_repo" --json headRefOid -q .headRefOid)
+    return
+  fi
+
+  local_head_sha=$(git rev-parse HEAD)
+  if [ "$validatedHead" != "$local_head_sha" ]; then
+    echo "Head changed after validation; restart sync, validation, and publication." >&2
+    exit 1
+  fi
+
+  head_tuple_matches=false
+  for head_check_attempt in 1 2 3 4 5; do
+    origin_head_sha=$(git ls-remote --heads origin "$branch" | awk '{print $1}')
+    pr_head_sha=$(gh pr view "$pr_number" --repo "$upstream_repo" --json headRefOid -q .headRefOid)
+    if [ "$validatedHead" = "$origin_head_sha" ] &&
+       [ "$validatedHead" = "$pr_head_sha" ]; then
+      head_tuple_matches=true
+      break
+    fi
+    sleep 1
+  done
+
+  if [ "$head_tuple_matches" != true ]; then
+    echo "Published Head mismatch; restart sync, validation, and publication." >&2
+    exit 1
+  fi
+}
+
+# Existing PR metadata must not be mutated from a stale local Head.
+if [ -n "$pr_state" ]; then
+  require_validated_published_head
+fi
+
 # Write a clear, human-friendly title that summarizes the shipped change.
 pr_title="<clear PR title written for this change>"
 tmp_pr_body=$(mktemp)
@@ -262,7 +310,7 @@ else
 fi
 rm -f "$tmp_pr_body"
 
-pr_head_sha=$(gh pr view "$pr_number" --repo "$upstream_repo" --json headRefOid -q .headRefOid)
+require_validated_published_head
 review_requested_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
 # Request review from the project's configured automated reviewer.
@@ -284,6 +332,7 @@ else
     echo "Pending human reviewer request(s) already exist; preserving them and skipping automated review request." >&2
     echo "$human_reviewers" >&2
     gh pr view "$pr_number" --repo "$upstream_repo" --json url -q .url
+    [ -n "${validatedHead:-}" ] && exit 0
     exit 6
   fi
 
@@ -319,7 +368,6 @@ gh pr view "$pr_number" --repo "$upstream_repo" --json url -q .url
   - Use the `symphony-pull` skill for non-fast-forward or stale-branch issues.
   - Surface auth, permissions, or workflow restrictions directly instead of
     changing remotes or protocols.
-- Reviewer timeout and "preserve pending human reviewer" exits use status 6.
-  This is a bounded fallback to human PR review, not success, so Symphony
-  can stop waiting without losing the review signal or disturbing human
-  reviewers.
+- Reviewer timeout and default-mode "preserve pending human reviewer" exits use
+  status 6. `publish/request-only` returns success after preserving the reviewer
+  because its caller owns the concurrent wait and handoff.
