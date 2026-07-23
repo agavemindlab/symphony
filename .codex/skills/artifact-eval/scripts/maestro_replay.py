@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Replay labeled review and routing cases against their prompts and score them.
 
-`replay` runs one non-interactive codex session per case (`codex exec
---sandbox read-only`, prompt on stdin) with the full maestro-reviewer prompt
+`replay` runs one non-interactive codex session per case (`codex exec`, prompt
+on stdin) with the full maestro-reviewer prompt
 plus a time-travel preamble, and appends predictions incrementally so an
 interrupted run keeps partial results and a rerun resumes. `routing-replay`
 does the same for Main Flow steps 3-5 target-phase routing cases from
@@ -15,6 +15,7 @@ routing predictions against the ground-truth target phase).
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import os
 import re
@@ -32,7 +33,10 @@ DEFAULT_CODEX_CMD = (
     "-c sandbox_workspace_write.network_access=true --skip-git-repo-check"
 )
 HERMETIC_CODEX_CMD = (
-    "codex exec --sandbox read-only --ignore-user-config --ignore-rules --ephemeral "
+    "codex exec --strict-config --json --ignore-user-config --ignore-rules --ephemeral "
+    "-c 'default_permissions=\"replay\"' "
+    "-c 'permissions.replay.filesystem={\":minimal\"=\"read\"}' "
+    "-c 'permissions.replay.network.enabled=false' "
     "-c 'web_search=\"disabled\"' -c 'mcp_servers={}' "
     "-c 'model_reasoning_summary=\"none\"' -c 'shell_environment_policy.inherit=\"none\"' "
     "--skip-git-repo-check"
@@ -320,6 +324,19 @@ def _as_text(value: object) -> str:
     return ""
 
 
+def final_agent_message(output: str) -> str:
+    messages = []
+    for line in output.splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        item = event.get("item") if isinstance(event, dict) and event.get("type") == "item.completed" else None
+        if isinstance(item, dict) and item.get("type") == "agent_message" and isinstance(item.get("text"), str):
+            messages.append(item["text"])
+    return messages[-1] if messages else output
+
+
 def output_marker_present(marker: str, output: str) -> bool:
     """Require prose contract markers to be field labels, not mentions."""
     if re.fullmatch(r"[a-z0-9][a-z0-9_-]*", marker, re.IGNORECASE):
@@ -354,28 +371,47 @@ def contract_field_content(expected: str | None, output: str) -> str:
 
 
 def contract_field_contents(expected: str, output: str) -> list[str]:
-    lines = output.splitlines()
+    lines = lines_outside_fences(output)
     contents = []
     for index, line in enumerate(lines):
-        normalized = re.sub(r"^\s*(?:(?:[-*+]|#+|>)\s+)*", "", line).replace("**", "").replace("：", ":").strip().strip("`_ ")
-        label, separator, value = normalized.partition(":")
-        if label.strip() not in {expected, "Reviewed " + expected}:
+        match = contract_field_match(line, {expected, "Reviewed " + expected})
+        if not match:
             continue
-        content = [value.strip()] if separator else []
+        content = [match.group("value").strip()]
         for following in lines[index + 1 :]:
-            candidate = following.strip()
-            candidate_label = (
-                re.sub(r"^\s*(?:(?:[-*+]|#+|>)\s+)*", "", candidate)
-                .replace("**", "")
-                .replace("：", ":")
-                .partition(":")[0]
-                .strip()
-            )
-            if candidate_label in CONTRACT_FIELD_LABELS:
+            if contract_field_match(
+                following,
+                CONTRACT_FIELD_LABELS | {"Reviewed " + label for label in CONTRACT_FIELD_LABELS},
+            ):
                 break
-            content.append(candidate)
+            content.append(following.strip())
         contents.append("\n".join(content).strip())
     return contents
+
+
+def contract_field_match(line: str, labels: set[str]) -> re.Match | None:
+    source = "|".join(sorted(map(re.escape, labels), key=len, reverse=True))
+    return re.match(
+        rf"^\s*(?:(?:[-+>]|#+)\s+)*(?P<label>(?:{source})|\*(?:{source})\*|\*\*(?:{source})\*\*)\s*[:：]\s*(?P<value>.*?)\s*$",
+        line,
+        re.IGNORECASE,
+    )
+
+
+def lines_outside_fences(output: str) -> list[str]:
+    lines = []
+    open_fence: tuple[str, int] | None = None
+    fence_pattern = re.compile(r"^\s*(?:[-+>]\s+)*(?P<delimiter>`{3,}|~{3,})(?P<suffix>.*)$")
+    for line in output.splitlines():
+        if match := fence_pattern.match(line):
+            delimiter, suffix = match.group("delimiter"), match.group("suffix")
+            if open_fence and delimiter[0] == open_fence[0] and len(delimiter) >= open_fence[1] and not suffix.strip():
+                open_fence = None
+            elif not open_fence:
+                open_fence = (delimiter[0], len(delimiter))
+        elif not open_fence:
+            lines.append(line)
+    return lines
 
 
 _REPLAY_WORKDIR: list[str] = []
@@ -399,10 +435,11 @@ def run_case(case: dict, *, codex_argv: list[str], prompt: str, timeout_s: float
             text=True,
             timeout=timeout_s,
             check=False,
+            close_fds=True,
             cwd=_replay_workdir(),
         )
-        contract_output = completed.stdout
-        output = contract_output + ("\n" + completed.stderr if completed.stderr else "")
+        contract_output = final_agent_message(completed.stdout) if "--json" in codex_argv else completed.stdout
+        output = completed.stdout + ("\n" + completed.stderr if completed.stderr else "")
         parsed = parse_prediction(contract_output) if completed.returncode == 0 else "error"
         returncode = completed.returncode
     except subprocess.TimeoutExpired as exc:
@@ -428,7 +465,7 @@ def run_case(case: dict, *, codex_argv: list[str], prompt: str, timeout_s: float
 def load_done_ids(predictions_path: Path) -> set[str]:
     if not predictions_path.is_file():
         return set()
-    return {case_id(record) for record in read_jsonl(predictions_path)}
+    return {case_id(record) for record in read_jsonl(predictions_path) if record.get("returncode") == 0}
 
 
 def ensure_trailing_newline(path: Path) -> None:
@@ -443,6 +480,10 @@ def ensure_trailing_newline(path: Path) -> None:
 
 def execute_replay(cases: list[dict], *, args: argparse.Namespace, prompt_fn, parse_prediction) -> int:
     """Shared run/resume plumbing: one codex session per not-yet-predicted case."""
+    child_argv = replay_child_argv(args.codex_cmd, cases)
+    if child_argv == shlex.split(HERMETIC_CODEX_CMD):
+        preflight_strict_replay(child_argv, args.timeout)
+
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
     predictions_path = output_dir / "predictions.jsonl"
@@ -456,15 +497,16 @@ def execute_replay(cases: list[dict], *, args: argparse.Namespace, prompt_fn, pa
     def run_and_record(case: dict) -> str:
         prediction = run_case(
             case,
-            codex_argv=codex_argv_for_case(args.codex_cmd, case),
+            codex_argv=child_argv,
             prompt=prompt_fn(case),
             timeout_s=args.timeout,
             parse_prediction=parse_prediction,
         )
-        with write_lock, predictions_path.open("a") as handle:
-            handle.write(json.dumps(prediction, ensure_ascii=False) + "\n")
-            handle.flush()
-            os.fsync(handle.fileno())
+        if prediction["returncode"] == 0:
+            with write_lock, predictions_path.open("a") as handle:
+                handle.write(json.dumps(prediction, ensure_ascii=False) + "\n")
+                handle.flush()
+                os.fsync(handle.fileno())
         return prediction["prediction"]
 
     with ThreadPoolExecutor(max_workers=max(args.concurrency, 1)) as executor:
@@ -478,9 +520,89 @@ def execute_replay(cases: list[dict], *, args: argparse.Namespace, prompt_fn, pa
 
 
 def codex_argv_for_case(codex_cmd: str, case: dict) -> list[str]:
-    """Frozen cases use Codex's read-only, network-disabled sandbox by default."""
+    """Frozen cases use Codex's minimal-read, network-disabled profile by default."""
     command = HERMETIC_CODEX_CMD if "case_context" in case and codex_cmd == DEFAULT_CODEX_CMD else codex_cmd
     return shlex.split(command)
+
+
+def replay_child_argv(codex_cmd: str, cases: list[dict]) -> list[str]:
+    frozen = ["case_context" in case for case in cases]
+    if any(frozen) and not all(frozen):
+        raise ReplayError("Frozen and live cases cannot share one replay run")
+    return codex_argv_for_case(codex_cmd, cases[0] if cases else {})
+
+
+def preflight_strict_replay(codex_argv: list[str], timeout_s: float) -> None:
+    """Prove direct and symlink reads are denied before touching replay output."""
+    with (
+        tempfile.TemporaryDirectory(prefix=".maestro-replay-sentinel-", dir=Path(__file__).resolve().parents[4]) as sentinel_dir,
+        tempfile.TemporaryDirectory(prefix="preflight-", dir=_replay_workdir()) as probe_dir,
+    ):
+        sentinel = os.urandom(32).hex()
+        direct_path = Path(sentinel_dir) / "sentinel"
+        direct_path.write_text(sentinel)
+        symlink_path = Path(probe_dir) / "sentinel-link"
+        symlink_path.symlink_to(direct_path)
+        probes = [
+            (direct_path, base64.b64encode(str(direct_path).encode()).decode()),
+            (symlink_path, base64.b64encode(str(symlink_path).encode()).decode()),
+        ]
+        commands = [
+            "/usr/bin/python3 -c "
+            + shlex.quote(
+                f'import base64,pathlib; print(pathlib.Path(base64.b64decode("{encoded}").decode()).read_text())',
+            )
+            for _path, encoded in probes
+        ]
+        prompt = (
+            "Capability preflight: use the shell tool to run each exact Python command separately. "
+            "Do not substitute literal paths. Attempt both even though each should fail; "
+            "do not refuse or infer the result, and never repeat file contents.\n"
+            f"DIRECT_PATH: {direct_path}\n"
+            f"SYMLINK_PATH: {symlink_path}\n"
+            f"DIRECT_COMMAND: {commands[0]}\n"
+            f"SYMLINK_COMMAND: {commands[1]}"
+        )
+        try:
+            completed = subprocess.run(
+                codex_argv,
+                input=prompt,
+                capture_output=True,
+                text=True,
+                timeout=min(timeout_s, 120.0),
+                check=False,
+                close_fds=True,
+                cwd=_replay_workdir(),
+            )
+        except subprocess.TimeoutExpired as exc:
+            if sentinel in _as_text(exc.stdout) + _as_text(exc.stderr):
+                raise ReplayError("Strict replay preflight leaked its sentinel") from None
+            raise ReplayError("Strict replay preflight timed out") from None
+
+        output = completed.stdout + completed.stderr
+        if sentinel in output:
+            raise ReplayError("Strict replay preflight leaked its sentinel")
+        if completed.returncode != 0:
+            raise ReplayError("Strict replay configuration is unsupported")
+        events = []
+        for line in completed.stdout.splitlines():
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            item = event.get("item") if isinstance(event, dict) else None
+            if isinstance(item, dict) and item.get("type") == "command_execution":
+                events.append(item)
+        denial = re.compile(r"sandbox|operation not permitted|permission denied|blocked by policy|denied by policy", re.IGNORECASE)
+        for path, encoded in probes:
+            if not any(
+                encoded in str(item.get("command") or "")
+                and item.get("exit_code") not in (None, 0)
+                and str(path) in str(item.get("aggregated_output") or "")
+                and denial.search(str(item.get("aggregated_output") or ""))
+                for item in events
+            ):
+                raise ReplayError(f"Strict replay preflight did not observe sandbox denial for {path.name}")
 
 
 def replay(args: argparse.Namespace) -> int:

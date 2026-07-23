@@ -4,6 +4,7 @@ import shutil
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -149,6 +150,31 @@ class ParseRecommendationTest(unittest.TestCase):
                 "下一轮建议方向:\nImplementation artifact id: impl-current\nPR Head: head-current",
             ),
         )
+
+    def test_card_fields_accept_only_exact_plain_single_or_double_emphasis(self) -> None:
+        for output in (
+            "收敛判断: continue implementation",
+            "*收敛判断*: continue implementation",
+            "**收敛判断**: continue implementation",
+        ):
+            with self.subTest(output=output):
+                self.assertEqual(
+                    maestro_replay.contract_field_content("收敛判断", output),
+                    "continue implementation",
+                )
+
+        for output in (
+            "***收敛判断***: continue implementation",
+            r"\*收敛判断\*: continue implementation",
+            "**收敛判断*: continue implementation",
+            "* 收敛判断 *: continue implementation",
+            "收敛判断:",
+            "```\n收敛判断: continue implementation\n```",
+            "收敛判断: continue implementation\n*收敛判断*: continue implementation",
+            "*收敛判断*: continue implementation\n**收敛判断**: continue implementation",
+        ):
+            with self.subTest(output=output):
+                self.assertEqual(maestro_replay.contract_field_content("收敛判断", output), "")
 
 
 class SelectCasesTest(unittest.TestCase):
@@ -473,13 +499,170 @@ class ReplayCommandTest(unittest.TestCase):
             shlex.split(maestro_replay.HERMETIC_CODEX_CMD),
         )
         argv = maestro_replay.codex_argv_for_case(maestro_replay.DEFAULT_CODEX_CMD, frozen)
+        self.assertNotIn("--sandbox", argv)
+        self.assertNotIn("read-only", argv)
+        self.assertIn("--strict-config", argv)
+        self.assertIn("--json", argv)
         self.assertIn("--ignore-user-config", argv)
         self.assertIn("--ignore-rules", argv)
         self.assertIn("--ephemeral", argv)
+        self.assertIn('default_permissions="replay"', argv)
+        self.assertIn('permissions.replay.filesystem={":minimal"="read"}', argv)
+        self.assertIn("permissions.replay.network.enabled=false", argv)
+        self.assertNotIn(":root", " ".join(argv))
+        self.assertNotIn(":workspace_roots", " ".join(argv))
         self.assertIn('web_search="disabled"', argv)
         self.assertIn("mcp_servers={}", argv)
         self.assertIn('model_reasoning_summary="none"', argv)
         self.assertIn('shell_environment_policy.inherit="none"', argv)
+
+    def test_strict_preflight_precedes_output_creation_and_resume_loading(self) -> None:
+        frozen = {
+            **case("FIXTURE-CONTINUE", "decision-continue", phase="Implementation", label="escalated"),
+            "case_context": {},
+        }
+        self.cases_path.write_text(json.dumps(frozen) + "\n")
+        events = []
+
+        def load_done(_path):
+            events.append("resume")
+            return set()
+
+        def reject_preflight(*_args, **_kwargs):
+            events.append("preflight")
+            raise maestro_replay.ReplayError("strict preflight rejected")
+
+        with (
+            mock.patch.object(maestro_replay, "load_done_ids", side_effect=load_done),
+            mock.patch.object(maestro_replay.subprocess, "run", side_effect=reject_preflight),
+        ):
+            self.assertEqual(self.run_replay(maestro_replay.DEFAULT_CODEX_CMD), 1)
+
+        self.assertEqual(events, ["preflight"])
+        self.assertFalse(self.output_dir.exists())
+
+    def test_unsupported_strict_config_fails_before_creating_output(self) -> None:
+        frozen = {
+            **case("FIXTURE-CONTINUE", "decision-continue", phase="Implementation", label="escalated"),
+            "case_context": {},
+        }
+        self.cases_path.write_text(json.dumps(frozen) + "\n")
+        unsupported = maestro_replay.subprocess.CompletedProcess(
+            [],
+            1,
+            stdout="",
+            stderr="Error loading config.toml: unknown configuration field",
+        )
+
+        with mock.patch.object(maestro_replay.subprocess, "run", return_value=unsupported):
+            self.assertEqual(self.run_replay(maestro_replay.DEFAULT_CODEX_CMD), 1)
+
+        self.assertFalse(self.output_dir.exists())
+
+    def test_missing_observed_sandbox_denial_fails_before_creating_output(self) -> None:
+        frozen = {
+            **case("FIXTURE-CONTINUE", "decision-continue", phase="Implementation", label="escalated"),
+            "case_context": {},
+        }
+        self.cases_path.write_text(json.dumps(frozen) + "\n")
+        refusal = maestro_replay.subprocess.CompletedProcess(
+            [],
+            0,
+            stdout=json.dumps(
+                {
+                    "type": "item.completed",
+                    "item": {"type": "agent_message", "text": "I will not read those files."},
+                },
+            ),
+            stderr="",
+        )
+
+        with mock.patch.object(maestro_replay.subprocess, "run", return_value=refusal):
+            self.assertEqual(self.run_replay(maestro_replay.DEFAULT_CODEX_CMD), 1)
+
+        self.assertFalse(self.output_dir.exists())
+
+    def test_preflight_rejects_sentinel_leak_without_persisting_it(self) -> None:
+        frozen = {
+            **case("FIXTURE-CONTINUE", "decision-continue", phase="Implementation", label="escalated"),
+            "case_context": {},
+        }
+        self.cases_path.write_text(json.dumps(frozen) + "\n")
+
+        def leak_sentinel(_argv, **kwargs):
+            prompt = kwargs["input"]
+            direct_path = next(
+                Path(line.removeprefix("DIRECT_PATH: "))
+                for line in prompt.splitlines()
+                if line.startswith("DIRECT_PATH: ")
+            )
+            leaked = direct_path.read_text()
+            return maestro_replay.subprocess.CompletedProcess(
+                [],
+                0,
+                stdout=json.dumps(
+                    {
+                        "type": "item.completed",
+                        "item": {
+                            "type": "command_execution",
+                            "command": f"/bin/cat {direct_path}",
+                            "aggregated_output": leaked,
+                            "exit_code": 0,
+                            "status": "completed",
+                        },
+                    },
+                ),
+                stderr="",
+            )
+
+        with mock.patch.object(maestro_replay.subprocess, "run", side_effect=leak_sentinel):
+            self.assertEqual(self.run_replay(maestro_replay.DEFAULT_CODEX_CMD), 1)
+
+        self.assertFalse(self.output_dir.exists())
+
+    def test_child_subprocess_closes_inherited_descriptors(self) -> None:
+        completed = maestro_replay.subprocess.CompletedProcess(
+            [],
+            0,
+            stdout="RECOMMENDATION: approve\n",
+            stderr="",
+        )
+        with mock.patch.object(maestro_replay.subprocess, "run", return_value=completed) as run:
+            maestro_replay.run_case(
+                case("DEV-1", "a1"),
+                codex_argv=[sys.executable, "-c", "pass"],
+                prompt="prompt",
+                timeout_s=5,
+            )
+
+        self.assertIs(run.call_args.kwargs["close_fds"], True)
+
+    def test_json_event_stream_parses_the_final_agent_message(self) -> None:
+        completed = maestro_replay.subprocess.CompletedProcess(
+            [],
+            0,
+            stdout="\n".join(
+                json.dumps(event)
+                for event in (
+                    {"type": "item.completed", "item": {"type": "agent_message", "text": "Working on it."}},
+                    {
+                        "type": "item.completed",
+                        "item": {"type": "agent_message", "text": "RECOMMENDATION: approve"},
+                    },
+                    {"type": "turn.completed"},
+                )
+            ),
+            stderr="",
+        )
+        with mock.patch.object(maestro_replay.subprocess, "run", return_value=completed):
+            result = maestro_replay.run_case(
+                case("DEV-1", "a1"),
+                codex_argv=["codex", "exec", "--json"],
+                prompt="prompt",
+                timeout_s=5,
+            )
+
+        self.assertEqual(result["prediction"], "approve")
 
     def test_frozen_reviewer_rejects_a_card_that_contradicts_its_audit_recommendation(self) -> None:
         frozen = {
@@ -548,6 +731,22 @@ class ReplayCommandTest(unittest.TestCase):
         )
         self.assertEqual(result["prediction"], "error")
         self.assertEqual(result["returncode"], 1)
+
+    def test_nonzero_child_is_not_completed_or_resumed(self) -> None:
+        codex_cmd = self.fake_codex(
+            "import pathlib, sys\n"
+            f"log = pathlib.Path({str(self.calls_log)!r})\n"
+            "sys.stdin.read()\n"
+            "log.open('a').write('call\\n')\n"
+            "print('RECOMMENDATION: approve')\n"
+            "raise SystemExit(1)\n",
+        )
+
+        self.assertEqual(self.run_replay(codex_cmd, "--sample", "1"), 0)
+        self.assertEqual(self.run_replay(codex_cmd, "--sample", "1"), 0)
+
+        self.assertEqual(self.calls_log.read_text().splitlines(), ["call", "call"])
+        self.assertFalse((self.output_dir / "predictions.jsonl").exists())
 
     def test_score_command_writes_report(self) -> None:
         predictions_path = self.tmp / "predictions.jsonl"
