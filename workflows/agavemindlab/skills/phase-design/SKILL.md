@@ -19,16 +19,13 @@ Produce **two paired outputs** — they serve different readers (see
    edge cases, failure modes, type-specific substance). Dev-cycle only — listed
    in workpad `cleanup` and persisted through the Linear state attachment.
 2. The **`## Design` Linear artifact** — the **human-facing** Chinese review
-   surface that summarizes the doc and gates approval, carrying:
-   - Core mechanism and end-to-end flow before approach / file-change details
-   - Chosen approach direction and rationale
-   - Key trade-offs and alternatives considered
-   - Diagram (for non-trivial designs — see Diagram requirement below)
-   - Prototype 截屏 previews (for UI-facing designs — see UI 原型 requirement below)
-   - Verification plan (`验收方案`)
-   - Intentionally uncovered scope with follow-up issue IDs
-   - Any newly-discovered risks
-   - A pointer to `.symphony/design.md`
+   surface that explains the conclusion and outcome, end-to-end mechanism,
+   rationale over meaningful alternatives, decision-relevant trade-offs and
+   risks, and how acceptance will be judged. Include the diagram, UI preview,
+   and uncovered scope when applicable. Do not embed the complete agent spec,
+   call-site inventory, implementation constraints, or full structured
+   verification plan. Optional `>>>` sections may contain only evidence that
+   helps a human review.
 
 ## At phase start
 
@@ -194,12 +191,13 @@ Required content:
 
 ## 验收方案设计（pre-PR 本地验收 + post-merge 最终验收）
 
-A design is not done until it says **how each acceptance `S<N>` will be proven**
-— and it is proven **twice**: once locally before the PR, once in production
-after merge. Design only *specifies* the plan and the evidence form; the
-Implementation and Deployment phases *execute* it and attach the actual
-evidence. Plan both gates for every `S<N>`, keyed to its Requirements
-verifiability class (`当场可验` / `延迟验收` / `需人工判定`):
+A design is not done until `.symphony/design.md` says **how each acceptance
+`S<N>` will be proven** twice: once locally before the PR, once in production
+after merge. The Linear artifact only explains the proof path and decisive
+pass signal in reviewer-readable language. Implementation and Deployment
+execute the complete plan and attach the actual evidence. Plan both gates in
+the design doc for every `S<N>`, keyed to its Requirements verifiability class
+(`当场可验` / `延迟验收` / `需人工判定`):
 
 - **Pre-PR 本地验收** — how the change is exercised on the running service /
   locally before the PR, and the evidence form it will produce. Where the
@@ -215,9 +213,9 @@ verifiability class (`当场可验` / `延迟验收` / `需人工判定`):
   `## Deployment`. By verifiability class: `当场可验` → an immediate
   post-deploy signal; `延迟验收` → the runnable spec (query + pass/fail
   predicate + observation window) Deployment re-runs once the window closes —
-  here name the **method and signal**, the exact query is filled in at
-  Implementation's `Merge 后验证`; `需人工判定` → name who/what produces the
-  human判定 and how it is recorded.
+  name the **method, signal, exact query, and predicate** here; Deployment
+  copies a still-pending spec into `待验证项`; `需人工判定` → name who/what
+  produces the human判定 and how it is recorded.
 
 **Evidence must be readable, not a raw dump.** Each piece is a one-line verdict
 + the concrete artifact backing it. Pick the artifact form by what the criterion
@@ -296,18 +294,21 @@ Design emits **two paired records with different readers**, kept in sync:
   spec that Implementation builds from. It holds the full depth the human
   summary does not repeat: the chosen approach and rationale, the alternatives
   considered **and why each was rejected**, the architecture / diagram, the
-  type-specific substance (the edge-case matrix / call-site survey / migration
-  plan / bug causal-chain from `Type-specific writing emphasis`), failure
-  modes, and the verification approach behind `验收方案`. Write the analysis
-  from Discovery here as you go — this is the home for it, not the workpad.
+  repository/file impact and implementation constraints, the type-specific
+  substance (the edge-case matrix / call-site survey / migration plan / bug
+  causal-chain from `Type-specific writing emphasis`), failure modes, and the
+  verification approach behind `验收方案`. Write the analysis from Discovery
+  here as you go — this is the home for it, not the workpad.
   Scale its depth to the change (a few lines for a trivial one). When
   `brainstorming` runs, point its design output at this file (overriding its
   default `docs/.../specs/` path); never invoke `writing-plans` (implementation
   breakdown is the Implementation phase's job).
-- **`## Design` Linear artifact** — for the **human**. The Chinese review
-  surface: a faithful summary of the doc + the diagram + `验收方案` + risks +
-  `待确认`. Do not link to `.symphony/design.md` as a GitHub blob: it is
-  agent-only state and must not enter the PR branch.
+- **`## Design` Linear artifact** — for the **human**. Interpret the design for
+  a reviewer instead of summarizing the doc field by field: explain the
+  conclusion, mechanism, rationale, decision-relevant risks, and acceptance
+  signals. Do not embed agent-only handoff content. Do not link to
+  `.symphony/design.md` as a GitHub blob: it is agent-only state and must not
+  enter the PR branch.
   Approving this artifact approves the design it represents.
 
 Lifecycle: `.symphony/design.md` — and `.symphony/prototype/` when present —
@@ -343,22 +344,13 @@ input, key steps, output, and blocking point（触发者 / 输入 / 关键步骤
 ```
 
 ### 原型预览（UI-facing designs only; omit otherwise）
-<embedded 截屏 previews of key prototype states> · 本地打开: `.symphony/prototype/`（见 agent state）
+<embedded 截屏 previews of key prototype states>
 
 ### 风险/注意（risks; omit if none）
 - <one sentence per item>
 
->>> 🧩 设计细节（默认折叠）
-### 仓库改动 / 文件影响（repository changes）
-- `<path>`: <what changes and why>
->>>
-
->>> ✅ 验收方案（默认折叠）
-### 验收方案（每个 S<N> 两道关；指定证据形式，长文本用列表）
-- **S1: <criterion>**
-  - Pre-PR 本地验收: <如何本地验> → <可重跑命令 + 通过判据；视觉类为 截屏 / 录屏>
-  - Post-Merge 最终验收: <如何线上验> → <即时信号 / 查询+判据+窗口 / 人工判定>
->>>
+### 验收说明（每个 S<N>）
+- **S<N>**: <用人话说明如何证明，以及哪个信号代表通过>
 
 ### 待确认（omit if none; use the visible `### NEEDS CLARIFICATION` block — see Batched clarification）
 
@@ -500,7 +492,10 @@ about form, not correctness:
 
 - `.symphony/design.md` written (scaled to the change), listed in workpad
   `cleanup`, and persisted through the latest `Symphony agent state` Linear
-  attachment; the `## Design` artifact faithfully summarizes it.
+  attachment; it retains the complete agent-facing design spec.
+- The `## Design` artifact interprets the conclusion, mechanism, rationale,
+  decision-relevant risks, and concise acceptance signals without copying the
+  agent handoff.
 - `核心机制` appears before `方案（approach）` and explains how the system works;
   cross-component flows include trigger（触发者）, input（输入）, key steps
   （关键步骤）, output（输出）, and blocking point（阻断点）.
@@ -508,10 +503,10 @@ about form, not correctness:
 - Diagram included for non-trivial designs.
 - UI 原型 built with its 截屏 previews embedded for UI-facing designs, or the
   `Skipped UI 原型: <reason>` workpad note recorded.
-- `验收方案` covers every `S<N>` with both gates (pre-PR 本地 + post-merge 最终)
-  and names each evidence form — 可重跑命令 + 通过判据 for commandable checks,
-  visual capture for any interactive `S<N>` — or
-  states why a gate does not apply.
+- The design doc's `验收方案` covers every `S<N>` with both gates (pre-PR
+  本地 + post-merge 最终) and names each evidence form — 可重跑命令 +
+  通过判据 for commandable checks, visual capture for any interactive
+  `S<N>` — or states why a gate does not apply.
 - Type-specific approach emphasis satisfied for `Primary:`.
 - No unresolved clarification gates.
 

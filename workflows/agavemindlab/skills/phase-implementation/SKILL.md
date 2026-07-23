@@ -23,24 +23,32 @@ before opening this skill. Build from three sources — not the Linear summary
 alone:
 
 - **`.symphony/design.md`** — the detailed, agent-facing design doc Design
-  wrote for you to implement from. This is your primary spec: the full approach,
-  the alternatives and why each was rejected, the architecture, the edge-case
-  matrix / call-site survey / failure modes, and the verification approach. A
-  fresh session has no other memory of Design's reasoning, so read this doc;
-  do not work off the one-line Linear summary.
-- The **approved Linear `## Requirements` and `## Design`** — what the review
-  actually approved: `S<N>` IDs, the `验收方案`, the approved approach, and
-  risks. These and their later human replies are **authoritative on scope and
-  commitments**; once Requirements exists, the issue description is intake
-  context only and must not select the review budget or override this chain.
+  wrote for you to implement from. `.symphony/design.md` is the executable source
+  and primary spec: the full approach, the alternatives and why each was
+  rejected, the architecture, the edge-case matrix / call-site survey / failure
+  modes, and the verification approach. A fresh session has no other memory of
+  Design's reasoning, so read this doc; do not work off the one-line Linear
+  summary.
+- The **review-approved Linear `## Requirements` and `## Design`** and their
+  later feedback — the authority for scope, commitments, approved approach,
+  risks, and conflicts. They are not complete executable plan sources. Once
+  Requirements exists, the issue description is intake context only and must
+  not select the review budget or override this chain.
 - The **workpad** (`.symphony/workpad.md`) — execution continuation: the plan
   checklist, spawned/proposed issues that bound scope, and progress notes.
 
-Keep the design doc and the approved artifact consistent; review covers only
-the artifact, so on any conflict the **approved artifact and its thread
-govern** and the doc is reconciled toward them. If the design doc itself reveals
-the approved design is actually wrong, that is a **cross-phase rework** (see
-below), never a silent deviation.
+Before any repository code read or modification, require a readable
+`.symphony/design.md` and read it explicitly. If the file is missing or
+unreadable, restore or reacquire the complete design through the existing agent
+state path and retry. If it remains unavailable, stop in `Human Review` and
+report the exact handoff gap; never implement from the human Linear Design
+artifact alone.
+
+After Design approval, do not rewrite `.symphony/design.md` during
+Implementation. Artifact omissions are not conflicts because the artifact is
+an intentionally incomplete human summary. If the approved artifact or its
+thread substantively conflicts with the design doc, route substantive
+conflicts through Design rework; never reconcile either source silently.
 
 Implementation always ends at `Human Review` with the PR up, and Deployment is
 reachable only via the `Merging` state.
@@ -48,17 +56,17 @@ reachable only via the `Merging` state.
 ## Type:Spike — findings, not a PR
 
 For a `Type:Spike` issue the deliverable is the **findings / recommendation**,
-not shipped code. Carry out the investigation plan from `## Design`, then write
-a findings artifact in place of the normal `## Implementation` artifact:
-state each Requirements question's answer, the evidence backing it, and the
-recommended decision. Open with that answer in plain language; do not lead with
-PR metadata. TDD and local runtime acceptance apply only to throwaway code you
-write to learn (a prototype, a benchmark) — keep it on a scratch branch and do
-not treat it as production work. The PR/CI line is optional: cite a prototype
-branch or an ADR/docs PR if one exists, else omit it. Exit to `Human Review` as
-usual; for a no-PR spike the human moves the issue straight to `Done`. The rest
-of this skill (PR feedback sweep, Merge-gated Deployment) applies only when the
-spike actually produced a PR worth landing.
+not shipped code. Carry out the investigation plan from `.symphony/design.md`,
+then write a findings artifact in place of the normal `## Implementation`
+artifact: state each Requirements question's answer, the evidence backing it,
+and the recommended decision. Open with that answer in plain language; do not
+lead with PR metadata. TDD and local runtime acceptance apply only to throwaway
+code you write to learn (a prototype, a benchmark) — keep it on a scratch
+branch and do not treat it as production work. The PR/CI line is optional: cite
+a prototype branch or an ADR/docs PR if one exists, else omit it. Exit to
+`Human Review` as usual; for a no-PR spike the human moves the issue straight
+to `Done`. The rest of this skill (PR feedback sweep, Merge-gated Deployment)
+applies only when the spike actually produced a PR worth landing.
 
 If the workpad (`.symphony/workpad.md`) does not exist, create it with the
 template from your workflow instructions. If this run is a rework of `## Implementation`
@@ -100,11 +108,11 @@ record `Skipped <skill>: <reason>` in workpad `notes`.
 
 ### Type-conditional skills (gate on `Primary:`; they produce the 验收方案 evidence)
 
-Invoke when the issue's type calls for it, to produce the acceptance evidence
-the `## Design` 验收方案 named (recorded into `验收对照`); skip and record
-`Skipped <skill>: <reason>` otherwise. These run autonomously — they do not
-interview a human; any decision only a human can make follows the workflow's
-clarification-gate handling.
+Invoke when the issue's type calls for it, to produce the type-conditional
+evidence named by `.symphony/design.md` (recorded into `Acceptance mapping`); skip and
+record `Skipped <skill>: <reason>` otherwise. These run autonomously — they do
+not interview a human; any decision only a human can make follows the
+workflow's clarification-gate handling.
 
 - **Feature / UI behavior** → `qa` (gstack — QA the running web app and fix what
   it finds) or `qa-only` (report-only) — exercise the critical-path flow and
@@ -154,13 +162,13 @@ Markdown sections:
    changed view.
 6. **Push** — invoke `symphony-pr` skill to publish to `origin` and request code
    review.
-7. **Local runtime acceptance** — execute the `## Design` 验收方案's **pre-PR
-   本地验收** for each `S<N>`: exercise the feature against the running service
-   per `AGENTS.md` and produce the evidence form the design named — a 截屏 for a
-   single state, a 录屏 / GIF for an interactive flow — recorded readably (a
-   verdict line + the artifact, raw output folded in `>>>`). If local acceptance
-   is impossible, record the reason and closest safe alternative proof; surface
-   the caveat in the artifact `风险/注意`.
+7. **Local runtime acceptance** — execute every pre-PR local acceptance check
+   from `.symphony/design.md` for each `S<N>`: exercise the feature against the
+   running service per `AGENTS.md` and produce the evidence form the design
+   named — a 截屏 for a single state, a 录屏 / GIF for an interactive flow —
+   recorded readably (a verdict line + the artifact, raw output folded in
+   `>>>`). If local acceptance is impossible, record the reason and closest safe
+   alternative proof; surface the caveat in the artifact `风险/注意`.
 8. **Verify** — invoke `verification-before-completion`.
 9. **Bounded pre-landing review** — set `MAX_REVIEW_ATTEMPTS = 5` for this
    Implementation agent turn. Finish every rebase, merge, squash, and PR-body
@@ -338,8 +346,8 @@ Evidence a reviewer cannot re-run must say why (interactive capture,
 credentialed env).
 
 For any `S<N>` classified `延迟验收` in Requirements' `关键假设`, `Merge 后验证`
-must carry a **self-contained, runnable** spec — the exact query, the pass/fail
-predicate, and the window length — not a vague "monitor the dashboard" note.
+must copy the exact query, predicate, and window from `.symphony/design.md` into
+a **self-contained, runnable** spec — not a vague "monitor the dashboard" note.
 It has to survive branch cleanup and be runnable months later by a fresh
 session that only has production-log access, because Deployment carries it into
 `待验证项` and re-runs it verbatim (re-entered via `In Progress`) once the window

@@ -646,7 +646,7 @@ defmodule SymphonyElixir.CoreTest do
     end
 
     assert land_skill =~
-             ~r/A missing post-merge\s+verification plan blocks merging only when an acceptance criterion is\s+`延迟验收`\./
+             ~r/A missing `Merge 后验证`\s+derivative blocks merging only when an acceptance criterion is `延迟验收`\./
 
     assert land_skill =~ "A missing merge-safety read always blocks merging"
     assert land_skill =~ "Use Requirements' `关键假设` as the source of truth"
@@ -808,7 +808,7 @@ defmodule SymphonyElixir.CoreTest do
     end
   end
 
-  test "phase artifact templates keep decisions visible and details folded" do
+  test "phase artifact templates keep their review audience visible" do
     implementation_skill =
       File.read!(Path.expand("../workflows/agavemindlab/skills/phase-implementation/SKILL.md", File.cwd!()))
 
@@ -870,16 +870,182 @@ defmodule SymphonyElixir.CoreTest do
     design_skill =
       File.read!(Path.expand("../workflows/agavemindlab/skills/phase-design/SKILL.md", File.cwd!()))
 
-    design_visible =
+    design_template =
       design_skill
-      |> String.split(">>> 🧩 设计细节（默认折叠）", parts: 2)
+      |> String.split("## Artifact template", parts: 2)
+      |> List.last()
+      |> String.split("## Batched clarification", parts: 2)
       |> hd()
 
-    assert design_visible =~ "### 图示"
-    assert design_visible =~ "### 风险/注意"
-    refute design_visible =~ "### 验收方案"
-    assert design_skill =~ ">>> 🧩 设计细节（默认折叠）"
-    assert design_skill =~ ">>> ✅ 验收方案（默认折叠）"
+    design_visible =
+      design_template
+      |> String.split(">>> 🛠️ 本次激活的 skills", parts: 2)
+      |> hd()
+
+    for decision_surface <- ["### 核心机制", "### 方案", "### 风险/注意", "### 验收说明"] do
+      assert design_visible =~ decision_surface
+    end
+
+    refute design_template =~ ">>> 🧩 设计细节（默认折叠）"
+    refute design_template =~ ">>> ✅ 验收方案（默认折叠）"
+
+    for agent_only_detail <- [
+          "### 仓库改动 / 文件影响",
+          "Pre-PR 本地验收",
+          "Post-Merge 最终验收",
+          "call-site inventory",
+          "implementation constraints"
+        ] do
+      refute design_template =~ agent_only_detail
+    end
+
+    [_, design_doc_contract] =
+      String.split(design_skill, "## 设计文档（`.symphony/design.md`）", parts: 2)
+
+    normalized_design_doc_contract = String.replace(design_doc_contract, ~r/\s+/, " ")
+
+    for required_agent_detail <- [
+          "chosen approach and rationale",
+          "alternatives considered **and why each was rejected**",
+          "architecture / diagram",
+          "repository/file impact and implementation constraints",
+          "failure modes",
+          "verification approach"
+        ] do
+      assert normalized_design_doc_contract =~ required_agent_detail
+    end
+  end
+
+  test "Implementation fails closed when the complete design handoff is unavailable" do
+    repo_root = Path.expand("..", File.cwd!())
+
+    implementation =
+      File.read!(Path.join(repo_root, "workflows/agavemindlab/skills/phase-implementation/SKILL.md"))
+
+    normalized_implementation = String.replace(implementation, ~r/\s+/, " ")
+
+    assert normalized_implementation =~ "Before any repository code read or modification"
+    assert normalized_implementation =~ "If the file is missing or unreadable"
+    assert normalized_implementation =~ "restore or reacquire the complete design"
+    assert normalized_implementation =~ "stop in `Human Review`"
+    assert normalized_implementation =~ "never implement from the human Linear Design artifact alone"
+    assert normalized_implementation =~ "do not rewrite `.symphony/design.md` during Implementation"
+    assert normalized_implementation =~ "Artifact omissions are not conflicts"
+    assert normalized_implementation =~ "route substantive conflicts through Design rework"
+    refute normalized_implementation =~ "`BLOCKED_HANDOFF`"
+  end
+
+  test "phase skills keep executable acceptance ownership in design.md" do
+    repo_root = Path.expand("..", File.cwd!())
+
+    design =
+      File.read!(Path.join(repo_root, "workflows/agavemindlab/skills/phase-design/SKILL.md"))
+
+    implementation =
+      File.read!(Path.join(repo_root, "workflows/agavemindlab/skills/phase-implementation/SKILL.md"))
+
+    deployment =
+      File.read!(Path.join(repo_root, "workflows/agavemindlab/skills/phase-deployment/SKILL.md"))
+
+    land =
+      File.read!(Path.join(repo_root, "workflows/agavemindlab/skills/symphony-land/SKILL.md"))
+
+    normalized_implementation = String.replace(implementation, ~r/\s+/, " ")
+
+    assert normalized_implementation =~ "`.symphony/design.md` is the executable source"
+    assert normalized_implementation =~ "scope, commitments, approved approach, risks, and conflicts"
+    assert normalized_implementation =~ "investigation plan from `.symphony/design.md`"
+    assert normalized_implementation =~ "type-conditional evidence named by `.symphony/design.md`"
+    assert normalized_implementation =~ "recorded into `Acceptance mapping`"
+    assert normalized_implementation =~ "every pre-PR local acceptance check from `.symphony/design.md`"
+    assert normalized_implementation =~ "copy the exact query, predicate, and window"
+
+    normalized_deployment = String.replace(deployment, ~r/\s+/, " ")
+
+    assert normalized_deployment =~
+             "restore and explicitly read a complete `.symphony/design.md` before invoking `symphony-land`"
+
+    assert normalized_deployment =~
+             "missing, unreadable, or lacks a complete post-merge plan for every `S<N>`"
+
+    assert normalized_deployment =~ "report the handoff gap and return to `Human Review` before land"
+    assert normalized_deployment =~ "complete post-merge plan from `.symphony/design.md`"
+
+    assert normalized_deployment =~
+             "derive unresolved delayed `待验证项` from that plan and the matching `## Implementation` `Merge 后验证` copy"
+
+    assert normalized_deployment =~
+             "require its query, predicate, and window to match the Design plan exactly"
+
+    {derivative_match_index, _} =
+      :binary.match(normalized_deployment, "require its query, predicate, and window to match")
+
+    {land_index, _} =
+      :binary.match(normalized_deployment, "Open and follow `.agents/skills/symphony-land")
+
+    assert derivative_match_index < land_index
+
+    assert normalized_deployment =~
+             "read only the published, self-contained unresolved `待验证项`"
+
+    assert normalized_deployment =~
+             "do not restore `.symphony/design.md` or invoke `symphony-land`"
+
+    land_failure_guard =
+      "On failure, cancellation, timeout, or rollback, publish that evidence and return to `Human Review`; do not enter **Verification** or run acceptance"
+
+    assert normalized_deployment =~ land_failure_guard
+
+    assert normalized_deployment =~
+             "successful deploy for the intended merge SHA with no rollback"
+
+    assert normalized_deployment =~
+             "or no deploy was triggered because the changed paths are outside documented deploy triggers"
+
+    assert normalized_deployment =~
+             "use the merge timestamp as the window start"
+
+    {land_failure_guard_index, _} = :binary.match(normalized_deployment, land_failure_guard)
+    {verification_index, _} = :binary.match(normalized_deployment, "## Verification")
+    assert land_failure_guard_index < verification_index
+
+    normalized_land = String.replace(land, ~r/\s+/, " ")
+
+    assert normalized_land =~
+             "approved `## Implementation` acceptance and risk evidence for merge safety"
+
+    assert normalized_land =~
+             "`.symphony/design.md` supplies the complete post-merge verification plan"
+
+    assert normalized_land =~
+             "Read and validate that plan in this skill before any merge command"
+
+    assert normalized_land =~ "If that plan is incomplete, do not merge"
+    assert normalized_land =~ "`Merge 后验证` is required only"
+    assert normalized_land =~ "Requirements classified `S<N>` as `延迟验收`"
+    assert normalized_land =~ "do not execute its acceptance checks in this skill"
+    assert normalized_land =~ "Deployment executes that plan exactly once after this skill returns"
+
+    refute normalized_land =~
+             "Execute the complete post-merge verification plan from `.symphony/design.md`"
+
+    design_template =
+      design
+      |> String.split("## Artifact template", parts: 2)
+      |> List.last()
+      |> String.split("## Batched clarification", parts: 2)
+      |> hd()
+
+    for agent_only_detail <- [
+          "完整实现规格保存在",
+          "可重跑命令",
+          "通过判据",
+          "Post-Merge 最终验收"
+        ] do
+      refute design_template =~ agent_only_detail
+    end
+
+    refute implementation <> deployment <> land =~ "`## Design` 验收方案"
   end
 
   test "phase skills require rerunnable commands for commandable acceptance evidence" do
