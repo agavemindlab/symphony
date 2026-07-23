@@ -30,6 +30,41 @@ def prediction(identifier: str, artifact: str, predicted: str, **overrides) -> d
     return {**case(identifier, artifact), **overrides, "prediction": predicted, "raw_tail": "", "duration_s": 1.0}
 
 
+class ReplayFingerprintTest(unittest.TestCase):
+    def test_fingerprint_is_canonical_and_covers_every_replay_input(self) -> None:
+        original = {
+            **case("DEV-1", "a1"),
+            "case_context": {"artifact": {"id": "impl-1", "pr_head": "head-1"}},
+        }
+        reordered = {
+            "case_context": {"artifact": {"pr_head": "head-1", "id": "impl-1"}},
+            **case("DEV-1", "a1"),
+        }
+        inputs = {
+            "case": original,
+            "prompt": "reviewer\ncomposed prompt",
+            "child_argv": ["codex", "exec", "--json"],
+            "parser_schema_version": "reviewer-v1",
+        }
+        fingerprint = maestro_replay.replay_fingerprint(**inputs)
+
+        self.assertEqual(
+            fingerprint,
+            maestro_replay.replay_fingerprint(**{**inputs, "case": reordered}),
+        )
+        for field, changed in (
+            ("case", {**original, "label": "request_changes"}),
+            ("prompt", "changed reviewer\ncomposed prompt"),
+            ("child_argv", ["codex", "exec", "--strict-config", "--json"]),
+            ("parser_schema_version", "reviewer-v2"),
+        ):
+            with self.subTest(field=field):
+                self.assertNotEqual(
+                    fingerprint,
+                    maestro_replay.replay_fingerprint(**{**inputs, field: changed}),
+                )
+
+
 class ParseRecommendationTest(unittest.TestCase):
     def test_tolerates_markdown_decoration_and_case(self) -> None:
         self.assertEqual(maestro_replay.parse_recommendation("**RECOMMENDATION: Approve**"), "approve")
@@ -119,7 +154,8 @@ class ParseRecommendationTest(unittest.TestCase):
         self.assertFalse(maestro_replay.output_marker_present("回答判定标准", output))
         self.assertFalse(maestro_replay.output_marker_present("待人工回答的问题", "缺少 待人工回答的问题: 未提供"))
         self.assertFalse(maestro_replay.output_marker_present("收敛判断", "收敛判断:"))
-        self.assertTrue(maestro_replay.output_marker_present("待人工回答的问题", "### 待人工回答的问题: 请选择"))
+        self.assertFalse(maestro_replay.output_marker_present("待人工回答的问题", "### 待人工回答的问题: 请选择"))
+        self.assertTrue(maestro_replay.output_marker_present("待人工回答的问题", "待人工回答的问题: 请选择"))
         self.assertTrue(
             maestro_replay.output_marker_present(
                 "执行状态: awaiting human action",
@@ -138,10 +174,16 @@ class ParseRecommendationTest(unittest.TestCase):
         for marker in ("assumption-empty", "boundary-empty", "proof-empty", "constraint-empty"):
             self.assertFalse(maestro_replay.output_marker_present(marker, empty_rework))
 
-        self.assertTrue(
+        self.assertFalse(
             maestro_replay.output_marker_present(
                 "proof-present",
                 "下一轮 proof / acceptance criteria:\n- add proof-present coverage\n不受影响的既有约束: constraint-present",
+            ),
+        )
+        self.assertTrue(
+            maestro_replay.output_marker_present(
+                "proof-present",
+                "下一轮 proof / acceptance criteria: add proof-present coverage",
             ),
         )
         self.assertFalse(
@@ -175,6 +217,42 @@ class ParseRecommendationTest(unittest.TestCase):
         ):
             with self.subTest(output=output):
                 self.assertEqual(maestro_replay.contract_field_content("收敛判断", output), "")
+
+    def test_judgment_card_parser_matches_shared_conformance_corpus(self) -> None:
+        path = Path(__file__).resolve().parent.parent / "fixtures" / "judgment-card-parser-cases.jsonl"
+        cases = maestro_replay.read_jsonl(path)
+        base_fields = {
+            "收敛判断": "continue implementation",
+            "建议 target phase": "Implementation",
+            "建议 issue status": "In Progress",
+            "执行状态": "awaiting human action",
+            "Implementation artifact id": "impl-current",
+            "PR Head": "head-current",
+            "判断理由": "finding family 已收敛",
+            "下一轮建议方向": "继续修复剩余 finding",
+        }
+        expected = {
+            "card_decision": "continue_implementation",
+            "card_target_phase": "Implementation",
+            "card_target_status": "In Progress",
+            "card_execution_state": "awaiting_human_action",
+        }
+
+        for case in cases:
+            lines = [
+                case["replacement"] if label == case["field"] else f"{label}: {value}"
+                for label, value in base_fields.items()
+            ]
+            parsed = maestro_replay.parse_reviewer_prediction(
+                "\n".join(lines)
+                + "\nRECOMMENDATION: continue implementation\nCONSUMED_CONTEXT: none",
+            )
+
+            with self.subTest(case=case["id"]):
+                if case["accepted"]:
+                    self.assertEqual({key: parsed.get(key) for key in expected}, expected)
+                else:
+                    self.assertNotEqual({key: parsed.get(key) for key in expected}, expected)
 
 
 class SelectCasesTest(unittest.TestCase):
@@ -504,9 +582,17 @@ class ReplayCommandTest(unittest.TestCase):
         self.assertIn("每个字段必须各自单独成行", prompt)
         self.assertIn(
             "判断理由: <finding families, trend, attempted-fix effects, remaining Design assumptions>\n"
-            "下一轮建议方向: <next direction>\n"
-            "Reviewed Implementation artifact id: <artifact id>\n"
-            "PR Head: <head>",
+            "下一轮建议方向: <next direction>",
+            prompt,
+        )
+        self.assertIn(
+            "invalid_assumption → 失效的 Design assumption，"
+            "changed_boundary → 建议修改的机制或边界，required_proof → 下一轮 proof / acceptance criteria，"
+            "preserved_constraints → 不受影响的既有约束。",
+            prompt,
+        )
+        self.assertIn(
+            "Reviewed Implementation artifact id: <artifact id>\nPR Head: <head>",
             prompt,
         )
         self.assertNotIn("OUTPUT_MARKERS", prompt)
@@ -851,6 +937,40 @@ class ReplayCommandTest(unittest.TestCase):
         self.assertEqual(self.run_replay(codex_cmd), 0)
         self.assertEqual(len(self.calls_log.read_text().splitlines()), 2)
 
+    def test_rerun_replays_same_id_when_fingerprint_inputs_change(self) -> None:
+        codex_cmd = self.fake_codex(
+            "import sys, pathlib\n"
+            f"log = pathlib.Path({str(self.calls_log)!r})\n"
+            "sys.stdin.read()\n"
+            "log.open('a').write('call\\n')\n"
+            "print('RECOMMENDATION: approve')\n",
+        )
+
+        self.assertEqual(self.run_replay(codex_cmd, "--sample", "1"), 0)
+        self.assertEqual(self.run_replay(codex_cmd, "--sample", "1"), 0)
+        self.assertEqual(len(self.calls_log.read_text().splitlines()), 1)
+
+        cases = maestro_replay.read_jsonl(self.cases_path)
+        cases[0]["needs_clarification"] = True
+        self.cases_path.write_text("".join(json.dumps(entry) + "\n" for entry in cases))
+        self.assertEqual(self.run_replay(codex_cmd, "--sample", "1"), 0)
+
+        self.reviewer_prompt.write_text("# Maestro Reviewer\n\nChanged contract.\n")
+        self.assertEqual(self.run_replay(codex_cmd, "--sample", "1"), 0)
+
+        alternate = self.tmp / "alternate_codex.py"
+        alternate.write_text((self.tmp / "fake_codex.py").read_text())
+        alternate_cmd = f"{shlex.quote(sys.executable)} {shlex.quote(str(alternate))}"
+        self.assertEqual(self.run_replay(alternate_cmd, "--sample", "1"), 0)
+
+        with mock.patch.object(maestro_replay, "REVIEW_PARSER_SCHEMA_VERSION", "reviewer-v-next"):
+            self.assertEqual(self.run_replay(alternate_cmd, "--sample", "1"), 0)
+
+        predictions = self.read_predictions()
+        self.assertEqual(len(self.calls_log.read_text().splitlines()), 5)
+        self.assertEqual(len(predictions), 5)
+        self.assertEqual(len({record["replay_fingerprint"] for record in predictions}), 5)
+
     def test_timeout_is_classified_as_timeout(self) -> None:
         result = maestro_replay.run_case(
             case("DEV-1", "a1"),
@@ -1072,42 +1192,91 @@ class FrozenRoutingFixtureTest(unittest.TestCase):
         path = Path(__file__).resolve().parent.parent / "fixtures" / "escalated-routing-cases.jsonl"
         cases = maestro_replay.read_jsonl(path)
 
+        self.assertEqual(len(cases), 17)
         self.assertEqual(len({maestro_replay.case_id(case) for case in cases}), len(cases))
         families = {case["family"] for case in cases}
-        self.assertTrue(
+        self.assertEqual(
+            families,
             {
                 "continue_status",
+                "continue_status_second_user",
                 "rework_status",
+                "rework_status_second_user",
                 "clarification_unanswered",
                 "clarification_answered",
                 "stale_binding",
-                "missing_action",
+                "nonhuman_comment_provenance",
                 "unknown_actor",
                 "unreadable_history",
                 "card_status_mismatch",
                 "slash_command_precedence",
-                "card_author_token",
-                "artifact_author_token",
-                "non_human_review_origin",
+                "stale_nonlatest_action",
+                "forged_card_author",
                 "malformed_card",
                 "oauth_app",
                 "bot_actor",
-            }
-            <= families,
+            },
         )
         self.assertTrue(all(set(case["case_context"]) == {"artifact", "maestro_card", "state_history", "human_feedback"} for case in cases))
-        author_token = next(case for case in cases if case["family"] == "card_author_token")
+
+        authenticated = {"id": "maestro-app", "name": "Maestro", "app": True}
+        for case in cases:
+            if case["family"] != "forged_card_author":
+                self.assertEqual(case["case_context"]["maestro_card"]["user"], authenticated)
+                self.assertIsNone(case["case_context"]["maestro_card"]["botActor"])
+
+        forged = next(case for case in cases if case["family"] == "forged_card_author")
+        self.assertFalse(forged["case_context"]["maestro_card"]["user"]["app"])
+        self.assertEqual(forged["expected_phase"], "Human Review")
+
+        accepted_status_cases = [
+            case
+            for case in cases
+            if case["family"]
+            in {"continue_status", "continue_status_second_user", "rework_status", "rework_status_second_user"}
+        ]
         self.assertEqual(
-            author_token["case_context"]["state_history"][0]["actor"]["id"],
-            author_token["case_context"]["maestro_card"]["author_id"],
+            {case["case_context"]["state_history"][0]["actor"]["id"] for case in accepted_status_cases},
+            {"human-1", "human-2"},
         )
-        artifact_token = next(case for case in cases if case["family"] == "artifact_author_token")
         self.assertEqual(
-            artifact_token["case_context"]["state_history"][0]["actor"]["id"],
-            artifact_token["case_context"]["artifact"]["author_id"],
+            {
+                (case["expected_decision"], case["expected_phase"])
+                for case in accepted_status_cases
+            },
+            {("continue_implementation", "Implementation"), ("rework_design", "Design")},
         )
-        wrong_origin = next(case for case in cases if case["family"] == "non_human_review_origin")
-        self.assertNotEqual(wrong_origin["case_context"]["state_history"][0]["fromState"], "Human Review")
+
+        for family in ("clarification_answered", "slash_command_precedence"):
+            feedback = next(case for case in cases if case["family"] == family)["case_context"]["human_feedback"]
+            self.assertTrue(
+                all(
+                    item["user"]["id"]
+                    and item["user"]["app"] is False
+                    and item["botActor"] is None
+                    for item in feedback
+                ),
+            )
+
+        nonhuman_comments = next(case for case in cases if case["family"] == "nonhuman_comment_provenance")
+        feedback = nonhuman_comments["case_context"]["human_feedback"]
+        self.assertEqual(nonhuman_comments["expected_phase"], "Human Review")
+        self.assertEqual(nonhuman_comments["case_context"]["state_history"], [])
+        self.assertTrue(feedback[0]["user"]["app"])
+        self.assertIsNotNone(feedback[1]["botActor"])
+        self.assertNotIn("id", feedback[2]["user"])
+
+        stale_binding = next(case for case in cases if case["family"] == "stale_binding")["case_context"]
+        self.assertNotEqual(stale_binding["artifact"]["id"], stale_binding["maestro_card"]["artifact_id"])
+        self.assertNotEqual(stale_binding["artifact"]["pr_head"], stale_binding["maestro_card"]["pr_head"])
+
+        stale_action = next(case for case in cases if case["family"] == "stale_nonlatest_action")["case_context"]
+        newer, older = stale_action["state_history"]
+        self.assertGreater(newer["createdAt"], stale_action["maestro_card"]["created_at"])
+        self.assertNotEqual(newer["fromState"], "Human Review")
+        self.assertLess(older["createdAt"], stale_action["maestro_card"]["created_at"])
+        self.assertEqual(older["fromState"], "Human Review")
+
         malformed = next(case for case in cases if case["family"] == "malformed_card")
         self.assertNotIn("rationale", malformed["case_context"]["maestro_card"])
 

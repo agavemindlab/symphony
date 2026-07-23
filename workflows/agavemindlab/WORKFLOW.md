@@ -268,8 +268,11 @@ Symphony only starts the agent when the issue is in an active state (`Todo`, `In
    - Gather new human feedback from two places: (a) replies in each unresolved Phase artifact's thread, including phase-closed artifacts in the current chain; inspect each artifact's `children` / thread replies first, and (b) standalone top-level **human** comments on the issue that are not replies to any artifact. When reading Linear comments, retain each comment's `parent { id }`; Linear may also return replies in `comments.nodes`, so never treat a parented reply node as standalone top-level feedback. A reply's feedback keeps the phase intent of that artifact. Exclude agent-authored `## 建议新建 issue` proposal comments — those are the consent channel handled by the first bullet, not feedback. Scan **every** unresolved artifact, not just the awaiting-review one — humans request cross-phase rework by commenting on the artifact they want changed (e.g. feedback on `## Design` while `## Implementation` awaits review). "New" = newer than the agent's last closing reply on that artifact (or, for standalone comments, newer than the agent's last action). Attribute each standalone comment to the phase it discusses; if unclear, assume the awaiting-review phase. If a comment refers back to an earlier round ("上次"/"之前提到的"), pull the specific resolved comment it points to per the `symphony-linear` skill's back-reference exception.
    - Gather the auto-rework signal separately from human feedback. It qualifies only when the issue is `Rework`, the Maestro-authored reply matches the current reviewed artifact/head, contains both `建议回复方式: request changes` and `🤖 auto: 已自动将 issue 置为 Rework`, and its `建议回复` starts with `/rework <phase>`. All other Maestro replies are advisory. An awaiting Implementation artifact with `Review verdict: ESCALATED` can never qualify, even if a legacy reply carries that marker.
    - For an awaiting Implementation artifact with `Review verdict: ESCALATED`,
-     select the newest Maestro judgment card matching the current Implementation
-     artifact id and PR Head. The card qualifies only when
+     select the newest judgment card attributed by Linear to the configured
+     Maestro OAuth app: require a complete `user.id`, `user.app == true`, no
+     `botActor`, and `user.name == "Maestro"`; a matching body from any other
+     principal is not a Maestro card. It must also match the current
+     Implementation artifact id and PR Head. The card qualifies only when
      `收敛判断`, `建议 target phase`, `建议 issue status`,
      `执行状态: awaiting human action`, `判断理由`, and
      `下一轮建议方向` each appear exactly once, are non-empty, and match

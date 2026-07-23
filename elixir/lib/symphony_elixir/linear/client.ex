@@ -741,6 +741,8 @@ defmodule SymphonyElixir.Linear.Client do
   defp normalize_issue(_issue, _assignee_filter), do: nil
 
   defp normalize_comment(comment) when is_map(comment) do
+    author_id = comment |> Map.get("user") |> comment_field("id") |> present_comment_actor_id()
+
     author_app =
       case comment["user"] do
         %{"app" => value} when is_boolean(value) -> value
@@ -761,9 +763,10 @@ defmodule SymphonyElixir.Linear.Client do
       resolved_at: parse_datetime(comment["resolvedAt"]),
       parent_id: comment_field(comment["parent"], "id"),
       author_name: comment_author_name(comment),
+      author_id: author_id,
       author_app: author_app,
       bot_actor_present: bot_actor_present,
-      author_is_bot: not (author_app == false and bot_actor_present == false)
+      author_is_bot: not (is_binary(author_id) and author_app == false and bot_actor_present == false)
     }
   end
 
@@ -783,6 +786,8 @@ defmodule SymphonyElixir.Linear.Client do
 
   defp comment_field(%{} = author, field) when is_binary(field), do: author[field]
   defp comment_field(_author, _field), do: nil
+  defp present_comment_actor_id(id) when is_binary(id), do: if(String.trim(id) == "", do: nil, else: id)
+  defp present_comment_actor_id(_id), do: nil
 
   defp present_author_name?(value), do: is_binary(value) and String.trim(value) != ""
 

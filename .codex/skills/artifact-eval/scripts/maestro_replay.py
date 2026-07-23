@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import fcntl
+import hashlib
 import json
 import os
 import re
@@ -46,6 +47,9 @@ DEFAULT_LABELS = "approve,request_changes,escalated"
 DEFAULT_CONCURRENCY = 2
 DEFAULT_TIMEOUT_S = 600.0
 RAW_TAIL_CHARS = 2000
+REPLAY_FINGERPRINT_SCHEMA_VERSION = 1
+REVIEW_PARSER_SCHEMA_VERSION = "reviewer-v1"
+ROUTING_PARSER_SCHEMA_VERSION = "routing-v1"
 SCOREABLE_LABELS = {"approve": "approve", "request_changes": "request changes"}
 RECOMMENDATIONS = (
     "completion confirmation",
@@ -92,6 +96,25 @@ CONTRACT_FIELD_LABELS = {
     "回答判定标准",
     "RECOMMENDATION",
     "CONSUMED_CONTEXT",
+}
+JUDGMENT_ENUMS = {
+    "收敛判断": {
+        "continue implementation": "continue_implementation",
+        "rework design": "rework_design",
+        "ask clarification": "ask_clarification",
+    },
+    "建议 target phase": {
+        "requirements": "Requirements",
+        "design": "Design",
+        "implementation": "Implementation",
+        "deployment": "Deployment",
+    },
+    "建议 issue status": {
+        "in progress": "In Progress",
+        "rework": "Rework",
+        "unchanged": "unchanged",
+    },
+    "执行状态": {"awaiting human action": "awaiting_human_action"},
 }
 
 
@@ -163,6 +186,9 @@ def compose_prompt(reviewer_prompt: str, case: dict) -> str:
             "执行状态: awaiting human action\n"
             "判断理由: <finding families, trend, attempted-fix effects, remaining Design assumptions>\n"
             "下一轮建议方向: <next direction>\n"
+            "若 case_context 提供决定专用值，须原样映射：invalid_assumption → 失效的 Design assumption，"
+            "changed_boundary → 建议修改的机制或边界，required_proof → 下一轮 proof / acceptance criteria，"
+            "preserved_constraints → 不受影响的既有约束。\n"
             "Reviewed Implementation artifact id: <artifact id>\n"
             "PR Head: <head>\n"
             "再以两行审计 contract 结束：\n"
@@ -291,14 +317,18 @@ def parse_reviewer_prediction(output: str) -> dict:
         "consumed_context": parse_consumed_context(output),
     }
     if "收敛判断" in output:
-        decision = contract_field_content("收敛判断", output).lower().replace("_", " ").replace("-", " ")
-        prediction["card_decision"] = decision.replace(" ", "_") if decision in ("continue implementation", "rework design", "ask clarification") else "unparsed"
-        prediction["card_target_phase"] = contract_field_content("建议 target phase", output)
-        prediction["card_target_status"] = contract_field_content("建议 issue status", output)
-        prediction["card_execution_state"] = contract_field_content("执行状态", output).lower().replace(" ", "_")
+        prediction["card_decision"] = parse_judgment_enum("收敛判断", output)
+        prediction["card_target_phase"] = parse_judgment_enum("建议 target phase", output)
+        prediction["card_target_status"] = parse_judgment_enum("建议 issue status", output)
+        prediction["card_execution_state"] = parse_judgment_enum("执行状态", output)
         prediction["card_artifact_id"] = contract_field_content("Implementation artifact id", output)
         prediction["card_pr_head"] = contract_field_content("PR Head", output)
     return prediction
+
+
+def parse_judgment_enum(label: str, output: str) -> str:
+    value = contract_field_content(label, output)
+    return JUDGMENT_ENUMS[label].get(value.lower(), "unparsed")
 
 
 def parse_routing_prediction(output: str) -> dict:
@@ -381,28 +411,18 @@ def contract_field_content(expected: str | None, output: str) -> str:
 
 
 def contract_field_contents(expected: str, output: str) -> list[str]:
-    lines = lines_outside_fences(output)
     contents = []
-    for index, line in enumerate(lines):
+    for line in lines_outside_fences(output):
         match = contract_field_match(line, {expected, "Reviewed " + expected})
-        if not match:
-            continue
-        content = [match.group("value").strip()]
-        for following in lines[index + 1 :]:
-            if contract_field_match(
-                following,
-                CONTRACT_FIELD_LABELS | {"Reviewed " + label for label in CONTRACT_FIELD_LABELS},
-            ):
-                break
-            content.append(following.strip())
-        contents.append("\n".join(content).strip())
+        if match:
+            contents.append(match.group("value").strip())
     return contents
 
 
 def contract_field_match(line: str, labels: set[str]) -> re.Match | None:
     source = "|".join(sorted(map(re.escape, labels), key=len, reverse=True))
     return re.match(
-        rf"^\s*(?:(?:[-+>]|#+)\s+)*(?P<label>(?:{source})|\*(?:{source})\*|\*\*(?:{source})\*\*)\s*[:：]\s*(?P<value>.*?)\s*$",
+        rf"^\s*(?:[-+>]\s+)*(?P<label>(?:{source})|\*(?:{source})\*|\*\*(?:{source})\*\*)\s*[:：]\s*(?P<value>.*?)\s*$",
         line,
         re.IGNORECASE,
     )
@@ -472,10 +492,34 @@ def run_case(case: dict, *, codex_argv: list[str], prompt: str, timeout_s: float
     }
 
 
-def load_done_ids(predictions_path: Path) -> set[str]:
+def replay_fingerprint(
+    *,
+    case: dict,
+    prompt: str,
+    child_argv: list[str],
+    parser_schema_version: str,
+) -> str:
+    """Bind a reusable prediction to every deterministic replay input."""
+    payload = {
+        "fingerprint_schema_version": REPLAY_FINGERPRINT_SCHEMA_VERSION,
+        "parser_schema_version": parser_schema_version,
+        "case": case,
+        "prompt": prompt,
+        "child_argv": child_argv,
+    }
+    canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode()).hexdigest()
+
+
+def load_done_ids(predictions_path: Path, expected_fingerprints: dict[str, str]) -> set[str]:
     if not predictions_path.is_file():
         return set()
-    return {case_id(record) for record in read_jsonl(predictions_path) if record.get("returncode") == 0}
+    return {
+        case_id(record)
+        for record in read_jsonl(predictions_path)
+        if record.get("returncode") == 0
+        and record.get("replay_fingerprint") == expected_fingerprints.get(case_id(record))
+    }
 
 
 def ensure_trailing_newline(path: Path) -> None:
@@ -488,30 +532,51 @@ def ensure_trailing_newline(path: Path) -> None:
             handle.write(b"\n")
 
 
-def execute_replay(cases: list[dict], *, args: argparse.Namespace, prompt_fn, parse_prediction) -> int:
+def execute_replay(
+    cases: list[dict],
+    *,
+    args: argparse.Namespace,
+    prompt_fn,
+    parse_prediction,
+    parser_schema_version: str,
+) -> int:
     """Shared run/resume plumbing: one codex session per not-yet-predicted case."""
     child_argv = replay_child_argv(args.codex_cmd, cases)
     if any("case_context" in case for case in cases):
         preflight_strict_replay(child_argv, args.timeout)
 
+    jobs = []
+    for case in cases:
+        prompt = prompt_fn(case)
+        fingerprint = replay_fingerprint(
+            case=case,
+            prompt=prompt,
+            child_argv=child_argv,
+            parser_schema_version=parser_schema_version,
+        )
+        jobs.append((case, prompt, fingerprint))
+
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
     predictions_path = output_dir / "predictions.jsonl"
     ensure_trailing_newline(predictions_path)
-    done = load_done_ids(predictions_path)
-    todo = [case for case in cases if case_id(case) not in done]
-    skipped = len(cases) - len(todo)
+    expected_fingerprints = {case_id(case): fingerprint for case, _, fingerprint in jobs}
+    done = load_done_ids(predictions_path, expected_fingerprints)
+    todo = [job for job in jobs if case_id(job[0]) not in done]
+    skipped = len(jobs) - len(todo)
 
     write_lock = threading.Lock()
 
-    def run_and_record(case: dict) -> str:
+    def run_and_record(job: tuple[dict, str, str]) -> str:
+        case, prompt, fingerprint = job
         prediction = run_case(
             case,
             codex_argv=child_argv,
-            prompt=prompt_fn(case),
+            prompt=prompt,
             timeout_s=args.timeout,
             parse_prediction=parse_prediction,
         )
+        prediction["replay_fingerprint"] = fingerprint
         if prediction["returncode"] == 0:
             with write_lock, predictions_path.open("a") as handle:
                 handle.write(json.dumps(prediction, ensure_ascii=False) + "\n")
@@ -681,6 +746,7 @@ def replay(args: argparse.Namespace) -> int:
         args=args,
         prompt_fn=lambda case: compose_prompt(reviewer_prompt, case),
         parse_prediction=parse_reviewer_prediction,
+        parser_schema_version=REVIEW_PARSER_SCHEMA_VERSION,
     )
 
 
@@ -696,6 +762,7 @@ def routing_replay(args: argparse.Namespace) -> int:
         args=args,
         prompt_fn=lambda case: compose_routing_prompt(excerpt, case),
         parse_prediction=parse_routing_prediction,
+        parser_schema_version=ROUTING_PARSER_SCHEMA_VERSION,
     )
 
 

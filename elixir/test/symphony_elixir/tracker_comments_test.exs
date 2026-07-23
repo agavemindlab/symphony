@@ -81,6 +81,7 @@ defmodule SymphonyElixir.TrackerCommentsTest do
              resolved_at: ~U[2026-01-02 00:00:00Z],
              parent_id: "comment-0",
              author_name: "ada",
+             author_id: "user-1",
              author_app: false,
              bot_actor_present: false,
              author_is_bot: false
@@ -143,7 +144,11 @@ defmodule SymphonyElixir.TrackerCommentsTest do
       {%{"user" => nil, "botActor" => %{"id" => "bot"}}, :unknown, true, true},
       {%{"user" => %{"id" => "user-bot", "app" => false}, "botActor" => %{"id" => "bot"}}, false, true, true},
       {%{"user" => %{"id" => "missing-app"}, "botActor" => nil}, :unknown, false, true},
-      {%{"user" => %{"id" => "missing-bot-key", "app" => false}}, false, :unknown, true}
+      {%{"user" => %{"id" => "missing-bot-key", "app" => false}}, false, :unknown, true},
+      {%{"user" => %{"app" => false}, "botActor" => nil}, false, false, true},
+      {%{"user" => %{"id" => nil, "app" => false}, "botActor" => nil}, false, false, true},
+      {%{"user" => %{"id" => "", "app" => false}, "botActor" => nil}, false, false, true},
+      {%{"user" => %{"id" => "  ", "app" => false}, "botActor" => nil}, false, false, true}
     ]
     |> Enum.each(fn {input, author_app, bot_actor_present, author_is_bot} ->
       comment = Client.normalize_comment_for_test(input)
@@ -152,6 +157,11 @@ defmodule SymphonyElixir.TrackerCommentsTest do
       assert comment.bot_actor_present == bot_actor_present
       assert comment.author_is_bot == author_is_bot
     end)
+
+    assert Client.normalize_comment_for_test(%{
+             "user" => %{"id" => "human-a", "app" => false},
+             "botActor" => nil
+           }).author_id == "human-a"
   end
 
   test "linear client paginates issue comments and sorts ascending by created_at" do

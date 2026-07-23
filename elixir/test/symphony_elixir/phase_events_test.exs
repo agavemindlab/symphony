@@ -456,6 +456,34 @@ defmodule SymphonyElixir.PhaseEventsTest do
     end
   end
 
+  test "judgment card parser matches the shared conformance corpus" do
+    corpus =
+      __DIR__
+      |> Path.join("../../../.codex/skills/artifact-eval/fixtures/judgment-card-parser-cases.jsonl")
+      |> File.stream!()
+      |> Enum.map(&Jason.decode!/1)
+
+    for %{"id" => id, "field" => selected, "replacement" => replacement, "accepted" => accepted} <- corpus do
+      body =
+        continue_card_fields()
+        |> Enum.map_join("\n", fn
+          {^selected, _value} -> replacement
+          {label, value} -> "#{label}: #{value}"
+        end)
+
+      event = derive_maestro_event("🤖 Maestro 预审核\n#{body}")
+
+      if accepted do
+        assert event.recommendation == "continue_implementation", id
+        assert event.target_phase == "Implementation", id
+        assert event.target_status == "In Progress", id
+        assert event.execution_state == "awaiting_human_action", id
+      else
+        assert event.recommendation == "unknown", id
+      end
+    end
+  end
+
   test "keeps blockquoted, mixed-delimiter, and shorter-closer fence content excluded" do
     for body <- [
           """
