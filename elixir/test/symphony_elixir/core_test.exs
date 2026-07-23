@@ -1141,7 +1141,9 @@ defmodule SymphonyElixir.CoreTest do
     assert reviewer =~ "mutate Linear, GitHub, files, or issue state"
     refute reviewer =~ "MAESTRO_AUTO_REWORK"
     assert skill =~ "MAESTRO_AUTO_REWORK"
-    assert skill =~ "except an `ESCALATED` Implementation review"
+    assert skill =~ "Ordinary Maestro `request changes` pre-reviews auto-execute"
+    assert skill =~ "`ESCALATED` never appends that marker or changes state"
+    refute skill =~ "except an `ESCALATED` Implementation review: they append"
   end
 
   test "linear api token resolves from LINEAR_API_KEY env var" do

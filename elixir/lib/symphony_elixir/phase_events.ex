@@ -17,7 +17,20 @@ defmodule SymphonyElixir.PhaseEvents do
   @marker_decoration_regex ~r/\A[\s>#*_`~-]+/u
   @needs_clarification_regex ~r/(?:\A|\n)\s*###\s+NEEDS CLARIFICATION\b|\[NEEDS CLARIFICATION/iu
   @judgment_labels ["收敛判断", "建议 target phase", "建议 issue status", "执行状态"]
-  @judgment_label_source Enum.join(@judgment_labels, "|")
+  @artifact_id_labels ["Implementation artifact id", "Reviewed Implementation artifact id"]
+  @base_detail_labels ["PR Head", "判断理由", "下一轮建议方向"]
+  @rework_detail_labels [
+    "失效的 Design assumption",
+    "建议修改的机制或边界",
+    "下一轮 proof / acceptance criteria",
+    "不受影响的既有约束"
+  ]
+  @clarification_detail_labels ["待人工回答的问题", "回答判定标准"]
+  @card_labels @judgment_labels ++
+                 @artifact_id_labels ++
+                 @base_detail_labels ++
+                 @rework_detail_labels ++ @clarification_detail_labels
+  @judgment_label_source Enum.map_join(@card_labels, "|", &Regex.escape/1)
   @line_prefix_source "\\s*(?:[-+>]\\s+)*"
   @judgment_field_regex Regex.compile!(
                           "\\A#{@line_prefix_source}(?<label>#{@judgment_label_source}|\\*(?:#{@judgment_label_source})\\*|\\*\\*(?:#{@judgment_label_source})\\*\\*)\\s*[:：]\\s*(?<value>.*?)\\s*\\z",
@@ -256,7 +269,7 @@ defmodule SymphonyElixir.PhaseEvents do
         event_id: "maestro_review:" <> comment.id,
         phase: phase,
         artifact_comment_id: comment.parent_id,
-        recommendation: maestro_recommendation(comment.body, judgment_fields),
+        recommendation: maestro_recommendation(comment.body, judgment_fields, comment.parent_id),
         confidence: maestro_confidence(comment.body),
         auto: String.contains?(comment.body, "🤖 auto"),
         comment_id: comment.id,
@@ -332,10 +345,10 @@ defmodule SymphonyElixir.PhaseEvents do
     end
   end
 
-  defp maestro_recommendation(body, fields) do
+  defp maestro_recommendation(body, fields, artifact_comment_id) do
     recommendations =
       if Enum.any?(@judgment_labels, &String.contains?(body, &1)) do
-        [convergence_recommendation(fields)]
+        [convergence_recommendation(fields, artifact_comment_id)]
       else
         body |> String.split("\n") |> Enum.map(&recommendation_from_line/1)
       end
@@ -347,14 +360,48 @@ defmodule SymphonyElixir.PhaseEvents do
     end
   end
 
-  defp convergence_recommendation(fields) do
+  defp convergence_recommendation(fields, artifact_comment_id) do
     recommendation = judgment_value(fields, "收敛判断")
 
     if Map.get(@convergence_contracts, recommendation) ==
          {judgment_value(fields, "建议 target phase"), judgment_value(fields, "建议 issue status")} and
-         judgment_value(fields, "执行状态") == "awaiting_human_action",
+         judgment_value(fields, "执行状态") == "awaiting_human_action" and
+         complete_card_details?(fields, recommendation, artifact_comment_id),
        do: recommendation
   end
+
+  defp complete_card_details?(fields, recommendation, artifact_comment_id) do
+    exact_artifact_id_matches?(fields, artifact_comment_id) and
+      Enum.all?(@base_detail_labels, &exact_nonempty_field?(fields, &1)) and
+      Enum.all?(decision_detail_labels(recommendation), &exact_nonempty_field?(fields, &1))
+  end
+
+  defp exact_artifact_id_matches?(fields, artifact_comment_id) do
+    case Enum.filter(fields, fn {label, _value} -> label in @artifact_id_labels end) do
+      [{_label, value}] -> normalize_artifact_id(value) == artifact_comment_id
+      _other -> false
+    end
+  end
+
+  defp normalize_artifact_id(value) do
+    value = String.trim(value)
+
+    case Regex.run(~r/\A`([^`]+)`\z/u, value, capture: :all_but_first) do
+      [artifact_id] -> artifact_id
+      nil -> if String.contains?(value, "`"), do: nil, else: value
+    end
+  end
+
+  defp exact_nonempty_field?(fields, label) do
+    case Enum.filter(fields, &match?({^label, _value}, &1)) do
+      [{^label, value}] -> String.trim(value) != ""
+      _other -> false
+    end
+  end
+
+  defp decision_detail_labels("rework_design"), do: @rework_detail_labels
+  defp decision_detail_labels("ask_clarification"), do: @clarification_detail_labels
+  defp decision_detail_labels(_recommendation), do: []
 
   defp recommendation_from_line(line) do
     if String.contains?(line, "建议回复方式") do
