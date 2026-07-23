@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import fcntl
+import functools
 import hashlib
 import json
 import os
@@ -36,7 +37,6 @@ DEFAULT_CODEX_CMD = (
 )
 HERMETIC_CODEX_CMD = (
     "codex exec --strict-config --json --ignore-user-config --ignore-rules --ephemeral "
-    "-m gpt-5.6-sol "
     "-c 'default_permissions=\"replay\"' "
     "-c 'permissions.replay.filesystem={\":minimal\"=\"read\"}' "
     "-c 'permissions.replay.network.enabled=false' "
@@ -498,6 +498,7 @@ def replay_fingerprint(
         "prompt": prompt,
         "child_argv": child_argv,
         "runtime_files": replay_runtime_files(child_argv),
+        "runtime_version": replay_runtime_version(child_argv),
     }
     canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode()).hexdigest()
@@ -513,6 +514,23 @@ def replay_runtime_files(child_argv: list[str]) -> dict[str, str]:
         str(path): hashlib.sha256(path.read_bytes()).hexdigest()
         for path in sorted(set(candidates))
     }
+
+
+def replay_runtime_version(child_argv: list[str]) -> str:
+    executable = shutil.which(child_argv[0]) if child_argv else None
+    return executable_version(str(Path(executable).resolve())) if executable else "unresolved"
+
+
+@functools.lru_cache(maxsize=None)
+def executable_version(executable: str) -> str:
+    completed = subprocess.run(
+        [executable, "--version"],
+        capture_output=True,
+        text=True,
+        timeout=5,
+        check=False,
+    )
+    return (completed.stdout + completed.stderr).strip()
 
 
 def matching_fingerprint_predictions(
