@@ -26,13 +26,21 @@ action after reading the `## Deployment` artifact.
 
 - **Merge entry** (issue in `Merging`). Main Flow detected the merge approval,
   wrote the approval reply on `## Implementation`, and set
-  `current_phase: Deployment`. Read the `## Implementation` artifact and PR,
-  then run the full path below: leak check → land → verify → post artifact.
+  `current_phase: Deployment`. Using the existing state restore/reacquire path
+  once, restore and explicitly read a complete `.symphony/design.md` before
+  invoking `symphony-land`. If it is missing, unreadable, or lacks a complete
+  post-merge plan for every `S<N>`, report the handoff gap and return to
+  `Human Review` before land or merge. Read the `## Implementation` artifact
+  and, for every delayed `S<N>`, require its query, predicate, and window to
+  match the Design plan exactly; report a mismatch and return to `Human Review`
+  before land or merge. Read the PR, then run the full path below: leak check →
+  land → verify → post artifact.
 - **Verification re-entry** (issue in `In Progress`, a concluded `## Deployment`
   artifact already exists with unresolved `⚠️ 待观察` items). The PR has long
   since merged. **Skip cleanup and land entirely** — do not touch the working
-  tree; this run only reads the existing `## Deployment` 的 `待验证项` block and
-  `## Requirements` and runs checks against production logs. Go straight to
+  tree; read only the published, self-contained unresolved `待验证项` and run
+  those checks against production logs. On verification re-entry, do not
+  restore `.symphony/design.md` or invoke `symphony-land`. Go straight to
   **Verification** to finish the pending items. This is what
   Deployment-in-`In Progress` means: continue verifying what could not be
   confirmed at deploy time.
@@ -62,18 +70,21 @@ Open and follow `.agents/skills/symphony-land/SKILL.md` to merge the PR.
 The current PR's own post-merge CI/deploy run completion is part of that land
 gate; do not post `## Deployment` until it reaches success, failure,
 cancelled, or a land-skill timeout/risk decision.
+Continue only when landing reports a successful deploy for the intended merge
+SHA with no rollback, or no deploy was triggered because the changed paths are
+outside documented deploy triggers. On failure, cancellation, timeout, or
+rollback, publish that evidence and return to `Human Review`; do not enter
+**Verification** or run acceptance.
 
 ## Verification
 
-Drive every acceptance `S<N>` from `## Requirements` to a resolved status
-(`✅ 通过` / `❌ 失败` / `➖ N/A`) by executing the `## Design` 验收方案's
-**post-merge 最终验收** for each, recording the evidence form the design named —
-a 截屏 / 录屏 for an interactive `S<N>`, the query+matched-lines for a log
-signal — readably (verdict line + artifact, raw output folded). The `验收对照`
-section is the running ledger. On a re-entry the still-`⚠️ 待观察` items are the
-main work — but also re-confirm any earlier `✅` you judge was only a
-point-in-time proxy for a criterion whose real intent is sustained or needs
-fresh confirmation; do not mechanically trust a prior pass.
+On merge entry, drive every acceptance `S<N>` from `## Requirements` to a
+resolved status (`✅ 通过` / `❌ 失败` / `➖ N/A`) by executing the complete
+post-merge plan from `.symphony/design.md`. Record the evidence form the plan
+names — a 截屏 / 录屏 for an interactive `S<N>`, the query+matched-lines for a
+log signal — readably (verdict line + artifact, raw output folded). The
+`验收对照` section is the running ledger. On verification re-entry, execute
+only the published unresolved `待验证项`.
 
 ### Authenticated production acceptance accounts
 
@@ -117,10 +128,12 @@ When a post-merge acceptance check requires logged-in user state:
    - Do not use `⚠️ 待观察` for the current PR's own post-merge CI/deploy run
      completion; that is the merge-entry land gate above.
    - `延迟验收` whose window is still open — on **merge entry** the deploy
-     **starts** the window: carry the runnable spec forward from
-     `## Implementation` 的 `Merge 后验证`, stamp the **window-end date**
-     (deploy date + window length), and record it in `待验证项`. On a re-entry,
-     if the window still has not elapsed, note `窗口未满，剩余 <N> 天`.
+     **starts** the window: derive unresolved delayed `待验证项` from that plan
+     and the matching `## Implementation` `Merge 后验证` copy, stamp the
+     **real window-end date** (deploy date + window length), and record it in
+     `待验证项`. When landing records a documented no-deploy result, use the
+     merge timestamp as the window start. On a re-entry, if the window still
+     has not elapsed, note `窗口未满，剩余 <N> 天`.
    - any other check not yet runnable (an external signal not yet readable).
      State the trigger action/event, owner, observable signal, and the human's
      next step once the signal appears. Do not use an abstract future event like

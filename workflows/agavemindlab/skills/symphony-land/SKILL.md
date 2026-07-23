@@ -2,7 +2,7 @@
 name: symphony-land
 description:
   Land a PR by monitoring conflicts, resolving them, waiting for checks, and
-  post-merge verification runs; use when asked to land, merge, or shepherd
+  post-merge workflow/deploy runs; use when asked to land, merge, or shepherd
   a PR to completion.
 ---
 
@@ -13,10 +13,11 @@ description:
 - Ensure the PR is conflict-free with `upstream/${SYMPHONY_BASE_BRANCH:-main}`.
 - Ensure the PR commit history is organized before merge, rewriting only when
   the history is scattered or fixup-heavy.
-- Keep PR CI and post-merge verification runs green.
-- Use the approved `## Implementation` artifact's `Acceptance mapping` and
-  `合并风险判断` as the Merging gate, plus `Merge 后验证` when any criterion is
-  `延迟验收`.
+- Keep PR CI and post-merge workflow/deploy runs green.
+- Use approved `## Implementation` acceptance and risk evidence for merge
+  safety.
+- Use `.symphony/design.md` to gate that a complete post-merge verification
+  plan exists; do not execute its acceptance checks in this skill.
 - Squash-merge the PR once checks pass, then watch the `main` workflows for
   the merge commit.
 - Do not yield to the user until the PR is merged and the post-merge runs are
@@ -35,20 +36,20 @@ description:
 2. Confirm the human approved Merging (the issue is in the `Merging` state)
    and read the approved `## Requirements` and `## Implementation` artifacts
    before merging. Use Requirements' `关键假设` as the source of truth for
-   `延迟验收`; Implementation must supply a merge-safety read plus a matching
-   post-merge verification plan for each such criterion:
-   - A merge-safety read: the `Acceptance mapping` and `合并风险判断` sections establish
-     whether the PR is safe to merge and whether any remaining issue could
-     crash services, corrupt/lose data, break background jobs, or only affect
-     a bounded path.
-   - A post-merge verification plan: the `Merge 后验证` section lists the
-     exact runnable checks to run after merge (required when any acceptance
-     criterion is `延迟验收` — see phase-requirements' Verifiability
-     classification).
-   A missing merge-safety read always blocks merging. A missing post-merge
-   verification plan blocks merging only when an acceptance criterion is
-   `延迟验收`. Note the gap in the `## Implementation` thread and return the
-   issue to `Human Review`.
+   `延迟验收`. Implementation's `Acceptance mapping` and `合并风险判断` provide
+   the approved acceptance and risk evidence for merge safety: whether any
+   remaining issue could crash services, corrupt/lose data, break background
+   jobs, or only affect a bounded path.
+   Require a readable `.symphony/design.md`; `.symphony/design.md` supplies the
+   complete post-merge verification plan for every `S<N>`. Read and validate
+   that plan in this skill before any merge command. If that plan is incomplete,
+   do not merge. `Merge 后验证` is required only as the matching,
+   self-contained delayed-check derivative when Requirements classified
+   `S<N>` as `延迟验收`. A missing merge-safety read always blocks merging. An
+   incomplete Design plan also blocks merging. A missing `Merge 后验证`
+   derivative blocks merging only when an acceptance criterion is `延迟验收`.
+   Note the gap in the `## Implementation` thread and return the issue to
+   `Human Review`.
 3. Confirm the relevant `AGENTS.md` validation is green locally before any push.
 4. If the working tree has uncommitted changes, commit with the `symphony-commit` skill
    and push with the `symphony-pr` skill before proceeding.
@@ -90,29 +91,26 @@ description:
 12. Immediately capture the merge commit SHA and watch `main` workflow runs for
     that SHA. Follow the project's deployment trigger paths documented in
     `AGENTS.md` to determine which workflows may run after a merge to `main`.
-13. Execute the post-merge verification plan from the latest handoff. Record
-    concrete evidence in the workpad: workflow/deploy run URLs or SHAs, service
-    health signals, smoke-test request/response, logs/error dashboard signal,
-    worker/job result, or data-safe read-only verification.
+13. Return the merge SHA and post-merge workflow/deploy evidence to
+    `phase-deployment`; Deployment executes that plan exactly once after this
+    skill returns.
 14. If a post-merge run fails, is cancelled, times out, or does not appear when
     expected, inspect the run logs and report the deployment risk immediately.
-15. If any planned post-merge verification fails or cannot be run, keep the issue
-    out of `Done`, record the failed signal, and report the risk immediately.
-16. Automatically rollback only when the rollback guardrails below prove it is
+15. Automatically rollback only when the rollback guardrails below prove it is
     data-safe; otherwise stop and ask for human direction.
-17. **Context guard:** Before implementing review feedback, confirm it does not
+16. **Context guard:** Before implementing review feedback, confirm it does not
     conflict with the user's stated intent or task context. If it conflicts,
     respond inline with a justification and ask the user before changing code.
-18. **Pushback template:** When disagreeing, reply inline with: acknowledge +
+17. **Pushback template:** When disagreeing, reply inline with: acknowledge +
     rationale + offer alternative.
-19. **Ambiguity gate:** When ambiguity blocks progress, use the clarification
+18. **Ambiguity gate:** When ambiguity blocks progress, use the clarification
     flow (assign PR to current GH user, mention them, wait for response). Do not
     implement until ambiguity is resolved.
     - If you are confident you know better than the reviewer, you may proceed
       without asking the user, but reply inline with your rationale.
-20. **Per-comment mode:** For each review comment, choose one of: accept,
+19. **Per-comment mode:** For each review comment, choose one of: accept,
     clarify, or push back. Reply inline stating the mode before changing code.
-21. **Reply before change:** Always respond with intended action before pushing
+20. **Reply before change:** Always respond with intended action before pushing
     code changes (inline for review comments, issue thread for automated reviews).
 
 ## Commands
