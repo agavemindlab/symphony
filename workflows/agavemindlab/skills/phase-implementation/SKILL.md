@@ -181,57 +181,99 @@ Markdown sections:
 3. **Implement with TDD** — for new behavior: failing test → minimal code
    → green → refactor.
 4. **Commit** — invoke `symphony-commit` skill for each logical change.
-5. **Persist agent state** — after the final workpad update, upload
-   `.symphony/workpad.md`, `.symphony/design.md`, and any other cleanup paths as
-   a `Symphony agent state` Linear issue attachment. Keep them untracked on the
-   PR branch. This is required before any PR publish / refresh so agent-only
-   state can be restored for rework without appearing in the GitHub Files
-   changed view.
-6. **Push** — invoke `symphony-pr` skill to publish to `origin` and request code
-   review.
-7. **Local runtime acceptance** — execute the `## Design` 验收方案's **pre-PR
+5. **Local runtime acceptance** — run acceptance-targeted tests, static checks,
+   and hooks locally; CI owns the full regression suite. Run the local full
+   suite only when the project has no complete CI, the change touches shared
+   infrastructure, or targeted evidence exposes cross-module risk. Execute the
+   `## Design` 验收方案's **pre-PR
    本地验收** for each `S<N>`: exercise the feature against the running service
    per `AGENTS.md` and produce the evidence form the design named — a 截屏 for a
    single state, a 录屏 / GIF for an interactive flow — recorded readably (a
    verdict line + the artifact, raw output folded in `>>>`). If local acceptance
    is impossible, record the reason and closest safe alternative proof; surface
    the caveat in the artifact `风险/注意`.
-8. **Verify** — invoke `verification-before-completion`.
-9. **Bounded pre-landing review** — set `MAX_REVIEW_ATTEMPTS = 5` for this
-   Implementation agent turn. Finish every rebase, merge, squash, and PR-body
-   change before the next review. Each invocation of the installed stock
-   `review` skill consumes one attempt, including an unavailable or interrupted
-   invocation. Do not implement another review engine or audit the review's
-   child sessions, filesystem manifests, or internal receipts.
+6. **Verify** — invoke `verification-before-completion`.
+7. **Persist agent state** — after the final workpad update, upload
+   `.symphony/workpad.md`, `.symphony/design.md`, and any other cleanup paths as
+   a `Symphony agent state` Linear issue attachment. Keep them untracked on the
+   PR branch. This is required before any PR publish / refresh so agent-only
+   state can be restored for rework without appearing in the GitHub Files
+   changed view.
+8. **Push** — invoke `symphony-pr` in `publish/request-only` mode with
+   `validatedHead=<full HEAD SHA>` to push to `origin`, refresh the PR, and
+   request code review, then return immediately. It must not enter its polling
+   or feedback-fix loop; step 9 owns the concurrent wait and severity-gated
+   repairs. Every initial and repair push must use this mode.
+9. **Bounded pre-landing review** — after push, start CI, automated review, and
+   local review concurrently. Keep the security specialist when the diff
+   involves PII, credentials, or real email, payment, or data-write side
+   effects: invoke the security specialist independently before every stock-review
+   invocation for the exact current Head, including after repair pushes, regardless
+   of diff size or scope auto-detection: dispatch the stock `review` skill's security
+   specialist checklist in report-only mode. Do not start stock review or publish
+   `CLEAN` until that exact-Head security report completes. An unavailable or
+   interrupted required security review yields `ESCALATED`, never `CLEAN`. Do not
+   rely on stock `review --security`, which skips all specialists for small diffs
+   before it evaluates force flags. Set `MAX_REVIEW_ATTEMPTS = 5` for this
+   Implementation agent turn.
+   Each invocation of the installed stock `review` skill consumes one attempt.
    - Before each invocation, require a clean worktree, pushed branch, and green
      validation for the current Head. Record `REVIEW_ATTEMPT_START N` with the
-     Base and exact Head; invoke stock `review` through its normal skill entry;
-     then record `REVIEW_ATTEMPT_END N` with one outcome: `clean`, `findings`, or
-     `unavailable`. Record blocking findings by stable family and severity so
-     Maestro can compare attempts in this Codex session.
-   - On attempts 1–4, `clean` freezes the reviewed Head: make the PR Ready for
-     Review, publish `CLEAN`, and stop without any later tracked edit, commit,
-     push, rebase, squash, PR-body mutation, or review invocation.
-   - On attempts 1–4, simplify before adding: if fixing a blocking finding found
-     only in newly added verification scaffolding that is not itself an approved
-     deliverable would widen product/runtime code, remove the scaffolding,
-     validate, commit, and push the narrowed Head. Invoke the next attempt if an
-     approved scoped evidence path remains; otherwise publish `ESCALATED`.
-     Batch-fix every other blocking finding that is local to the approved Design.
-     A new or differently worded finding is Implementation feedback, not by
-     itself a Design failure.
-   - On attempts 1–4, an unavailable or interrupted review is an infrastructure
-     outcome, not a code finding. Repair only its invocation precondition when
-     safe, then consume the next attempt; never turn missing optional child
-     output or transcript bookkeeping into P0/P1.
-   - Stop early as `ESCALATED` only under the preceding missing-evidence rule or
-     when a validated blocking finding directly contradicts an explicit
-     approved Design assumption and cannot be repaired locally. Keep the PR
-     Draft so Maestro can recommend Design rework.
-   - Attempt 5 is final. After it returns, do not change Head or invoke review
-     again. Publish `CLEAN` and make the PR Ready only for a clean exact Head;
-     otherwise keep the PR Draft and publish `ESCALATED`. Never invoke attempt
-     6 in this turn.
+     Base and exact Head; invoke stock `review` through its normal skill entry
+     for analysis only. This phase's no-edit instruction overrides stock review's
+     Fix-First, AUTO-FIX, ASK, and apply-fix steps: stop after collecting and
+     reporting findings; do not edit files or mutate tracked or PR content. Return
+     every finding to this phase, which alone applies the Head gate. Record
+     `REVIEW_ATTEMPT_END N` as `clean`,
+     `blocking_findings`, `advisory_only`, or `unavailable`. Clean means no
+     remaining blocking signal that passes the gate below. Record advisory findings separately;
+     `advisory_only` is terminal `CLEAN` after replies and settled signals.
+   - Normalize every substantive finding from stock review, automated review,
+     and PR feedback into a severity plus the three gate dispositions below.
+     If severity or gate disposition cannot be normalized, treat that review
+     channel as `unavailable`, never `clean`.
+   - Attempts 1–4 may change this issue's code or tests only when all three conditions hold:
+     the finding blocks delivery: `CRITICAL`, `P1`, a CI failure caused by the current diff,
+     or directly blocks an approved `S<N>`; it is a regression introduced by the current
+     diff or directly blocks an approved `S<N>`; and its repair is inside the approved
+     `.symphony/design.md` scope; conditional Design scope requires evidence that its
+     condition has triggered.
+   - If a finding exists only because this issue added non-required verification scaffolding,
+     remove that scaffolding. For an existing or adjacent problem that does not directly
+     block an approved `S<N>`, leave Head unchanged and create a follow-up issue. If a
+     delivery-blocking current-diff regression or direct `S<N>` blocker requires work
+     outside the approved Design, do not mark `CLEAN`; publish `ESCALATED` with the
+     required Design rework direction. Otherwise record and reply to `P2` and
+     `INFORMATIONAL` findings without expanding code or tests.
+     An adjacent `P1` not introduced by the current diff, not blocking any approved `S<N>`,
+     and outside the approved Design leaves Head unchanged and creates a follow-up issue.
+   - Batch-fix findings that pass the gate, validate, commit, then use
+     `symphony-pr publish/request-only` to push and request review again. This gate applies
+     to stock review, automated review, and every PR feedback channel.
+   - After every other required signal finishes, wait at most five additional
+     minutes for the automated reviewer. Do not publish `CLEAN` before these
+     concurrent signals settle or this tail wait expires. On timeout, record
+     the timeout and enter `Human Review`; if every returned required signal is
+     non-blocking, treat the timeout as non-blocking and publish `CLEAN` there.
+     Require every CI check suite's `headSha` to equal the attempt's recorded
+     Head. Stale or missing exact-Head CI remains pending and blocks `CLEAN`.
+     When complete CI is unavailable and the documented local full-suite
+     fallback runs, bind that evidence to the exact Head and omit the CI signal.
+     Accept automated-review feedback with a review or inline-comment commit ID
+     only when that ID equals the requested Head; otherwise keep the signal
+     pending until the five-minute timeout. An unversioned top-level
+     automated-review comment never settles the exact-Head signal: normalize
+     and gate its content, but keep waiting for a commit-bound response or the
+     timeout. Automated review is evidence, never human approval.
+   - Any clean attempt after the required signals settle freezes the reviewed Head,
+     makes the PR Ready for Review, publishes `CLEAN`, and stops without later Head
+     or PR-body mutation. Advisory findings do not require another attempt.
+   - Attempt 5 is final. Publish `CLEAN` only when it is clean; otherwise keep
+     the PR Draft and publish `ESCALATED`. Never invoke attempt 6 or change Head
+     after Attempt 5.
+   - An unavailable or interrupted review consumes its attempt but is an
+     infrastructure outcome, not a code finding. On the final attempt it yields
+     `ESCALATED`.
    - Every `CLEAN` or `ESCALATED` outcome ends this agent turn in Human Review.
      The next turn requires a human state action; Maestro only recommends
      whether that action should continue Implementation or rework Design.
@@ -256,8 +298,9 @@ Run this sweep during each bounded review pass before posting the artifact:
      spun off via the `symphony-issue` skill (autonomous `follow-up` kind);
      cite the new issue's identifier (e.g. `ENG-123`) in the reply.
    - Not applied: reply with explicit technical pushback.
-5. Update the workpad `plan` / `acceptance_criteria` with each feedback
-   item and its resolution.
+5. Update the workpad `plan` and `notes` with each feedback item and its
+   resolution. Keep `acceptance_criteria` limited to approved Requirements;
+   advisory feedback must not expand it.
 6. Apply the pass-specific repair or escalation rule from Implementation flow
    step 9.
 

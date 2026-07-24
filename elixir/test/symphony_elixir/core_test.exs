@@ -386,6 +386,7 @@ defmodule SymphonyElixir.CoreTest do
     end
   end
 
+  @tag :prompt_contract
   test "implementation review is bounded and only ordinary Maestro rework can restart work" do
     workflow = shared_workflow_prompt()
 
@@ -399,10 +400,11 @@ defmodule SymphonyElixir.CoreTest do
       File.read!(Path.expand("../.codex/skills/maestro/agents/maestro-reviewer.md", File.cwd!()))
 
     assert implementation_skill =~ "MAX_REVIEW_ATTEMPTS = 5"
-    assert implementation_skill =~ "On attempts 1–4"
-    assert implementation_skill =~ "an unavailable or interrupted review is an infrastructure"
+    assert implementation_skill =~ "Attempts 1–4"
     assert implementation_skill =~ "Attempt 5 is final"
-    assert implementation_skill =~ "Never invoke attempt"
+    assert implementation_skill =~ "Never invoke attempt 6"
+    assert implementation_skill =~ "Any clean attempt after the required signals settle"
+    assert implementation_skill =~ "advisory feedback must not expand it"
     assert implementation_skill =~ "Every `CLEAN` or `ESCALATED` outcome ends this agent turn"
     refute implementation_skill =~ "recursive child rollout"
     refute implementation_skill =~ "before/after manifest"
@@ -426,6 +428,159 @@ defmodule SymphonyElixir.CoreTest do
     assert maestro_workflow =~ "except an `ESCALATED` Implementation review"
     assert maestro_reviewer =~ "current-turn Codex session"
     assert maestro_reviewer =~ "Missing optional reviewer output is an"
+  end
+
+  @tag :prompt_contract
+  test "implementation finding gate preserves delivery while rejecting scope expansion" do
+    repo_root = Path.expand("..", File.cwd!())
+
+    implementation_skill =
+      repo_root
+      |> Path.join("workflows/agavemindlab/skills/phase-implementation/SKILL.md")
+      |> File.read!()
+      |> String.replace(~r/\s+/, " ")
+
+    symphony_pr_skill =
+      repo_root
+      |> Path.join("workflows/agavemindlab/skills/symphony-pr/SKILL.md")
+      |> File.read!()
+      |> String.replace(~r/\s+/, " ")
+
+    assert implementation_skill =~ "acceptance-targeted tests, static checks, and hooks"
+    assert implementation_skill =~ "CI owns the full regression suite"
+    assert implementation_skill =~ "project has no complete CI"
+    assert implementation_skill =~ "change touches shared infrastructure"
+    assert implementation_skill =~ "targeted evidence exposes cross-module risk"
+    assert implementation_skill =~ "only when all three conditions hold"
+
+    assert implementation_skill =~
+             "blocks delivery: `CRITICAL`, `P1`, a CI failure caused by the current diff, or directly blocks an approved `S<N>`"
+
+    assert implementation_skill =~
+             "is a regression introduced by the current diff or directly blocks an approved `S<N>`"
+
+    assert implementation_skill =~ "repair is inside the approved `.symphony/design.md` scope"
+
+    assert implementation_skill =~
+             "conditional Design scope requires evidence that its condition has triggered"
+
+    assert implementation_skill =~
+             "finding exists only because this issue added non-required verification scaffolding"
+
+    assert implementation_skill =~ "remove that scaffolding"
+
+    assert implementation_skill =~
+             "existing or adjacent problem that does not directly block an approved `S<N>`"
+
+    assert implementation_skill =~ "leave Head unchanged and create a follow-up issue"
+
+    assert implementation_skill =~
+             "An adjacent `P1` not introduced by the current diff, not blocking any approved `S<N>`, and outside the approved Design leaves Head unchanged and creates a follow-up issue"
+
+    assert implementation_skill =~ "`P2` and `INFORMATIONAL`"
+    assert implementation_skill =~ "PII, credentials, or real email, payment, or data-write side effects"
+
+    assert implementation_skill =~
+             "invoke the security specialist independently before every stock-review invocation for the exact current Head, including after repair pushes"
+
+    assert implementation_skill =~
+             "dispatch the stock `review` skill's security specialist checklist in report-only mode"
+
+    assert implementation_skill =~
+             "Do not start stock review or publish `CLEAN` until that exact-Head security report completes"
+
+    assert implementation_skill =~
+             "An unavailable or interrupted required security review yields `ESCALATED`, never `CLEAN`"
+
+    assert implementation_skill =~ "Do not rely on stock `review --security`"
+    assert implementation_skill =~ "before it evaluates force flags"
+    assert implementation_skill =~ "CI, automated review, and local review concurrently"
+    assert implementation_skill =~ "`publish/request-only` mode"
+    assert implementation_skill =~ "must not enter its polling or feedback-fix loop"
+    assert implementation_skill =~ "Every initial and repair push must use this mode"
+    assert implementation_skill =~ "validatedHead=<full HEAD SHA>"
+    assert symphony_pr_skill =~ "reuse the caller's current-Head green validation evidence"
+
+    {acceptance_position, _} = :binary.match(implementation_skill, "**Local runtime acceptance**")
+    {verify_position, _} = :binary.match(implementation_skill, "**Verify**")
+    {push_position, _} = :binary.match(implementation_skill, "**Push**")
+    {review_position, _} = :binary.match(implementation_skill, "**Bounded pre-landing review**")
+    assert acceptance_position < verify_position
+    assert verify_position < push_position
+    assert push_position < review_position
+
+    assert symphony_pr_skill =~ "`publish/request-only`"
+
+    assert symphony_pr_skill =~
+             "skip step 2 only when `validatedHead` equals `git rev-parse HEAD`"
+
+    assert symphony_pr_skill =~
+             "require `validatedHead`, local Head, origin branch Head, and PR `headRefOid` to be identical"
+
+    assert symphony_pr_skill =~
+             "On mismatch, stop and restart sync, validation, and publication"
+
+    assert symphony_pr_skill =~ "allow a short bounded PR-Head propagation retry"
+    assert symphony_pr_skill =~ "before any existing PR metadata mutation and recheck after create/update"
+
+    assert symphony_pr_skill =~
+             "In `publish/request-only` mode, preserving a pending human reviewer returns the PR URL successfully"
+
+    assert symphony_pr_skill =~ "return the PR URL immediately without polling or fixing feedback"
+    assert implementation_skill =~ "Normalize every substantive finding"
+
+    assert implementation_skill =~
+             "If severity or gate disposition cannot be normalized, treat that review channel as `unavailable`, never `clean`"
+
+    assert implementation_skill =~
+             "Accept automated-review feedback with a review or inline-comment commit ID only when that ID equals the requested Head"
+
+    assert implementation_skill =~
+             "otherwise keep the signal pending until the five-minute timeout"
+
+    assert implementation_skill =~
+             "Require every CI check suite's `headSha` to equal the attempt's recorded Head"
+
+    assert implementation_skill =~
+             "Stale or missing exact-Head CI remains pending and blocks `CLEAN`"
+
+    assert implementation_skill =~
+             "When complete CI is unavailable and the documented local full-suite fallback runs, bind that evidence to the exact Head and omit the CI signal"
+
+    assert implementation_skill =~
+             "An unversioned top-level automated-review comment never settles the exact-Head signal"
+
+    assert implementation_skill =~
+             "normalize and gate its content, but keep waiting for a commit-bound response or the timeout"
+
+    assert implementation_skill =~ "at most five additional minutes"
+    assert implementation_skill =~ "record the timeout and enter `Human Review`"
+    assert implementation_skill =~ "Do not publish `CLEAN` before these concurrent signals settle"
+    assert implementation_skill =~ "Any clean attempt after the required signals settle"
+
+    assert implementation_skill =~
+             "This phase's no-edit instruction overrides stock review's Fix-First, AUTO-FIX, ASK, and apply-fix steps"
+
+    assert implementation_skill =~
+             "do not edit files or mutate tracked or PR content"
+
+    assert implementation_skill =~ "this phase, which alone applies the Head gate"
+    assert implementation_skill =~ "Clean means no remaining blocking signal"
+    assert implementation_skill =~ "`advisory_only` is terminal `CLEAN`"
+    assert implementation_skill =~ "treat the timeout as non-blocking and publish `CLEAN`"
+
+    assert implementation_skill =~
+             "delivery-blocking current-diff regression or direct `S<N>` blocker requires work outside the approved Design"
+
+    assert implementation_skill =~
+             "publish `ESCALATED` with the required Design rework direction"
+
+    refute File.exists?(
+             Path.join(
+               repo_root,
+               "workflows/agavemindlab/tests/fixtures/dev-5510-implementation-replay.json"
+             )
+           )
   end
 
   test "cross-phase rollback supersedes stale target-through-awaiting artifacts" do
