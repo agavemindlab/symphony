@@ -141,6 +141,38 @@ index 0000000..b6fc4c6
         self.assertIn("/outside/repo/context.md", result.report_path.read_text())
         self.assertFalse((self.tmp / "replays").exists())
 
+    def test_deployment_runbook_fixture_matches_current_skill_contract(self) -> None:
+        artifact_eval.verify_deployment_runbook_fixture(self.repo_root)
+
+    def test_deployment_runbook_fixture_requires_s4_heading(self) -> None:
+        source = artifact_eval.read_json(
+            Path(".codex/skills/artifact-eval/fixtures/deployment-runbook.json"),
+        )
+        source["expected_artifact"] = source["expected_artifact"].replace(
+            "#### Runbook — S4: 历史 webhook 已失效、轮换或吊销\n",
+            "",
+        )
+        fixture_path = self.tmp / "deployment-runbook-without-s4-heading.json"
+        artifact_eval.write_json(fixture_path, source)
+        with self.assertRaises(artifact_eval.CaseError):
+            artifact_eval.verify_deployment_runbook_fixture(self.repo_root, fixture_path)
+
+    def test_deployment_runbook_fixture_keeps_s5_ordinary_and_complete(self) -> None:
+        source = artifact_eval.read_json(
+            Path(".codex/skills/artifact-eval/fixtures/deployment-runbook.json"),
+        )
+        ordinary = next(
+            line for line in source["expected_artifact"].splitlines() if line.startswith("- S5:")
+        )
+        source["expected_artifact"] = source["expected_artifact"].replace(
+            ordinary,
+            "#### Runbook — S5: 7 天观察窗口结束",
+        )
+        fixture_path = self.tmp / "deployment-runbook-misclassified-s5.json"
+        artifact_eval.write_json(fixture_path, source)
+        with self.assertRaisesRegex(artifact_eval.CaseError, "ordinary S5"):
+            artifact_eval.verify_deployment_runbook_fixture(self.repo_root, fixture_path)
+
     def test_capture_audit_has_no_write_side_effect_commands(self) -> None:
         source = (Path(__file__).with_name("artifact_eval.py")).read_text()
 

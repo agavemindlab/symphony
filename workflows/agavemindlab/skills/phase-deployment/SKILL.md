@@ -128,11 +128,11 @@ When a post-merge acceptance check requires logged-in user state:
      action, and fallback if it never happens. If no one can cause it and no
      signal can be watched, this is not a useful pending item. If a human/admin
      action is needed to create the signal, first research the repo, PR,
-     configured service, and public docs, then write the exact runbook: where
-     to act, what to configure, where secret values come from without printing
-     them, how to rerun verification, and the pass predicate. If that cannot be
-     determined, use a visible `### NEEDS CLARIFICATION` gate with the exact
-     question.
+     configured service, and public docs, then write it under the searchable
+     `#### Runbook — S<N>: <criterion>` heading with the action location,
+     responsible party, secret source without the value, rerun method, pass
+     predicate, and issue action after completion. If that cannot be determined,
+     use a visible `### NEEDS CLARIFICATION` gate with the exact question.
 3. **Hand off `需人工判定` `S<N>`** (only a human can confirm). Note it in
    后续事项; spin off genuine follow-up work as a separate ticket via the
    `symphony-issue` skill (autonomous `follow-up`) and cite its identifier
@@ -163,7 +163,21 @@ rework below; use `⚠️ 待观察` only for checks that are not runnable yet.
   - 证据: 见待验证项
 
 ### 待验证项（omit when none pending; one per still-`⚠️ 待观察` S<N>）
-- S<N>: **等待条件** `<condition>` · **触发动作/责任方** `<who/what causes it>` · **人工操作** `<exact runbook if human/admin action is needed; otherwise n/a>` · **可观测信号** `<log/comment/run/metadata>` · **查询** `<runnable query once signal exists>` · **通过判据** `<predicate>` · **何时可验** `<only after signal exists>` / `窗口末 <YYYY-MM-DD>` · **信号出现后人工动作** `<issue status/action>`
+- S<N>: **等待条件** `<condition>` · **触发动作/责任方** `<who/what causes it>` · **可观测信号** `<log/comment/run/metadata>` · **查询** `<runnable query once signal exists>` · **通过判据** `<predicate>` · **何时可验** `<only after signal exists>` / `窗口末 <YYYY-MM-DD>` · **信号出现后人工动作** `<issue status/action>`
+
+<Only include the following Runbook when human/admin action is required.>
+
+#### Runbook — S<N>: <criterion>
+- **等待条件**: `<condition>`
+- **操作位置**: `<system/account/project/workspace>`
+- **责任方**: `<human/admin role>`
+- **操作步骤**: `<exact actions and configuration>`
+- **secret 来源**: `<approved source or generation path; never the value>`
+- **可观测信号**: `<log/comment/run/metadata>`
+- **复验方式**: `<runnable command/query after the action>`
+- **通过判据**: `<predicate>`
+- **何时可验**: `<only after signal exists>`
+- **完成后的 issue 动作**: `<observable signal and issue status/action>`
 
 ### 后续事项（optional）
 - <follow-up issues, rollback path; omit if none>

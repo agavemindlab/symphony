@@ -1,0 +1,6 @@
+{
+  "captured_via": "read-only Linear GraphQL query",
+  "expected_artifact": "### 待验证项\n\n- S5: **等待条件** 7 天观察窗口结束 · **触发动作/责任方** 时间窗自然结束 · **可观测信号** 窗口末日志可查询 · **查询** 统计窗口内失败数 · **通过判据** 失败数为 0 · **何时可验** 窗口末 · **信号出现后人工动作** 将 issue 移回 In Progress\n\n#### Runbook — S4: 历史 webhook 已失效、轮换或吊销\n- **等待条件**: Discord 管理员可以删除或吊销历史 webhook\n- **操作位置**: Discord Server Settings → Integrations → Webhooks\n- **责任方**: 对应 Discord server/channel 的管理员\n- **操作步骤**: 确认 live release 不再使用历史值后，删除或吊销历史 Alertmanager webhook；不要打印或粘贴 URL\n- **secret 来源**: 从既有授权来源写入 workspace 内 `.issue-secrets/discord-old-webhook-url` 并 `chmod 600`；artifact 不保存值\n- **可观测信号**: 旧端点的只读 HTTP 状态\n- **复验方式**: 对 `.issue-secrets/discord-old-webhook-url` 中的旧端点执行只读 HTTP 状态查询\n- **通过判据**: HTTP 404；429/5xx/transport failure 均为未定，需重试\n- **何时可验**: Discord UI 删除后\n- **完成后的 issue 动作**: 将 DEV-5363 移回 In Progress，Deployment 重入并关闭 S4",
+  "source_comment": "204522be-aea1-47cb-b130-76318c523677",
+  "source_issue": "DEV-5363"
+}
