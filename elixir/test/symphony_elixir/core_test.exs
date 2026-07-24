@@ -441,6 +441,9 @@ defmodule SymphonyElixir.CoreTest do
     assert implementation_skill =~ "回复 `/rework design` 并将 issue 移至 `Rework`"
     assert implementation_skill =~ "不要移至 `Merging`"
     refute implementation_skill =~ "建议回 Design 或继续 Implementation"
+    assert implementation_skill =~ "Maestro only recommends"
+    assert implementation_skill =~ "a human must reactivate the issue"
+    refute implementation_skill =~ "Maestro routes it"
 
     assert workflow =~
              "`/rework implementation` or a human-authored move to `In Progress` resumes Implementation"

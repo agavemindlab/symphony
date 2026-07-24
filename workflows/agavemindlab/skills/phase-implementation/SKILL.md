@@ -467,5 +467,5 @@ Then update workpad `current_phase` to the target phase and open the target phas
   handler.
 
 The human approves a `CLEAN` artifact by moving the issue to `Merging`. An
-`ESCALATED` artifact cannot enter Deployment; Maestro routes it to Design
-rework or another bounded Implementation turn from the recorded trajectory.
+`ESCALATED` artifact cannot enter Deployment; Maestro only recommends Design
+rework or another bounded Implementation turn, and a human must reactivate the issue.
