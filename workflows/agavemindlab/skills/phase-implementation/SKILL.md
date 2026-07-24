@@ -98,23 +98,58 @@ same-phase Rework cycle in your workflow instructions when re-posting the artifa
 If a skill genuinely does not apply (e.g. no new behavior to test-drive),
 record `Skipped <skill>: <reason>` in workpad `notes`.
 
-### Type-conditional skills (gate on `Primary:`; they produce the 验收方案 evidence)
+### Conditional skills (they produce the 验收方案 evidence)
 
-Invoke when the issue's type calls for it, to produce the acceptance evidence
-the `## Design` 验收方案 named (recorded into `验收对照`); skip and record
-`Skipped <skill>: <reason>` otherwise. These run autonomously — they do not
-interview a human; any decision only a human can make follows the workflow's
-clarification-gate handling.
+Primary-triggered skills produce the evidence that `## Design` named; website
+visual impact is decided from the actual PR diff. Record Primary-triggered
+evidence in `Acceptance mapping` and diff-triggered visual evidence in
+`网站视觉对比`, or record `Skipped <skill>: <reason>`. These run autonomously —
+they do not interview a human; any decision only a human can make follows the
+workflow's clarification-gate handling.
 
 - **Feature / UI behavior** → `qa` (gstack — QA the running web app and fix what
   it finds) or `qa-only` (report-only) — exercise the critical-path flow and
   capture the **截屏 / 录屏** the pre-PR 本地验收 requires.
-- **UI / visual change** → `design-review` (gstack) — designer's-eye pass on
+- **Website visual impact** → `design-review` (gstack) — designer's-eye pass on
   spacing / hierarchy / visual consistency, with before/after capture.
 - **`Type:Refactor`** → `refactor` (gstack) — surgical, behavior-preserving
   edits plus the call-site survey the design committed to.
 - **`Type:Performance`** → `benchmark` (gstack) or `performance-goal` — produce
   the before/after numbers the 验收方案 demands, with a rerunnable command.
+
+### Website visual comparison gate
+
+Inspect every PR's canonical Base..Head diff and repository shape. Treat changes
+that can affect rendered website UI as visual signals, including
+views/templates, rendered components, routes/redirects/request-to-page dispatch,
+styles/themes, fonts, icons/images, frontend dependencies/configuration, shared
+rendering code, and backend/data/content/i18n output that feeds rendered UI;
+uncertainty opens the gate. If none applies, record the diff evidence and why
+visual comparison is not required.
+
+When the gate opens:
+
+1. Derive the exhaustive affected-route set from the route inventory plus
+   router/call-site evidence for each changed surface. Sampling is not complete
+   evidence.
+2. For every route, run the full canonical Base and Head SHAs with the same
+   data, page state, viewport, and readiness conditions, including loaded fonts
+   and assets, using the same deterministic non-production fixture/account.
+   Inspect and redact private rendered content before upload. Upload one Base
+   screenshot and one Head screenshot and label both with the route/page and
+   full Base and Head SHAs.
+3. Compare every pair and record either `无视觉差异` or route-level
+   `可疑变化点`, including whether each difference matches the approved scope.
+   Any out-of-scope `可疑变化点` must be fixed and recaptured or `ESCALATED`;
+   it cannot reach `CLEAN`.
+4. If Base or Head changes, discard the stale pairs and recapture every
+   affected route before the next review attempt.
+
+If the exhaustive affected-route set cannot be proven, name the discovery failure
+and concrete reason. If any route lacks either screenshot, name the route,
+failed Base/Head side, capture method, and concrete reason. In either case the
+review verdict must be `ESCALATED`, never `CLEAN`; the closest safe alternative
+proof cannot satisfy this gate.
 
 ## Workpad (`.symphony/workpad.md`)
 
@@ -330,6 +365,22 @@ comfort.
 - S2: <状态 + 证据；说明失败条件仍会被拒绝或不回归>
 - S<N>: <状态 + 证据>
 
+### 网站视觉对比（website visual comparison；不适用则写 diff 依据）
+
+只填写一种结果：门禁关闭、route discovery 失败，或 discovery 成功后的逐路由证据。
+
+- Diff evidence / N/A reason: `<门禁关闭时必填；否则省略>`
+- Final affected-route list: `<discovery 成功时的完整路由列表>`
+- Route discovery evidence: `<route inventory + router/call-site completeness evidence>`
+- Route discovery failure: `<无法证明完整路由集时的具体原因；否则省略>`
+- Repeat for every affected route:
+  - Route/page: `<route or page>`
+  - Conditions: `<same fixture/data, page state, viewport, readiness>`
+  - Base: `<full SHA>` · <uploaded before image>
+  - Head: `<full SHA>` · <uploaded after image>
+  - 结论: `<无视觉差异 | 可疑变化点及是否符合批准范围>`
+  - Capture failure: `<failed Base/Head side + method + concrete reason；成功则省略>`
+
 ### 合并风险判断（required: 2-3 bullets）
 
 - 漏 bug 最坏影响: <如果仍有漏 bug，合并后最坏会造成什么影响>
@@ -441,6 +492,9 @@ Then update workpad `current_phase` to the target phase and open the target phas
   checkbox checked.
 - For app-behavior changes, local runtime acceptance has produced concrete
   evidence, or the substitution path is documented.
+- For an applicable website visual comparison gate, every route has fresh,
+  SHA-bound Base/Head evidence and a conclusion; incomplete evidence is
+  `ESCALATED`.
 - For `CLEAN`, validation/tests are green for the exact reserved Head, the
   canonical Base and exact Head are recorded as full `Base` and `Head` SHAs,
   and the PR is pushed, linked on the issue, and green. For `ESCALATED`, record

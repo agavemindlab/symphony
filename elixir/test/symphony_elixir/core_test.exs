@@ -318,6 +318,74 @@ defmodule SymphonyElixir.CoreTest do
     assert workflow =~ "folded into a new artifact before downstream work continues"
   end
 
+  test "implementation requires route-complete visual comparison for website diffs" do
+    skill =
+      File.read!(Path.expand("../workflows/agavemindlab/skills/phase-implementation/SKILL.md", File.cwd!()))
+
+    contract = String.replace(skill, ~r/\s+/, " ")
+
+    for visual_signal <- [
+          "views/templates",
+          "rendered components",
+          "styles/themes",
+          "fonts",
+          "icons/images",
+          "frontend dependencies/configuration",
+          "shared rendering code",
+          "backend/data/content/i18n output"
+        ] do
+      assert contract =~ visual_signal
+    end
+
+    assert contract =~ "Inspect every PR's canonical Base..Head diff and repository shape"
+    assert contract =~ "changes that can affect rendered website UI as visual signals"
+    assert contract =~ "routes/redirects/request-to-page dispatch"
+    assert contract =~ "uncertainty opens the gate"
+    assert contract =~ "record the diff evidence and why visual comparison is not required"
+    assert contract =~ "route inventory"
+    assert contract =~ "router/call-site evidence"
+    assert contract =~ "exhaustive affected-route set"
+    assert contract =~ "same data, page state, viewport, and readiness conditions"
+    assert contract =~ "deterministic non-production fixture/account"
+    assert contract =~ "Inspect and redact private rendered content before upload"
+    assert contract =~ "one Base screenshot and one Head screenshot"
+    assert contract =~ "full Base and Head SHAs"
+    assert contract =~ "If Base or Head changes"
+    assert contract =~ "recapture every affected route before the next review attempt"
+    assert contract =~ "无视觉差异"
+    assert contract =~ "可疑变化点"
+    assert contract =~ "out-of-scope `可疑变化点` must be fixed and recaptured or `ESCALATED`"
+
+    assert contract =~
+             "If the exhaustive affected-route set cannot be proven, name the discovery failure and concrete reason"
+
+    assert contract =~ "failed Base/Head side"
+    assert contract =~ "must be `ESCALATED`, never `CLEAN`"
+    assert contract =~ "closest safe alternative proof cannot satisfy this gate"
+
+    assert contract =~
+             "Primary-triggered evidence in `Acceptance mapping` and diff-triggered visual evidence in `网站视觉对比`"
+
+    [_, visual_template] = String.split(skill, "### 网站视觉对比", parts: 2)
+    [visual_template, _] = String.split(visual_template, "### 合并风险判断", parts: 2)
+
+    for field <- [
+          "Diff evidence / N/A reason:",
+          "Final affected-route list:",
+          "Route discovery evidence:",
+          "Route discovery failure:",
+          "Repeat for every affected route:",
+          "Route/page:",
+          "Conditions:",
+          "Base:",
+          "Head:",
+          "结论:",
+          "Capture failure:"
+        ] do
+      assert visual_template =~ field
+    end
+  end
+
   @tag :prompt_contract
   test "implementation review is bounded and only ordinary Maestro rework can restart work" do
     workflow = shared_workflow_prompt()
