@@ -188,8 +188,8 @@ Implementation produces the findings — see those skills' `Type:Spike` notes.
 
 **Bounce a pure question.** If the issue is a question or discussion with no
 investigation the agent can actually perform (only a human can answer), do not
-run the pipeline: state this in the `## Requirements` artifact, `@`-mention the
-issue's `creator`, move the issue to `Human Review`, and stop.
+run the pipeline: route it through Batched clarification below and apply the
+complete-gate test in When blocked.
 
 ## Batched clarification (`### NEEDS CLARIFICATION`)
 
@@ -230,15 +230,15 @@ ___
 
 ### NEEDS CLARIFICATION
 
-> 需要人工决定后 workflow 才能继续。认可全部推荐请回复「同意默认」，否则逐条说明。
+> 需要人工决定后 workflow 才能继续。认可全部推荐请回复「同意默认」，否则逐条说明；回答后，将 issue 置为 `In Progress`。
 
 **Q1. <question> 〔影响：低〕**
-  背景: <一句：歧义在哪 + 选错的代价>
+  背景: <一句：为什么必须由人类决定 + 歧义在哪 + 选错的代价>
   - A（推荐）: <answer> — <这样选的后果 / 为什么是安全选择>
   - B: <answer> — <这样选的后果>
 
 **Q2. <question> 🔴 〔影响：高 · 需明确回答〕**
-  背景: <一句：利害所在 / 为什么 blanket approval 不能覆盖>
+  背景: <一句：为什么必须由人类决定 + 利害所在 / 为什么 blanket approval 不能覆盖>
   - A（推荐）: <answer> — <后果>
   - B: <answer> — <后果>
   - C: <answer> — <后果>
@@ -248,8 +248,9 @@ ___
 
 Give each question as many concrete branches as the decision genuinely has
 (office-hours' framing decides this, not a fixed number), exactly one marked
-`（推荐）`. Every option states its consequence; the recommended one's doubles
-as the rationale. There is **no cap** on questions per round — surface every
+`（推荐）`. Every question states why it needs a human decision; every option
+states its consequence, and the recommended one's doubles as the rationale.
+There is **no cap** on questions per round — surface every
 material uncertainty the walk reached; that one complete batch is the efficient
 ask.
 
@@ -337,8 +338,9 @@ When a batched clarification block remains after honest analysis:
 
 1. Write the batched block at the foot of the `## Requirements` artifact.
 2. Publish the artifact through the workflow artifact protocol.
-3. Move the issue to `Human Review`.
-4. Stop.
+3. Apply the workflow's complete-gate test:
+   - After publication, an incomplete clarification gate returns `stop` to Main Flow for the standard review/rework handoff without moving the issue yourself.
+   - Only for a complete gate, move the issue to `Human Review` and stop.
 
 ### Consent convention (how the human replies)
 
@@ -377,9 +379,9 @@ Once no batched question remains, proceed to Exit.
 
 ## Exit
 
-### Completeness bar (required to post the artifact)
+### Clean-exit completeness bar
 
-The artifact is complete enough to post when all of these hold — this is
+The gate-free artifact is complete enough for a clean Exit when all of these hold — this is
 about form, not correctness:
 
 - `Primary:`, `要解决的问题`, `为什么解决`, `验收标准` all filled.
@@ -394,6 +396,4 @@ Publish the `## Requirements` artifact through the workflow artifact protocol
 and set the workpad `current_phase: Requirements`. Do **not** move the issue
 yourself on a clean exit — hand back **`stop`** for Main Flow to execute.
 
-(The "When blocked" path above is the harder stop: an unresolved
-`### NEEDS CLARIFICATION` means the artifact is not even safe to build on, so
-it moves to `Human Review` directly.)
+(The "When blocked" path above is the harder stop: A complete unresolved `### NEEDS CLARIFICATION` gate moves to `Human Review` directly.)

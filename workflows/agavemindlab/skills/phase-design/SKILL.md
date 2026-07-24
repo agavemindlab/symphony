@@ -272,10 +272,10 @@ Apply the emphasis matching `Primary:` from the Requirements artifact.
 ## High-impact decision protocol
 
 If the approach has a **high-impact unresolved decision**, do not pick
-unilaterally — surface it as a batched `### NEEDS CLARIFICATION` block tagged
-`🔴 〔影响：高 · 需明确回答〕` (see Batched clarification below) and move to Human
-Review. The tag means a blanket `同意默认` never resolves it — the human must
-answer it explicitly.
+unilaterally — surface it as a batched `### NEEDS CLARIFICATION` block
+tagged `🔴 〔影响：高 · 需明确回答〕` (see Batched clarification below) and
+route it through When blocked's complete-gate test. The tag means a blanket
+`同意默认` never resolves it — the human must answer it explicitly.
 
 High-impact categories: schema/data migrations; dependency changes with
 breaking changes; production/shared infrastructure; security/privacy
@@ -396,8 +396,8 @@ complete, because the human answers it in one pass. Then sort each one:
   never covers (see the consent convention).
 
 Each question must carry enough for the human to decide **without re-deriving
-the design**: a `背景` line naming the fork and what a wrong pick would cost,
-and a short consequence on **every** option — not just the recommended one (a
+the design**: a `背景` line stating why the fork needs a human decision, naming
+the fork and what a wrong pick would cost, and a short consequence on **every** option — not just the recommended one (a
 bare architecture label gives the reviewer nothing to weigh an override
 against). When plan-eng-review (or your own analysis) surfaced the tradeoff,
 preserve it here — do not flatten the reasoning down to a bare question.
@@ -409,15 +409,15 @@ ___
 
 ### NEEDS CLARIFICATION
 
-> 需要人工决定后 workflow 才能继续。认可全部推荐请回复「同意默认」，否则逐条说明。
+> 需要人工决定后 workflow 才能继续。认可全部推荐请回复「同意默认」，否则逐条说明；回答后，将 issue 置为 `In Progress`。
 
 **Q1. <question> 〔影响：低〕**
-  背景: <一句：这个 fork 是什么 + 选错的代价>
+  背景: <一句：为什么必须由人类决定 + 这个 fork 是什么 + 选错的代价>
   - A（推荐）: <answer> — <这样选的后果 / 为什么优于备选>
   - B: <answer> — <这样选的后果>
 
 **Q2. <question> 🔴 〔影响：高 · 需明确回答〕**
-  背景: <一句：利害所在 / 为什么 blanket approval 不能覆盖>
+  背景: <一句：为什么必须由人类决定 + 利害所在 / 为什么 blanket approval 不能覆盖>
   - A（推荐）: <answer> — <后果>
   - B: <answer> — <后果>
   - C: <answer> — <后果>
@@ -427,8 +427,9 @@ ___
 
 Give each question as many concrete branches as the decision genuinely has
 (plan-eng-review's framing decides this, not a fixed number), exactly one
-marked `（推荐）`. Every option states its consequence; the recommended one's
-doubles as the rationale. There is **no cap** on questions per round — surface
+marked `（推荐）`. Every question states why it needs a human decision; every
+option states its consequence, and the recommended one's doubles as the rationale.
+There is **no cap** on questions per round — surface
 every material fork the walk reached; that one complete batch is the efficient
 ask. If the material set comes out so large that the issue is clearly
 mis-scoped, that is a signal to propose a `sub-issue` split via `symphony-issue`
@@ -446,8 +447,9 @@ When a batched clarification block remains after analysis:
 
 1. Write the batched block at the foot of the `## Design` artifact.
 2. Publish the artifact through the workflow artifact protocol.
-3. Move the issue to `Human Review`.
-4. Stop.
+3. Apply the workflow's complete-gate test:
+   - After publication, an incomplete clarification gate returns `stop` to Main Flow for the standard review/rework handoff without moving the issue yourself.
+   - Only for a complete gate, move the issue to `Human Review` and stop.
 
 ### Consent convention (how the human replies)
 
@@ -493,9 +495,9 @@ workpad `current_phase: Requirements`, and open `phase-requirements`.
 
 ## Exit
 
-### Completeness bar (required to post the artifact)
+### Clean-exit completeness bar
 
-The artifact is complete enough to post when all of these hold — this is
+The gate-free artifact is complete enough for a clean Exit when all of these hold — this is
 about form, not correctness:
 
 - `.symphony/design.md` written (scaled to the change), listed in workpad
@@ -519,6 +521,4 @@ Publish the `## Design` artifact through the workflow artifact protocol and set 
 `current_phase: Design`. Do **not** move the issue yourself on a clean exit —
 hand back **`stop`** for Main Flow to execute.
 
-(The "When blocked" path above is the harder stop: an unresolved
-`### NEEDS CLARIFICATION` means the artifact is not even safe to build on, so
-it moves to `Human Review` directly.)
+(The "When blocked" path above is the harder stop: A complete unresolved `### NEEDS CLARIFICATION` gate moves to `Human Review` directly.)

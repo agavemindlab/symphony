@@ -419,6 +419,7 @@ defmodule SymphonyElixir.CoreTest do
     {auto_rework_position, _} = :binary.match(workflow, "Maestro auto-rework")
     {intent_position, _} = :binary.match(workflow, "Fast path — explicit commands")
     assert cleanup_position < clarification_position
+    assert clarification_position < gate_position
     assert cleanup_position < gate_position
     assert gate_position < auto_rework_position
     assert auto_rework_position < intent_position
@@ -490,6 +491,185 @@ defmodule SymphonyElixir.CoreTest do
       assert new_artifact.id != old_artifact.id
       assert DateTime.compare(new_artifact.created_at, old_artifact.created_at) == :gt
       refute_called_comment_update_for_artifact(calls, old_artifact.id)
+    end
+  end
+
+  test "DEV-5556 complete blocked clarifications skip Maestro until a fresh artifact resolves them" do
+    workflow = shared_workflow_prompt()
+    artifact = %{id: "dev-5549-requirements", created_at: ~U[2026-07-22 01:00:00Z]}
+
+    assert workflow =~ "at least two distinct, nonblank concrete answer options"
+    assert workflow =~ "at least one unresolved question exists"
+    assert workflow =~ "Only a complete unresolved Requirements or Design clarification gate"
+    assert workflow =~ "the phase published a clarification question rather than ordinary review"
+    assert workflow =~ "With no new human reply, never approve or close the artifact"
+    assert workflow =~ "Evaluate it in this order"
+    assert workflow =~ "if a qualifying auto-rework signal exists, route its `/rework <phase>` draft literally"
+    assert workflow =~ "continue to step 6"
+    assert workflow =~ "Immediately before the direct `Human Review` state update, re-read"
+    assert workflow =~ "the human answers in that thread and then moves the issue to `In Progress`"
+    assert workflow =~ "the agent stops with the issue in `Human Review`"
+
+    complete_question = %{
+      question: "Which retention window should apply?",
+      background: "Only the product owner can choose the policy.",
+      options: ["30 days", "90 days"],
+      recommendation: "30 days",
+      impacts: %{"30 days" => "Lower storage cost", "90 days" => "Longer recovery window"}
+    }
+
+    refute complete_clarification_question?(%{
+             complete_question
+             | options: ["30 days", ""],
+               impacts: %{"30 days" => "Lower storage cost", "" => "No concrete answer"}
+           })
+
+    refute complete_clarification_question?(%{
+             complete_question
+             | options: ["30 days", "30 days"],
+               impacts: %{"30 days" => "Lower storage cost"}
+           })
+
+    complete_gate = %{
+      unresolved?: true,
+      questions: [
+        complete_question,
+        %{
+          question: "Who can override the retention window?",
+          background: "Only the product owner can assign policy ownership.",
+          options: ["Any admin", "Product owner"],
+          recommendation: "Product owner",
+          impacts: %{
+            "Any admin" => "Any admin can override it",
+            "Product owner" => "Only owners can override it"
+          }
+        }
+      ]
+    }
+
+    single_question_gate = %{unresolved?: true, questions: [complete_question]}
+
+    for phase <- ["Requirements", "Design"] do
+      calls =
+        dry_run_artifact_calls(
+          workflow,
+          :blocked_clarification,
+          phase,
+          artifact,
+          single_question_gate
+        )
+
+      assert {:issueUpdate, :state, "Human Review"} in calls
+      refute Enum.any?(calls, &match?({:start_maestro_session, _artifact_id}, &1))
+    end
+
+    assert dry_run_unanswered_clarification_calls(workflow, "Requirements", complete_gate, false) == [
+             {:issueUpdate, :state, "Human Review"}
+           ]
+
+    incomplete_gate =
+      update_in(complete_gate.questions, fn [first, second | rest] ->
+        [first, Map.delete(second, :impacts) | rest]
+      end)
+
+    assert dry_run_unanswered_clarification_calls(
+             workflow,
+             "Requirements",
+             incomplete_gate,
+             true
+           ) == [{:route, :maestro_auto_rework}]
+
+    assert dry_run_unanswered_clarification_calls(
+             workflow,
+             "Requirements",
+             incomplete_gate,
+             false
+           ) == [{:return, :stop_for_standard_handoff}]
+
+    for phase <- ["Requirements", "Design"] do
+      calls =
+        dry_run_artifact_calls(
+          workflow,
+          :blocked_clarification,
+          phase,
+          artifact,
+          complete_gate
+        )
+
+      assert {:issueUpdate, :state, "Human Review"} in calls
+      assert {:commentUpdate, :status_card_target, artifact.id} in calls
+      refute Enum.any?(calls, &match?({:issueUpdate, :add_label, "symphony:maestro"}, &1))
+      refute Enum.any?(calls, &match?({:issueUpdate, :remove_label, "symphony:maestro"}, &1))
+      refute Enum.any?(calls, &match?({:issueUpdate, :state_and_labels, _}, &1))
+      refute Enum.any?(calls, &match?({:start_maestro_session, _artifact_id}, &1))
+      refute Enum.any?(calls, &match?({:commentCreate, :clarification_summary, _body}, &1))
+    end
+
+    for phase_skill <- ["phase-requirements", "phase-design"] do
+      skill =
+        File.read!(
+          Path.expand(
+            "../workflows/agavemindlab/skills/#{phase_skill}/SKILL.md",
+            File.cwd!()
+          )
+        )
+
+      assert skill =~ "Every question states why it needs a human decision"
+      assert skill =~ "After publication, an incomplete clarification gate returns `stop` to Main Flow"
+      refute skill =~ "Do not execute the complete-gate steps below"
+      assert skill =~ "A complete unresolved `### NEEDS CLARIFICATION` gate moves to `Human Review` directly"
+      assert skill =~ "回答后，将 issue 置为 `In Progress`"
+      assert skill =~ "### Clean-exit completeness bar"
+      refute skill =~ "prefer surfacing it as a batched"
+    end
+
+    requirements_skill =
+      File.read!(Path.expand("../workflows/agavemindlab/skills/phase-requirements/SKILL.md", File.cwd!()))
+
+    design_skill =
+      File.read!(Path.expand("../workflows/agavemindlab/skills/phase-design/SKILL.md", File.cwd!()))
+
+    assert requirements_skill =~ "route it through Batched clarification below"
+    refute requirements_skill =~ "issue's `creator`, move the issue to `Human Review`, and stop"
+    assert design_skill =~ "route it through When blocked's complete-gate test"
+    refute design_skill =~ "and move to Human\nReview"
+    assert workflow =~ "For Requirements or Design, use that phase skill's batched format and complete-gate test"
+    assert workflow =~ "For Implementation or Deployment, use the fallback block below"
+
+    for missing_field <- [:question, :background, :options, :recommendation, :impacts] do
+      calls =
+        dry_run_artifact_calls(
+          workflow,
+          :blocked_clarification,
+          "Requirements",
+          artifact,
+          update_in(complete_gate.questions, fn [first, second | rest] ->
+            [first, Map.delete(second, missing_field) | rest]
+          end)
+        )
+
+      assert {:issueUpdate, :state_and_labels, {"Human Review", "symphony:maestro"}} in calls
+      assert {:start_maestro_session, artifact.id} in calls
+    end
+
+    revised_calls =
+      dry_run_artifact_calls(
+        workflow,
+        :blocked_clarification,
+        "Requirements",
+        %{artifact | id: "fresh-revised-requirements"},
+        %{complete_gate | unresolved?: false}
+      )
+
+    assert {:issueUpdate, :state_and_labels, {"Human Review", "symphony:maestro"}} in revised_calls
+    assert {:start_maestro_session, "fresh-revised-requirements"} in revised_calls
+
+    for phase <- ["Requirements", "Design"] do
+      ordinary_calls =
+        dry_run_artifact_calls(workflow, :blocked_clarification, phase, artifact, nil)
+
+      assert {:issueUpdate, :state_and_labels, {"Human Review", "symphony:maestro"}} in ordinary_calls
+      assert {:start_maestro_session, artifact.id} in ordinary_calls
     end
   end
 
@@ -4097,6 +4277,58 @@ defmodule SymphonyElixir.CoreTest do
     end
   end
 
+  defp dry_run_artifact_calls(
+         workflow,
+         :blocked_clarification,
+         phase,
+         artifact,
+         clarification_gate
+       ) do
+    short_circuit_contracts = [
+      "current awaiting Requirements or Design artifact",
+      "every unresolved question",
+      "why only a human can decide",
+      "concrete answer options",
+      "exactly one recommended answer per question",
+      "consequence of every option",
+      "leave `symphony:maestro` unchanged",
+      "start no Maestro session",
+      "original artifact thread",
+      "fresh revised artifact no longer has an unresolved clarification gate"
+    ]
+
+    short_circuit? =
+      phase in ["Requirements", "Design"] and
+        complete_unresolved_clarification?(clarification_gate) and
+        Enum.all?(short_circuit_contracts, &String.contains?(workflow, &1))
+
+    standard_handoff? =
+      Enum.all?(
+        [
+          "An incomplete gate follows the existing review/rework handoff",
+          "fresh revised artifact no longer has an unresolved clarification gate",
+          "one `issueUpdate` mutation that sets the `Human Review` state and full label set together"
+        ],
+        &String.contains?(workflow, &1)
+      )
+
+    if short_circuit? do
+      [
+        {:issueUpdate, :state, "Human Review"},
+        {:commentUpdate, :status_card_target, artifact.id}
+      ]
+    else
+      if standard_handoff? do
+        [
+          {:issueUpdate, :state_and_labels, {"Human Review", "symphony:maestro"}},
+          {:start_maestro_session, artifact.id}
+        ]
+      else
+        []
+      end
+    end
+  end
+
   defp dry_run_artifact_calls(workflow, :cross_phase_rollback, target_phase, awaiting_phase, artifacts) do
     required_contracts = [
       "from the target phase through the awaiting-review phase",
@@ -4119,6 +4351,34 @@ defmodule SymphonyElixir.CoreTest do
 
     Enum.map(artifacts_to_resolve, &{:commentResolve, &1.id}) ++
       [{:commentCreate, :top_level_phase_artifact, "## #{target_phase}"}]
+  end
+
+  defp dry_run_unanswered_clarification_calls(workflow, phase, gate, maestro_rework?) do
+    contract? =
+      Enum.all?(
+        [
+          "never approve or close the artifact",
+          "only a complete Requirements or Design gate uses the direct blocked exit",
+          "Evaluate it in this order",
+          "if a qualifying auto-rework signal exists, route its `/rework <phase>` draft literally",
+          "continue to step 6"
+        ],
+        &String.contains?(workflow, &1)
+      )
+
+    cond do
+      not contract? ->
+        [{:route, :generic_active_state_approval}]
+
+      phase in ["Requirements", "Design"] and complete_unresolved_clarification?(gate) ->
+        [{:issueUpdate, :state, "Human Review"}]
+
+      maestro_rework? ->
+        [{:route, :maestro_auto_rework}]
+
+      true ->
+        [{:return, :stop_for_standard_handoff}]
+    end
   end
 
   defp phase_artifact_invalidated_between?(artifact, target_phase, awaiting_phase) do
@@ -4154,6 +4414,28 @@ defmodule SymphonyElixir.CoreTest do
       created_at: DateTime.add(old_artifact.created_at, 1, :second)
     }
   end
+
+  defp complete_unresolved_clarification?(gate) when is_map(gate) do
+    questions = Map.get(gate, :questions, [])
+
+    gate[:unresolved?] == true and questions != [] and
+      Enum.all?(questions, &complete_clarification_question?/1)
+  end
+
+  defp complete_unresolved_clarification?(_gate), do: false
+
+  defp complete_clarification_question?(question) do
+    options = Map.get(question, :options, [])
+    impacts = Map.get(question, :impacts, %{})
+    recommendation = Map.get(question, :recommendation)
+
+    present_text?(question[:question]) and present_text?(question[:background]) and
+      length(options) >= 2 and Enum.all?(options, &present_text?/1) and Enum.uniq(options) == options and
+      present_text?(recommendation) and recommendation in options and
+      Enum.all?(options, &present_text?(Map.get(impacts, &1)))
+  end
+
+  defp present_text?(value), do: is_binary(value) and String.trim(value) != ""
 
   defp eventually_read_file!(path, deadline_ms \\ System.monotonic_time(:millisecond) + 1_000) do
     case File.read(path) do
