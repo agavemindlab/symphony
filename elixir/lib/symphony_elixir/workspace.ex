@@ -4,7 +4,7 @@ defmodule SymphonyElixir.Workspace do
   """
 
   require Logger
-  alias SymphonyElixir.{Analytics, Config, PathSafety, SSH, Workflow}
+  alias SymphonyElixir.{Analytics, Config, PathSafety, SSH, Subprocess, Workflow}
 
   @remote_workspace_marker "__SYMPHONY_WORKSPACE__"
 
@@ -242,28 +242,30 @@ defmodule SymphonyElixir.Workspace do
           :ok | {:error, term()}
   def run_before_run_hook(workspace, issue_or_identifier, worker_host \\ nil) when is_binary(workspace) do
     issue_context = issue_context(issue_or_identifier)
-    hooks = Config.settings!().hooks
+    settings = Config.settings!()
+    hooks = settings.hooks
 
     case hooks.before_run do
       nil ->
         :ok
 
       command ->
-        run_hook(command, workspace, issue_context, "before_run", worker_host)
+        run_hook(command, workspace, issue_context, "before_run", worker_host, settings)
     end
   end
 
   @spec run_after_run_hook(Path.t(), map() | String.t() | nil, worker_host()) :: :ok
   def run_after_run_hook(workspace, issue_or_identifier, worker_host \\ nil) when is_binary(workspace) do
     issue_context = issue_context(issue_or_identifier)
-    hooks = Config.settings!().hooks
+    settings = Config.settings!()
+    hooks = settings.hooks
 
     case hooks.after_run do
       nil ->
         :ok
 
       command ->
-        run_hook(command, workspace, issue_context, "after_run", worker_host)
+        run_hook(command, workspace, issue_context, "after_run", worker_host, settings)
         |> ignore_hook_failure("after_run", issue_context)
     end
   end
@@ -283,7 +285,8 @@ defmodule SymphonyElixir.Workspace do
   end
 
   defp maybe_run_after_create_hook(workspace, issue_context, created?, worker_host) do
-    hooks = Config.settings!().hooks
+    settings = Config.settings!()
+    hooks = settings.hooks
 
     case created? do
       true ->
@@ -292,7 +295,7 @@ defmodule SymphonyElixir.Workspace do
             :ok
 
           command ->
-            run_after_create_hook(command, workspace, issue_context, worker_host)
+            run_after_create_hook(command, workspace, issue_context, worker_host, settings)
         end
 
       false ->
@@ -300,8 +303,8 @@ defmodule SymphonyElixir.Workspace do
     end
   end
 
-  defp run_after_create_hook(command, workspace, issue_context, worker_host) do
-    case run_hook(command, workspace, issue_context, "after_create", worker_host) do
+  defp run_after_create_hook(command, workspace, issue_context, worker_host, settings) do
+    case run_hook(command, workspace, issue_context, "after_create", worker_host, settings) do
       :ok ->
         :ok
 
@@ -355,7 +358,8 @@ defmodule SymphonyElixir.Workspace do
   end
 
   defp maybe_run_before_remove_hook(workspace, nil, issue_context) do
-    hooks = Config.settings!().hooks
+    settings = Config.settings!()
+    hooks = settings.hooks
 
     case File.dir?(workspace) do
       true ->
@@ -369,7 +373,8 @@ defmodule SymphonyElixir.Workspace do
               workspace,
               issue_context,
               "before_remove",
-              nil
+              nil,
+              settings
             )
             |> ignore_hook_failure("before_remove", issue_context)
         end
@@ -380,7 +385,9 @@ defmodule SymphonyElixir.Workspace do
   end
 
   defp maybe_run_before_remove_hook(workspace, worker_host, issue_context) when is_binary(worker_host) do
-    hooks = Config.settings!().hooks
+    settings = Config.settings!()
+    hooks = settings.hooks
+    auth_names = Config.linear_auth_env_names(settings)
 
     case hooks.before_remove do
       nil ->
@@ -389,7 +396,7 @@ defmodule SymphonyElixir.Workspace do
       command ->
         script =
           [
-            remote_hook_env_exports(issue_context),
+            remote_hook_env_exports(issue_context, auth_names),
             remote_shell_assign("workspace", workspace),
             "if [ -d \"$workspace\" ]; then",
             "  cd \"$workspace\"",
@@ -398,7 +405,7 @@ defmodule SymphonyElixir.Workspace do
           ]
           |> Enum.join("\n")
 
-        run_remote_command(worker_host, script, Config.settings!().hooks.timeout_ms)
+        run_remote_command(worker_host, script, hooks.timeout_ms, auth_names)
         |> case do
           {:ok, {output, status}} ->
             handle_hook_command_result(
@@ -438,14 +445,15 @@ defmodule SymphonyElixir.Workspace do
       :ok
   end
 
-  defp run_hook(command, workspace, issue_context, hook_name, nil) do
-    timeout_ms = Config.settings!().hooks.timeout_ms
+  defp run_hook(command, workspace, issue_context, hook_name, nil, settings) do
+    timeout_ms = settings.hooks.timeout_ms
+    auth_names = Config.linear_auth_env_names(settings)
 
     Logger.info("Running workspace hook hook=#{hook_name} #{issue_log_context(issue_context)} workspace=#{workspace} worker_host=local")
 
     script =
       [
-        hook_env_exports(issue_context),
+        hook_env_exports(issue_context, auth_names),
         command
       ]
       |> Enum.reject(&(&1 == ""))
@@ -453,10 +461,11 @@ defmodule SymphonyElixir.Workspace do
 
     task =
       Task.async(fn ->
-        System.cmd("sh", ["-lc", script],
-          cd: workspace,
-          env: cleared_hook_env(),
-          stderr_to_stdout: true
+        Subprocess.cmd(
+          "sh",
+          ["-lc", script],
+          [cd: workspace, env: cleared_hook_env(), stderr_to_stdout: true],
+          auth_names
         )
       end)
 
@@ -473,21 +482,23 @@ defmodule SymphonyElixir.Workspace do
     end
   end
 
-  defp run_hook(command, workspace, issue_context, hook_name, worker_host) when is_binary(worker_host) do
-    timeout_ms = Config.settings!().hooks.timeout_ms
+  defp run_hook(command, workspace, issue_context, hook_name, worker_host, settings)
+       when is_binary(worker_host) do
+    timeout_ms = settings.hooks.timeout_ms
+    auth_names = Config.linear_auth_env_names(settings)
 
     Logger.info("Running workspace hook hook=#{hook_name} #{issue_log_context(issue_context)} workspace=#{workspace} worker_host=#{worker_host}")
 
     script =
       [
-        remote_hook_env_exports(issue_context),
+        remote_hook_env_exports(issue_context, auth_names),
         "cd #{shell_escape(workspace)}",
         command
       ]
       |> Enum.reject(&(&1 == ""))
       |> Enum.join("\n")
 
-    case run_remote_command(worker_host, script, timeout_ms) do
+    case run_remote_command(worker_host, script, timeout_ms, auth_names) do
       {:ok, cmd_result} ->
         handle_hook_command_result(cmd_result, workspace, issue_context, hook_name)
 
@@ -600,11 +611,13 @@ defmodule SymphonyElixir.Workspace do
     end
   end
 
-  defp run_remote_command(worker_host, script, timeout_ms)
+  defp run_remote_command(worker_host, script, timeout_ms, auth_names \\ nil)
        when is_binary(worker_host) and is_binary(script) and is_integer(timeout_ms) and timeout_ms > 0 do
     task =
       Task.async(fn ->
-        SSH.run(worker_host, script, stderr_to_stdout: true)
+        opts = [stderr_to_stdout: true]
+        opts = if is_list(auth_names), do: Keyword.put(opts, :linear_auth_env_names, auth_names), else: opts
+        SSH.run(worker_host, script, opts)
       end)
 
     case Task.yield(task, timeout_ms) do
@@ -677,11 +690,11 @@ defmodule SymphonyElixir.Workspace do
     |> Enum.map(&{&1, nil})
   end
 
-  defp remote_hook_env_exports(issue_context) do
-    hook_env_exports(issue_context)
+  defp remote_hook_env_exports(issue_context, auth_names) do
+    hook_env_exports(issue_context, auth_names)
   end
 
-  defp hook_env_exports(issue_context) do
+  defp hook_env_exports(issue_context, auth_names) do
     exports =
       issue_context
       |> hook_env()
@@ -689,8 +702,13 @@ defmodule SymphonyElixir.Workspace do
         "#{name}=#{shell_escape(value)}\nexport #{name}"
       end)
 
+    unset_context =
+      ["SYMPHONY_PROJECT_DIR", "SYMPHONY_LINEAR_PROJECT_ID", "SYMPHONY_LINEAR_PROJECT_SLUG", "SYMPHONY_LINEAR_PROJECT_NAME"]
+      |> Enum.join(" ")
+
     """
-    unset SYMPHONY_PROJECT_DIR SYMPHONY_LINEAR_PROJECT_ID SYMPHONY_LINEAR_PROJECT_SLUG SYMPHONY_LINEAR_PROJECT_NAME
+    #{Config.linear_auth_unset_command(auth_names)}
+    command unset #{unset_context} || exit 126
     #{exports}
     """
   end

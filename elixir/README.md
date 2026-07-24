@@ -112,10 +112,7 @@ workspace:
 hooks:
   after_create: |
     git clone git@github.com:your-org/your-repo.git .
-  issue_running: |
-    sh "$SYMPHONY_WORKFLOW_DIR/mark-running-issue.sh" running
-  issue_stopped: |
-    sh "$SYMPHONY_WORKFLOW_DIR/mark-running-issue.sh" stopped
+  linear_running_marker: true
 agent:
   max_concurrent_agents: 10
   max_turns: 20
@@ -179,11 +176,14 @@ Notes:
   identifier, title, and body.
 - Use `hooks.after_create` to bootstrap a fresh workspace. For a Git-backed repo, you can run
   `git clone ... .` there, along with any other setup commands you need.
-- Use `hooks.issue_running` and `hooks.issue_stopped` to set or clear a tracker-visible
-  "currently handled by Symphony" marker. These hooks run from the workflow directory with
+- Use `hooks.linear_running_marker` to set or clear a Linear label through the host's current
+  API-key or OAuth authentication. `hooks.issue_running` and `hooks.issue_stopped` remain optional
+  custom shell hooks. These hooks run from the workflow directory with
   `SYMPHONY_WORKFLOW_DIR`, `SYMPHONY_HOOK_EVENT`, `SYMPHONY_HOOK_REASON`,
   `SYMPHONY_ISSUE_ID`, `SYMPHONY_ISSUE_IDENTIFIER`, `SYMPHONY_ISSUE_STATE`,
   `SYMPHONY_ISSUE_URL`, and `SYMPHONY_WORKER_HOST` in the environment.
+- Shell hook children never inherit `LINEAR_API_KEY`, `LINEAR_CLIENT_ID`,
+  `LINEAR_CLIENT_SECRET`, or environment variables referenced by tracker auth fields.
 - Hooks for a Linear issue also receive `SYMPHONY_LINEAR_PROJECT_ID`,
   `SYMPHONY_LINEAR_PROJECT_SLUG`, and `SYMPHONY_LINEAR_PROJECT_NAME` when the
   issue payload includes project data. Use `SYMPHONY_LINEAR_PROJECT_SLUG` to

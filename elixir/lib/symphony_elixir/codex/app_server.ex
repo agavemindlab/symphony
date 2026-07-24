@@ -4,7 +4,7 @@ defmodule SymphonyElixir.Codex.AppServer do
   """
 
   require Logger
-  alias SymphonyElixir.{Codex.DynamicTool, Config, PathSafety, SSH, Workflow}
+  alias SymphonyElixir.{Codex.DynamicTool, Config, PathSafety, SSH, Subprocess, Workflow}
 
   @initialize_id 1
   @thread_start_id 2
@@ -193,10 +193,12 @@ defmodule SymphonyElixir.Codex.AppServer do
     if is_nil(executable) do
       {:error, :bash_not_found}
     else
-      command = launch_command(issue)
+      settings = Config.settings!()
+      auth_names = Config.linear_auth_env_names(settings)
+      command = launch_command(issue, settings, auth_names)
 
       port =
-        Port.open(
+        Subprocess.open_port(
           {:spawn_executable, String.to_charlist(executable)},
           [
             :binary,
@@ -205,7 +207,8 @@ defmodule SymphonyElixir.Codex.AppServer do
             args: [~c"-lc", String.to_charlist(command)],
             cd: String.to_charlist(workspace),
             line: @port_line_bytes
-          ]
+          ],
+          auth_names
         )
 
       {:ok, port}
@@ -213,27 +216,32 @@ defmodule SymphonyElixir.Codex.AppServer do
   end
 
   defp start_port(workspace, worker_host, issue) when is_binary(worker_host) do
-    remote_command = remote_launch_command(workspace, issue)
-    SSH.start_port(worker_host, remote_command, line: @port_line_bytes)
+    settings = Config.settings!()
+    auth_names = Config.linear_auth_env_names(settings)
+    remote_command = remote_launch_command(workspace, issue, settings, auth_names)
+
+    SSH.start_port(worker_host, remote_command, line: @port_line_bytes, linear_auth_env_names: auth_names)
   end
 
-  defp launch_command(issue) do
+  defp launch_command(issue, settings, auth_names) do
+    unset_linear_auth = Config.linear_auth_unset_command(auth_names)
+
     [
       "set -e",
-      "unset LINEAR_API_KEY LINEAR_CLIENT_ID LINEAR_CLIENT_SECRET",
+      unset_linear_auth,
       project_env_source_prefix(issue),
-      "unset LINEAR_API_KEY LINEAR_CLIENT_ID LINEAR_CLIENT_SECRET",
-      "exec #{Config.settings!().codex.command}"
+      unset_linear_auth,
+      "exec #{settings.codex.command}"
     ]
     |> Enum.reject(&(&1 == ""))
     |> Enum.join("\n")
   end
 
-  defp remote_launch_command(workspace, issue) when is_binary(workspace) do
+  defp remote_launch_command(workspace, issue, settings, auth_names) when is_binary(workspace) do
     [
       "set -e",
       "cd #{shell_escape(workspace)}",
-      launch_command(issue)
+      launch_command(issue, settings, auth_names)
     ]
     |> Enum.join("\n")
   end

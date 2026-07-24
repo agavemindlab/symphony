@@ -20,6 +20,8 @@ defmodule SymphonyElixir.Config do
   {% endif %}
   """
 
+  @linear_auth_env_names ["LINEAR_API_KEY", "LINEAR_CLIENT_ID", "LINEAR_CLIENT_SECRET"]
+
   @type codex_runtime_settings :: %{
           approval_policy: String.t() | map(),
           thread_sandbox: String.t(),
@@ -188,6 +190,19 @@ defmodule SymphonyElixir.Config do
         {:error, :missing_linear_auth}
     end
   end
+
+  @spec linear_auth_env_names() :: [String.t()]
+  def linear_auth_env_names, do: linear_auth_env_names(settings!())
+
+  @spec linear_auth_env_names(Schema.t()) :: [String.t()]
+  def linear_auth_env_names(%Schema{} = settings),
+    do: Enum.uniq(@linear_auth_env_names ++ settings.tracker.auth_env_names)
+
+  @spec linear_auth_unset_command() :: String.t()
+  def linear_auth_unset_command, do: linear_auth_unset_command(linear_auth_env_names())
+
+  @spec linear_auth_unset_command([String.t()]) :: String.t()
+  def linear_auth_unset_command(auth_names), do: "command unset " <> Enum.join(auth_names, " ") <> " || exit 126"
 
   @spec configured_project_slugs() :: {:ok, [String.t()]} | {:error, term()}
   def configured_project_slugs, do: Schema.configured_project_slugs(settings!().tracker)

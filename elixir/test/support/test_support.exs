@@ -183,6 +183,7 @@ defmodule SymphonyElixir.TestSupport do
           hook_before_run: nil,
           hook_after_run: nil,
           hook_before_remove: nil,
+          hook_linear_running_marker: false,
           hook_issue_running: nil,
           hook_issue_stopped: nil,
           hook_timeout_ms: 60_000,
@@ -208,6 +209,8 @@ defmodule SymphonyElixir.TestSupport do
     tracker_required_labels = Keyword.get(config, :tracker_required_labels)
     tracker_active_states = Keyword.get(config, :tracker_active_states)
     tracker_terminal_states = Keyword.get(config, :tracker_terminal_states)
+    tracker_client_id = Keyword.get(config, :tracker_client_id)
+    tracker_client_secret = Keyword.get(config, :tracker_client_secret)
     poll_interval_ms = Keyword.get(config, :poll_interval_ms)
     workspace_root = Keyword.get(config, :workspace_root)
     worker_ssh_hosts = Keyword.get(config, :worker_ssh_hosts)
@@ -227,6 +230,7 @@ defmodule SymphonyElixir.TestSupport do
     hook_before_run = Keyword.get(config, :hook_before_run)
     hook_after_run = Keyword.get(config, :hook_after_run)
     hook_before_remove = Keyword.get(config, :hook_before_remove)
+    hook_linear_running_marker = Keyword.get(config, :hook_linear_running_marker)
     hook_issue_running = Keyword.get(config, :hook_issue_running)
     hook_issue_stopped = Keyword.get(config, :hook_issue_stopped)
     hook_timeout_ms = Keyword.get(config, :hook_timeout_ms)
@@ -245,6 +249,8 @@ defmodule SymphonyElixir.TestSupport do
         "  kind: #{yaml_value(tracker_kind)}",
         "  endpoint: #{yaml_value(tracker_endpoint)}",
         "  api_key: #{yaml_value(tracker_api_token)}",
+        "  client_id: #{yaml_value(tracker_client_id)}",
+        "  client_secret: #{yaml_value(tracker_client_secret)}",
         "  project_slug: #{yaml_value(tracker_project_slug)}",
         tracker_project_slugs_entry(tracker_project_slugs),
         tracker_project_name_entry(tracker_project_name),
@@ -276,6 +282,7 @@ defmodule SymphonyElixir.TestSupport do
           hook_before_run,
           hook_after_run,
           hook_before_remove,
+          hook_linear_running_marker,
           hook_issue_running,
           hook_issue_stopped,
           hook_timeout_ms
@@ -317,7 +324,7 @@ defmodule SymphonyElixir.TestSupport do
 
   defp yaml_value(value), do: yaml_value(to_string(value))
 
-  defp hooks_yaml(nil, nil, nil, nil, nil, nil, timeout_ms),
+  defp hooks_yaml(nil, nil, nil, nil, false, nil, nil, timeout_ms),
     do: "hooks:\n  timeout_ms: #{yaml_value(timeout_ms)}"
 
   defp hooks_yaml(
@@ -325,6 +332,7 @@ defmodule SymphonyElixir.TestSupport do
          hook_before_run,
          hook_after_run,
          hook_before_remove,
+         hook_linear_running_marker,
          hook_issue_running,
          hook_issue_stopped,
          timeout_ms
@@ -332,6 +340,7 @@ defmodule SymphonyElixir.TestSupport do
     [
       "hooks:",
       "  timeout_ms: #{yaml_value(timeout_ms)}",
+      "  linear_running_marker: #{yaml_value(hook_linear_running_marker)}",
       hook_entry("after_create", hook_after_create),
       hook_entry("before_run", hook_before_run),
       hook_entry("after_run", hook_after_run),

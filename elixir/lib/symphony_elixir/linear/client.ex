@@ -242,7 +242,14 @@ defmodule SymphonyElixir.Linear.Client do
     request_fun = Keyword.get(opts, :request_fun, &post_graphql_request/2)
 
     with {:ok, authorization} <- graphql_authorization(opts) do
-      do_graphql_request(payload, authorization, request_fun, Keyword.get(opts, :auth_opts, []), 0)
+      do_graphql_request(
+        payload,
+        authorization,
+        request_fun,
+        Keyword.get(opts, :auth_opts, []),
+        Keyword.get(opts, :log_error_body, true),
+        0
+      )
     end
   end
 
@@ -600,7 +607,7 @@ defmodule SymphonyElixir.Linear.Client do
     end
   end
 
-  defp do_graphql_request(payload, authorization, request_fun, auth_opts, attempt) do
+  defp do_graphql_request(payload, authorization, request_fun, auth_opts, log_error_body?, attempt) do
     headers = graphql_headers(authorization)
 
     case request_fun.(payload, headers) do
@@ -609,12 +616,12 @@ defmodule SymphonyElixir.Linear.Client do
 
       {:ok, %{status: 401}} when authorization.mode == :oauth and attempt == 0 ->
         with {:ok, refreshed} <- Auth.refresh(authorization.version, auth_opts) do
-          do_graphql_request(payload, refreshed, request_fun, auth_opts, 1)
+          do_graphql_request(payload, refreshed, request_fun, auth_opts, log_error_body?, 1)
         end
 
       {:ok, response} ->
         context =
-          if authorization.mode == :api_key and response.status != 401,
+          if log_error_body? and authorization.mode == :api_key and response.status != 401,
             do: linear_error_context(payload, response),
             else: ""
 

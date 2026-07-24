@@ -1,7 +1,150 @@
 defmodule SymphonyElixir.SSHTest do
-  use ExUnit.Case, async: false
+  use SymphonyElixir.TestSupport
 
   alias SymphonyElixir.SSH
+
+  @auth_names [
+    "LINEAR_API_KEY",
+    "LINEAR_CLIENT_ID",
+    "LINEAR_CLIENT_SECRET",
+    "CUSTOM_LINEAR_API_KEY",
+    "CUSTOM_LINEAR_CLIENT_ID",
+    "CUSTOM_LINEAR_CLIENT_SECRET"
+  ]
+
+  test "run/3 clears protected auth after caller env while preserving ordinary context" do
+    test_root = Path.join(System.tmp_dir!(), "symphony-ssh-auth-test-#{System.unique_integer([:positive])}")
+    trace_file = Path.join(test_root, "ssh.trace")
+    previous_path = System.get_env("PATH")
+    previous = Map.new(@auth_names, &{&1, System.get_env(&1)})
+
+    on_exit(fn ->
+      restore_env("PATH", previous_path)
+      Enum.each(previous, fn {name, value} -> restore_env(name, value) end)
+      File.rm_rf(test_root)
+    end)
+
+    Enum.each(@auth_names, &System.put_env(&1, "parent-#{&1}"))
+    write_custom_auth_workflow!()
+
+    install_fake_ssh!(test_root, trace_file, """
+    #!/bin/sh
+    printf '%s|%s|%s|%s|%s|%s|%s' \
+      "${LINEAR_API_KEY-unset}" \
+      "${LINEAR_CLIENT_ID-unset}" \
+      "${LINEAR_CLIENT_SECRET-unset}" \
+      "${CUSTOM_LINEAR_API_KEY-unset}" \
+      "${CUSTOM_LINEAR_CLIENT_ID-unset}" \
+      "${CUSTOM_LINEAR_CLIENT_SECRET-unset}" \
+      "${SAFE_CONTEXT-unset}" > "#{trace_file}"
+    """)
+
+    caller_env = Enum.map(@auth_names, &{&1, "caller-#{&1}"}) ++ [{"SAFE_CONTEXT", "kept"}]
+
+    assert {:ok, {"", 0}} = SSH.run("worker", "printf ok", env: caller_env)
+    assert File.read!(trace_file) == "unset|unset|unset|unset|unset|unset|kept"
+  end
+
+  test "start_port/3 clears protected auth after caller env while preserving ordinary context" do
+    test_root = Path.join(System.tmp_dir!(), "symphony-ssh-port-auth-test-#{System.unique_integer([:positive])}")
+    trace_file = Path.join(test_root, "ssh.trace")
+    previous_path = System.get_env("PATH")
+    previous = Map.new(@auth_names, &{&1, System.get_env(&1)})
+
+    on_exit(fn ->
+      restore_env("PATH", previous_path)
+      Enum.each(previous, fn {name, value} -> restore_env(name, value) end)
+      File.rm_rf(test_root)
+    end)
+
+    Enum.each(@auth_names, &System.put_env(&1, "parent-#{&1}"))
+    write_custom_auth_workflow!()
+
+    install_fake_ssh!(test_root, trace_file, """
+    #!/bin/sh
+    printf '%s|%s|%s|%s|%s|%s|%s' \
+      "${LINEAR_API_KEY-unset}" \
+      "${LINEAR_CLIENT_ID-unset}" \
+      "${LINEAR_CLIENT_SECRET-unset}" \
+      "${CUSTOM_LINEAR_API_KEY-unset}" \
+      "${CUSTOM_LINEAR_CLIENT_ID-unset}" \
+      "${CUSTOM_LINEAR_CLIENT_SECRET-unset}" \
+      "${SAFE_CONTEXT-unset}" > "#{trace_file}"
+    """)
+
+    caller_env = Enum.map(@auth_names, &{&1, "caller-#{&1}"}) ++ [{"SAFE_CONTEXT", "kept"}]
+
+    assert {:ok, port} = SSH.start_port("worker", "printf ok", env: caller_env)
+    assert is_port(port)
+    wait_for_trace!(trace_file)
+    assert File.read!(trace_file) == "unset|unset|unset|unset|unset|unset|kept"
+  end
+
+  test "remote command clears login environment before executing the intended payload" do
+    test_root = Path.join(System.tmp_dir!(), "symphony-ssh-remote-auth-test-#{System.unique_integer([:positive])}")
+    trace_file = Path.join(test_root, "ssh.trace")
+    previous_path = System.get_env("PATH")
+
+    on_exit(fn ->
+      restore_env("PATH", previous_path)
+      File.rm_rf(test_root)
+    end)
+
+    write_custom_auth_workflow!()
+
+    install_fake_ssh!(test_root, trace_file, """
+    #!/bin/sh
+    remote_command=
+    for arg do remote_command="$arg"; done
+    export LINEAR_API_KEY=remote
+    export LINEAR_CLIENT_ID=remote
+    export LINEAR_CLIENT_SECRET=remote
+    export CUSTOM_LINEAR_API_KEY=remote
+    export CUSTOM_LINEAR_CLIENT_ID=remote
+    export CUSTOM_LINEAR_CLIENT_SECRET=remote
+    exec /bin/sh -c "$remote_command"
+    """)
+
+    payload =
+      "printf '%s|%s|%s|%s|%s|%s' " <>
+        Enum.map_join(@auth_names, " ", &"\"\${#{&1}-unset}\"")
+
+    assert {:ok, {"unset|unset|unset|unset|unset|unset", 0}} =
+             SSH.run("worker", payload, stderr_to_stdout: true)
+  end
+
+  test "run/3 uses one supplied auth-name snapshot for local and remote scrubbing" do
+    test_root = Path.join(System.tmp_dir!(), "symphony-ssh-snapshot-test-#{System.unique_integer([:positive])}")
+    trace_file = Path.join(test_root, "ssh.trace")
+    previous_path = System.get_env("PATH")
+    previous_secret = System.get_env("SNAPSHOT_LINEAR_SECRET")
+
+    on_exit(fn ->
+      restore_env("PATH", previous_path)
+      restore_env("SNAPSHOT_LINEAR_SECRET", previous_secret)
+      File.rm_rf(test_root)
+    end)
+
+    System.put_env("SNAPSHOT_LINEAR_SECRET", "local-secret")
+
+    install_fake_ssh!(test_root, trace_file, """
+    #!/bin/sh
+    remote_command=
+    for arg do remote_command="$arg"; done
+    printf 'LOCAL:%s\n' "${SNAPSHOT_LINEAR_SECRET-unset}" > "#{trace_file}"
+    export SNAPSHOT_LINEAR_SECRET=remote-secret
+    exec /bin/sh -c "$remote_command"
+    """)
+
+    assert {:ok, {"REMOTE:unset", 0}} =
+             SSH.run(
+               "worker",
+               ~s(printf 'REMOTE:%s' "${SNAPSHOT_LINEAR_SECRET-unset}"),
+               linear_auth_env_names: ["SNAPSHOT_LINEAR_SECRET"]
+             )
+
+    assert File.read!(trace_file) == "LOCAL:unset\n"
+  end
 
   test "run/3 keeps bracketed IPv6 host:port targets intact" do
     test_root = Path.join(System.tmp_dir!(), "symphony-ssh-ipv6-test-#{System.unique_integer([:positive])}")
@@ -158,8 +301,10 @@ defmodule SymphonyElixir.SSHTest do
   end
 
   test "remote_shell_command/1 escapes embedded single quotes" do
-    assert SSH.remote_shell_command("printf 'hello'") ==
-             "bash -lc 'printf '\"'\"'hello'\"'\"''"
+    command = SSH.remote_shell_command("printf 'hello'")
+
+    assert command =~ "command unset LINEAR_API_KEY LINEAR_CLIENT_ID LINEAR_CLIENT_SECRET || exit 126\n"
+    assert command =~ "printf '\"'\"'hello'\"'\"'"
   end
 
   defp install_fake_ssh!(test_root, trace_file, script \\ nil) do
@@ -194,6 +339,11 @@ defmodule SymphonyElixir.SSHTest do
     end
   end
 
-  defp restore_env(key, nil), do: System.delete_env(key)
-  defp restore_env(key, value), do: System.put_env(key, value)
+  defp write_custom_auth_workflow! do
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_api_token: "$CUSTOM_LINEAR_API_KEY",
+      tracker_client_id: "$CUSTOM_LINEAR_CLIENT_ID",
+      tracker_client_secret: "$CUSTOM_LINEAR_CLIENT_SECRET"
+    )
+  end
 end
