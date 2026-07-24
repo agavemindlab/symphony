@@ -142,11 +142,11 @@ Reply locations:
 All phases:
 
 - Compare the artifact against the accepted `## Requirements` acceptance
-  criteria plus later human-approved scope changes. Once Requirements exists,
-  treat the issue description as intake context only; conflicts resolve as
-  human reply > current artifact > previous artifact > description. Request
-  changes when the artifact would leave the next phase unable to satisfy that
-  source of truth.
+  criteria plus later human-approved scope changes. Once Requirements is
+  accepted, treat the issue description as intake context only; conflicts
+  resolve as human reply > accepted Requirements > current artifact > previous
+  artifact > description. Request changes when the artifact would leave the
+  next phase unable to satisfy that source of truth.
 - When feedback or evidence shows the accepted source of truth is incomplete,
   wrong, or newly changed, target the owning phase for rework: Requirements
   for scope, acceptance criteria, actor identity, auth/permission boundaries,
@@ -160,10 +160,19 @@ All phases:
 
 Requirements:
 
-- Compare directly to the issue description and human comments. Do not approve
-  Requirements that silently narrow a broad delivery issue into a Spike,
-  research, or docs-only task; require an explicit parent/subissue boundary or
-  cited human scope approval for the narrower scope.
+- Compare directly to the issue description and human comments. Reject
+  Requirements that silently change the stated delivery scope. Narrowing
+  delivery requires an explicit parent/subissue boundary or cited human
+  approval. Any delivery-scope expansion requires cited human approval of that
+  added deliverable; turning a means of verification into a required
+  deliverable is one example.
+- For verification evidence, require the smallest close test: a scenario,
+  observable behavioral outcome, and pass condition. Tests, replays, harnesses,
+  model runs, prior failures, and scrubbed regression scenarios may supply
+  evidence; they create no infrastructure requirement unless it is itself part
+  of explicit human-approved delivery scope. Return `request changes` with a
+  draft whose first line starts `/rework requirements`, never `/rework design`
+  for any unapproved Requirements scope change.
 
 Design:
 
