@@ -67,20 +67,23 @@ optional `project.env.local`) may override them when needed.
 
 ## Hooks
 
-The shared `WORKFLOW.md` expects Symphony to expose `SYMPHONY_WORKFLOW_DIR` to
-local hooks. The value is the directory that contains the workflow file passed
-to the CLI, without resolving through symlinks.
+The shared workflows expect Symphony to expose `SYMPHONY_WORKFLOW_DIR` and
+`SYMPHONY_WORKFLOW_FILE` to hooks. They identify the configured workflow's
+directory and exact file path without resolving through symlinks.
 
 `hooks.after_create` clones `$GITHUB_FORK_OWNER/$SYMPHONY_REPO`, configures the
 `agavemindlab/$SYMPHONY_REPO` upstream remote, fetches
 `$SYMPHONY_BASE_BRANCH`, runs the project `setup.sh` if it exists, then
-symlinks shared skills from `$SYMPHONY_WORKFLOW_DIR/skills/` into the workspace
-`.agents/skills/` directory. If the target repository already contains
-`.agents/skills/<name>/`, the installer skips that skill and leaves the
-repository version in place. Only newly linked skills are added to
-`.git/info/exclude`; the committed `.gitignore` is not modified. The hook also
-creates `.issue-secrets/` with mode `700` and local-excludes it for
-human-provided, issue-scoped secret files.
+runs no shared-skill installation. The hook also creates `.issue-secrets/`
+with mode `700` and local-excludes it for human-provided, issue-scoped secret
+files.
+
+`hooks.before_turn` archives shared skills from their Symphony repository's
+committed `HEAD` into `.symphony/shared-skills/`, then switches workspace-local
+managed links. Repository-tracked names win; dirty canonical changes are
+ignored. Snapshot construction or reconciliation failure prevents the Codex
+turn from starting and leaves the previous complete generation active. The
+snapshot state and managed links are added only to `.git/info/exclude`.
 
 `hooks.before_remove` runs the project `teardown.sh` if it exists.
 
@@ -98,8 +101,8 @@ registry for spawned-issue routing).
 
 ## Shared Skills
 
-`workflows/agavemindlab/skills/` contains the shared workflow skills installed
-into each workspace. The `symphony-cleanup` skill is shared because it only uses Docker's
+`workflows/agavemindlab/skills/` contains the shared workflow skills snapshotted
+into each workspace at turn boundaries. The `symphony-cleanup` skill is shared because it only uses Docker's
 `com.docker.compose.project` labels and the configured Symphony workspace root
 to identify resources left behind by removed workspaces; it does not depend on
 any project-specific Compose files or services.

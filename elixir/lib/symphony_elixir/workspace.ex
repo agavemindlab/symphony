@@ -7,6 +7,11 @@ defmodule SymphonyElixir.Workspace do
   alias SymphonyElixir.{Analytics, Config, PathSafety, SSH, Workflow}
 
   @remote_workspace_marker "__SYMPHONY_WORKSPACE__"
+  @hook_timeout_marker "__SYMPHONY_HOOK_TIMEOUT__"
+  @hook_timeout_exit_status 124
+  @hook_termination_grace_ms 5_000
+  @hook_termination_poll_ms 100
+  @remote_hook_connect_timeout_ms 10_000
 
   @type worker_host :: String.t() | nil
 
@@ -253,6 +258,18 @@ defmodule SymphonyElixir.Workspace do
     end
   end
 
+  @spec run_before_turn_hook(Path.t(), map() | String.t() | nil, worker_host()) ::
+          :ok | {:error, term()}
+  def run_before_turn_hook(workspace, issue_or_identifier, worker_host \\ nil)
+      when is_binary(workspace) do
+    issue_context = issue_context(issue_or_identifier)
+
+    case Config.settings!().hooks.before_turn do
+      nil -> :ok
+      command -> run_hook(command, workspace, issue_context, "before_turn", worker_host)
+    end
+  end
+
   @spec run_after_run_hook(Path.t(), map() | String.t() | nil, worker_host()) :: :ok
   def run_after_run_hook(workspace, issue_or_identifier, worker_host \\ nil) when is_binary(workspace) do
     issue_context = issue_context(issue_or_identifier)
@@ -451,25 +468,26 @@ defmodule SymphonyElixir.Workspace do
       |> Enum.reject(&(&1 == ""))
       |> Enum.join("\n")
 
+    outer_timeout_ms = timeout_ms + @hook_termination_grace_ms + 2_000
+
     task =
       Task.async(fn ->
-        System.cmd("sh", ["-lc", script],
+        System.cmd("bash", ["-lc", timed_shell_script(script, timeout_ms)],
           cd: workspace,
           env: cleared_hook_env(),
           stderr_to_stdout: true
         )
       end)
 
-    case Task.yield(task, timeout_ms) do
-      {:ok, cmd_result} ->
-        handle_hook_command_result(cmd_result, workspace, issue_context, hook_name)
-
+    case Task.yield(task, outer_timeout_ms) do
       nil ->
         Task.shutdown(task, :brutal_kill)
-
         Logger.warning("Workspace hook timed out hook=#{hook_name} #{issue_log_context(issue_context)} workspace=#{workspace} worker_host=local timeout_ms=#{timeout_ms}")
 
         {:error, {:workspace_hook_timeout, hook_name, timeout_ms}}
+
+      {:ok, cmd_result} ->
+        handle_timed_hook_result(cmd_result, workspace, issue_context, hook_name, timeout_ms, nil)
     end
   end
 
@@ -487,16 +505,63 @@ defmodule SymphonyElixir.Workspace do
       |> Enum.reject(&(&1 == ""))
       |> Enum.join("\n")
 
-    case run_remote_command(worker_host, script, timeout_ms) do
+    remote_timeout_ms =
+      timeout_ms + @hook_termination_grace_ms + @remote_hook_connect_timeout_ms + 2_000
+
+    case run_remote_command(
+           worker_host,
+           timed_shell_script(script, timeout_ms),
+           remote_timeout_ms,
+           batch_mode: true,
+           connect_timeout_seconds: div(@remote_hook_connect_timeout_ms, 1_000)
+         ) do
       {:ok, cmd_result} ->
-        handle_hook_command_result(cmd_result, workspace, issue_context, hook_name)
+        handle_timed_hook_result(
+          cmd_result,
+          workspace,
+          issue_context,
+          hook_name,
+          timeout_ms,
+          worker_host
+        )
 
       {:error, {:workspace_hook_timeout, ^hook_name, _timeout_ms} = reason} ->
         {:error, reason}
 
+      {:error, {:workspace_hook_timeout, "remote_command", ^remote_timeout_ms}} ->
+        {:error, {:workspace_hook_timeout, hook_name, timeout_ms}}
+
       {:error, reason} ->
         {:error, reason}
     end
+  end
+
+  defp handle_timed_hook_result(
+         {output, @hook_timeout_exit_status} = cmd_result,
+         workspace,
+         issue_context,
+         hook_name,
+         timeout_ms,
+         worker_host
+       ) do
+    if hook_timeout_output?(output) do
+      Logger.warning("Workspace hook timed out hook=#{hook_name} #{issue_log_context(issue_context)} workspace=#{workspace} worker_host=#{worker_host_for_log(worker_host)} timeout_ms=#{timeout_ms}")
+
+      {:error, {:workspace_hook_timeout, hook_name, timeout_ms}}
+    else
+      handle_hook_command_result(cmd_result, workspace, issue_context, hook_name)
+    end
+  end
+
+  defp handle_timed_hook_result(
+         cmd_result,
+         workspace,
+         issue_context,
+         hook_name,
+         _timeout_ms,
+         _worker_host
+       ) do
+    handle_hook_command_result(cmd_result, workspace, issue_context, hook_name)
   end
 
   defp handle_hook_command_result({_output, 0}, _workspace, _issue_id, _hook_name) do
@@ -600,11 +665,11 @@ defmodule SymphonyElixir.Workspace do
     end
   end
 
-  defp run_remote_command(worker_host, script, timeout_ms)
+  defp run_remote_command(worker_host, script, timeout_ms, ssh_opts \\ [])
        when is_binary(worker_host) and is_binary(script) and is_integer(timeout_ms) and timeout_ms > 0 do
     task =
       Task.async(fn ->
-        SSH.run(worker_host, script, stderr_to_stdout: true)
+        SSH.run(worker_host, script, Keyword.put(ssh_opts, :stderr_to_stdout, true))
       end)
 
     case Task.yield(task, timeout_ms) do
@@ -615,6 +680,52 @@ defmodule SymphonyElixir.Workspace do
         Task.shutdown(task, :brutal_kill)
         {:error, {:workspace_hook_timeout, "remote_command", timeout_ms}}
     end
+  end
+
+  defp timed_shell_script(script, timeout_ms) do
+    timeout_seconds = milliseconds_to_seconds(timeout_ms)
+    termination_checks = div(@hook_termination_grace_ms, @hook_termination_poll_ms)
+    termination_poll_seconds = milliseconds_to_seconds(@hook_termination_poll_ms)
+
+    """
+    marker=$(mktemp "${TMPDIR:-/tmp}/symphony-hook.XXXXXXXX") || exit 125
+    trap 'rm -f "$marker"' EXIT HUP INT TERM
+    set -m
+    sh -lc #{shell_escape(script)} &
+    hook_pid=$!
+    (
+      sleep #{timeout_seconds}
+      printf timeout > "$marker"
+      /bin/kill -TERM -- "-$hook_pid" 2>/dev/null || true
+      checks=0
+      while /bin/kill -0 -- "-$hook_pid" 2>/dev/null && [ "$checks" -lt #{termination_checks} ]; do
+        sleep #{termination_poll_seconds}
+        checks=$((checks + 1))
+      done
+      /bin/kill -KILL -- "-$hook_pid" 2>/dev/null || true
+    ) &
+    watchdog_pid=$!
+    wait "$hook_pid"
+    status=$?
+    if [ -s "$marker" ]; then
+      wait "$watchdog_pid" 2>/dev/null || true
+      printf '%s\n' '#{@hook_timeout_marker}'
+      exit #{@hook_timeout_exit_status}
+    fi
+    /bin/kill -TERM -- "-$watchdog_pid" 2>/dev/null || true
+    wait "$watchdog_pid" 2>/dev/null || true
+    exit "$status"
+    """
+  end
+
+  defp hook_timeout_output?(output) do
+    output
+    |> IO.iodata_to_binary()
+    |> String.ends_with?(@hook_timeout_marker <> "\n")
+  end
+
+  defp milliseconds_to_seconds(milliseconds) do
+    "#{div(milliseconds, 1_000)}.#{milliseconds |> rem(1_000) |> Integer.to_string() |> String.pad_leading(3, "0")}"
   end
 
   defp shell_escape(value) when is_binary(value) do
@@ -662,13 +773,17 @@ defmodule SymphonyElixir.Workspace do
   end
 
   defp hook_env(issue_context) do
-    [{"SYMPHONY_WORKFLOW_DIR", Path.dirname(Workflow.workflow_file_path())}]
+    [
+      {"SYMPHONY_WORKFLOW_DIR", Path.dirname(Workflow.workflow_file_path())},
+      {"SYMPHONY_WORKFLOW_FILE", Workflow.workflow_file_path()}
+    ]
     |> Kernel.++(project_hook_env(Map.get(issue_context, :project)))
   end
 
   defp cleared_hook_env do
     [
       "SYMPHONY_WORKFLOW_DIR",
+      "SYMPHONY_WORKFLOW_FILE",
       "SYMPHONY_PROJECT_DIR",
       "SYMPHONY_LINEAR_PROJECT_ID",
       "SYMPHONY_LINEAR_PROJECT_SLUG",

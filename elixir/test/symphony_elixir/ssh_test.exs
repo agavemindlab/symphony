@@ -87,6 +87,29 @@ defmodule SymphonyElixir.SSHTest do
     assert trace =~ "printf ok"
   end
 
+  test "run/3 applies bounded non-interactive connection options when requested" do
+    test_root = Path.join(System.tmp_dir!(), "symphony-ssh-options-test-#{System.unique_integer([:positive])}")
+    trace_file = Path.join(test_root, "ssh.trace")
+    previous_path = System.get_env("PATH")
+
+    on_exit(fn ->
+      restore_env("PATH", previous_path)
+      File.rm_rf(test_root)
+    end)
+
+    install_fake_ssh!(test_root, trace_file)
+
+    assert {:ok, {"", 0}} =
+             SSH.run("worker", "printf ok",
+               batch_mode: true,
+               connect_timeout_seconds: 10,
+               stderr_to_stdout: true
+             )
+
+    trace = File.read!(trace_file)
+    assert trace =~ "-T -o BatchMode=yes -o ConnectTimeout=10 worker bash -lc"
+  end
+
   test "run/3 returns an error when ssh is unavailable" do
     test_root = Path.join(System.tmp_dir!(), "symphony-ssh-missing-test-#{System.unique_integer([:positive])}")
     previous_path = System.get_env("PATH")

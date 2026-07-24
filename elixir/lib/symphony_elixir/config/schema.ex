@@ -263,6 +263,7 @@ defmodule SymphonyElixir.Config.Schema do
     embedded_schema do
       field(:after_create, :string)
       field(:before_run, :string)
+      field(:before_turn, :string)
       field(:after_run, :string)
       field(:before_remove, :string)
       field(:issue_running, :string)
@@ -275,7 +276,16 @@ defmodule SymphonyElixir.Config.Schema do
       schema
       |> cast(
         attrs,
-        [:after_create, :before_run, :after_run, :before_remove, :issue_running, :issue_stopped, :timeout_ms],
+        [
+          :after_create,
+          :before_run,
+          :before_turn,
+          :after_run,
+          :before_remove,
+          :issue_running,
+          :issue_stopped,
+          :timeout_ms
+        ],
         empty_values: []
       )
       |> validate_number(:timeout_ms, greater_than: 0)

@@ -24,6 +24,7 @@ defmodule SymphonyElixir.CoreTest do
     assert config.tracker.terminal_states == ["Closed", "Cancelled", "Canceled", "Duplicate", "Done"]
     assert config.tracker.assignee == nil
     assert config.agent.max_turns == 20
+    assert config.hooks.before_turn == nil
     assert config.hooks.issue_running == nil
     assert config.hooks.issue_stopped == nil
 
@@ -162,8 +163,10 @@ defmodule SymphonyElixir.CoreTest do
     assert is_map(hooks)
     assert Map.get(hooks, "after_create") =~ "project_workflow_dir="
     assert Map.get(hooks, "after_create") =~ "\"$project_workflow_dir/setup.sh\""
-    assert Map.get(hooks, "after_create") =~ "\"$project_workflow_dir/skills\""
-    assert Map.get(hooks, "after_create") =~ ".git/info/exclude"
+    refute Map.get(hooks, "after_create") =~ "ln -s"
+    assert Map.get(hooks, "before_turn") =~ "snapshot-shared-skills.sh"
+    assert Map.get(hooks, "before_turn") =~ "\"$project_workflow_dir/skills\""
+    assert Map.get(hooks, "before_turn") =~ "$SYMPHONY_WORKFLOW_FILE"
     assert Map.get(hooks, "before_remove") =~ "\"$project_workflow_dir/teardown.sh\""
 
     assert String.trim(prompt) != ""
@@ -253,7 +256,9 @@ defmodule SymphonyElixir.CoreTest do
     assert Map.fetch!(tracker, "active_states") == ["Human Review"]
     assert Map.fetch!(tracker, "required_labels") == ["symphony", "symphony:maestro"]
     assert get_in(config, ["workspace", "root"]) == "$SYMPHONY_MAESTRO_WORKSPACE_ROOT"
-    assert get_in(config, ["hooks", "after_create"]) =~ ".codex/skills/maestro"
+    assert get_in(config, ["hooks", "before_turn"]) =~ ".codex/skills/maestro"
+    assert get_in(config, ["hooks", "before_turn"]) =~ "snapshot-shared-skills.sh"
+    assert get_in(config, ["hooks", "before_turn"]) =~ "$SYMPHONY_WORKFLOW_FILE"
 
     assert prompt =~ "apply it directly"
     assert prompt =~ "Read `.agents/skills/maestro/agents/maestro-reviewer.md`"
@@ -860,6 +865,14 @@ defmodule SymphonyElixir.CoreTest do
       assert workflow =~ "/approve"
       assert workflow =~ "/rework"
     end
+  end
+
+  test "lite workflow uses the shared snapshot helper from the canonical workflow" do
+    workflow =
+      File.read!(Path.expand("../workflows/agavemindlab-lite/WORKFLOW.md", File.cwd!()))
+
+    assert workflow =~
+             ~s("$workflow_source_dir/../agavemindlab/snapshot-shared-skills.sh")
   end
 
   test "workflow prompts inject the engine-precomputed routing brief" do

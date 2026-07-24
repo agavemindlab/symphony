@@ -179,6 +179,12 @@ Notes:
   identifier, title, and body.
 - Use `hooks.after_create` to bootstrap a fresh workspace. For a Git-backed repo, you can run
   `git clone ... .` there, along with any other setup commands you need.
+- Use `hooks.before_turn` for inputs that must refresh between Codex turns without changing during
+  a turn. It runs before the first thread starts and before every continuation `turn/start`;
+  failure or timeout prevents that turn from starting.
+- Workspace hooks receive `SYMPHONY_WORKFLOW_DIR` and the exact configured
+  `SYMPHONY_WORKFLOW_FILE`; a timed-out `before_turn` process group is terminated before the runner
+  returns.
 - Use `hooks.issue_running` and `hooks.issue_stopped` to set or clear a tracker-visible
   "currently handled by Symphony" marker. These hooks run from the workflow directory with
   `SYMPHONY_WORKFLOW_DIR`, `SYMPHONY_HOOK_EVENT`, `SYMPHONY_HOOK_REASON`,

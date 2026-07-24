@@ -416,6 +416,9 @@ Fields:
   - Runs before each agent attempt after workspace preparation and before launching the coding
     agent.
   - Failure aborts the current attempt.
+- `before_turn` (multiline shell script string, OPTIONAL)
+  - Runs before the first Codex thread starts and before each continuation `turn/start`.
+  - Failure or timeout prevents the corresponding turn from starting.
 - `after_run` (multiline shell script string, OPTIONAL)
   - Runs after each agent attempt (success, failure, timeout, or cancellation) once the workspace
     exists.
@@ -618,6 +621,7 @@ not require recognizing or validating extension fields unless that extension is 
 - `workspace.root`: path resolved to absolute, default `<system-temp>/symphony_workspaces`
 - `hooks.after_create`: shell script or null
 - `hooks.before_run`: shell script or null
+- `hooks.before_turn`: shell script or null
 - `hooks.after_run`: shell script or null
 - `hooks.before_remove`: shell script or null
 - `hooks.issue_running`: shell script or null
@@ -906,6 +910,7 @@ Supported hooks:
 
 - `hooks.after_create`
 - `hooks.before_run`
+- `hooks.before_turn`
 - `hooks.after_run`
 - `hooks.before_remove`
 - `hooks.issue_running`
@@ -915,6 +920,8 @@ Execution contract:
 
 - Execute in a local shell context appropriate to the host OS, with the workspace directory as
   `cwd`.
+- Workspace hooks receive the configured workflow directory and exact file path in
+  `SYMPHONY_WORKFLOW_DIR` and `SYMPHONY_WORKFLOW_FILE`.
 - Issue-running hooks execute from the workflow directory and receive issue context in
   `SYMPHONY_*` environment variables.
 - Hooks for a Linear issue receive project context when present:
@@ -922,13 +929,15 @@ Execution contract:
   `SYMPHONY_LINEAR_PROJECT_NAME`.
 - On POSIX systems, `sh -lc <script>` (or a stricter equivalent such as `bash -lc <script>`) is a
   conforming default.
-- Hook timeout uses `hooks.timeout_ms`; default: `60000 ms`.
+- Hook timeout uses `hooks.timeout_ms`; default: `60000 ms`. A `before_turn` timeout terminates its
+  hook process group before returning control to the runner.
 - Log hook start, failures, and timeouts.
 
 Failure semantics:
 
 - `after_create` failure or timeout is fatal to workspace creation.
 - `before_run` failure or timeout is fatal to the current run attempt.
+- `before_turn` failure or timeout is fatal before the corresponding Codex turn starts.
 - `after_run` failure or timeout is logged and ignored.
 - `before_remove` failure or timeout is logged and ignored.
 - `issue_running` and `issue_stopped` failure or timeout is logged and ignored.
@@ -1891,6 +1900,9 @@ function run_agent_attempt(issue, attempt, orchestrator_channel):
   if run_hook("before_run", workspace.path) failed:
     fail_worker("before_run hook error")
 
+  if run_hook("before_turn", workspace.path) failed:
+    fail_worker("before_turn hook error")
+
   session = app_server.start_session(workspace=workspace.path)
   if session failed:
     run_hook_best_effort("after_run", workspace.path)
@@ -1900,6 +1912,11 @@ function run_agent_attempt(issue, attempt, orchestrator_channel):
   turn_number = 1
 
   while true:
+    if turn_number > 1 and run_hook("before_turn", workspace.path) failed:
+      app_server.stop_session(session)
+      run_hook_best_effort("after_run", workspace.path)
+      fail_worker("before_turn hook error")
+
     prompt = build_turn_prompt(workflow_template, issue, attempt, turn_number, max_turns)
     if prompt failed:
       app_server.stop_session(session)
@@ -2037,6 +2054,8 @@ Unless otherwise noted, Sections 17.1 through 17.7 are `Core Conformance`. Bulle
 - OPTIONAL workspace population/synchronization errors are surfaced
 - `after_create` hook runs only on new workspace creation
 - `before_run` hook runs before each attempt and failure/timeouts abort the current attempt
+- `before_turn` hook runs before the first thread and every continuation turn; failures/timeouts
+  prevent that turn from starting
 - `after_run` hook runs after each attempt and failure/timeouts are logged and ignored
 - `before_remove` hook runs on cleanup and failures/timeouts are ignored
 - Workspace path sanitization and root containment invariants are enforced before agent launch
@@ -2210,6 +2229,8 @@ Extension config:
 - A remote host SHOULD satisfy the same basic contract as a local worker environment: reachable
   shell, writable workspace root, coding-agent executable, and any required auth or repository
   prerequisites.
+- Hooks receive the configured workflow paths unchanged. A remote host whose hooks read workflow
+  files MUST expose that checkout at the same absolute paths as the orchestrator.
 
 ### A.2 Scheduling Notes
 

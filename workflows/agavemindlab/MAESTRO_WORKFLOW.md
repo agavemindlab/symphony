@@ -47,23 +47,19 @@ hooks:
       "$project_workflow_dir/setup.sh"
     fi
 
-    mkdir -p .agents/skills
-    if [ -d "$project_workflow_dir/skills" ]; then
-      for skill in "$project_workflow_dir"/skills/* "$SYMPHONY_WORKFLOW_DIR"/../../.codex/skills/maestro; do
-        [ -d "$skill" ] || continue
-        name="${skill##*/}"
-        target=".agents/skills/$name"
-        if [ -e "$target" ] || [ -L "$target" ]; then
-          continue
-        fi
-        skill_path="$(cd "$skill" && pwd -P)"
-        ln -s "$skill_path" "$target"
-        if [ -d .git/info ]; then
-          exclude_entry=".agents/skills/$name"
-          grep -Fxq "$exclude_entry" .git/info/exclude 2>/dev/null || printf '%s\n' "$exclude_entry" >> .git/info/exclude
-        fi
-      done
+  before_turn: |
+    set -e
+    : "${SYMPHONY_WORKFLOW_DIR:?SYMPHONY_WORKFLOW_DIR is not set}"
+
+    if [ -f "$SYMPHONY_WORKFLOW_DIR/project-for-linear-project.sh" ]; then
+      . "$SYMPHONY_WORKFLOW_DIR/project-for-linear-project.sh"
     fi
+
+    project_workflow_dir="${SYMPHONY_PROJECT_DIR:-$SYMPHONY_WORKFLOW_DIR}"
+    workflow_source_dir="$(dirname "$(realpath "$SYMPHONY_WORKFLOW_FILE")")"
+    "$workflow_source_dir/snapshot-shared-skills.sh" \
+      "$project_workflow_dir/skills" \
+      "$workflow_source_dir/../../.codex/skills/maestro"
 agent:
   max_concurrent_agents: 5
   max_turns: 1

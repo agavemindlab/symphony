@@ -902,13 +902,15 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     end
   end
 
-  test "config reads issue running and stopped hooks" do
+  test "config reads before-turn, issue-running, and issue-stopped hooks" do
     write_workflow_file!(Workflow.workflow_file_path(),
+      hook_before_turn: "echo before-turn",
       hook_issue_running: "echo running",
       hook_issue_stopped: "echo stopped"
     )
 
     config = Config.settings!()
+    assert String.trim(config.hooks.before_turn) == "echo before-turn"
     assert String.trim(config.hooks.issue_running) == "echo running"
     assert String.trim(config.hooks.issue_stopped) == "echo stopped"
   end
@@ -1583,7 +1585,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
              {:error, {:invalid_linear_project_names, :blank}}
   end
 
-  test "local workspace hooks receive workflow directory from symlinked workflow path" do
+  test "local workspace hooks receive the configured workflow file and directory" do
     test_root =
       Path.join(
         System.tmp_dir!(),
@@ -1594,7 +1596,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       canonical_dir = Path.join(test_root, "agavemindlab")
       project_dir = Path.join(test_root, "symphony")
       canonical_workflow = Path.join(canonical_dir, "WORKFLOW.md")
-      project_workflow = Path.join(project_dir, "WORKFLOW.md")
+      project_workflow = Path.join(project_dir, "CUSTOM_WORKFLOW.md")
       workspace_root = Path.join(test_root, "workspaces")
       before_remove_marker = Path.join(test_root, "before-remove-workflow-dir.txt")
 
@@ -1603,8 +1605,8 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
 
       write_workflow_file!(canonical_workflow,
         workspace_root: workspace_root,
-        hook_after_create: "printf '%s' \"$SYMPHONY_WORKFLOW_DIR\" > after-create-workflow-dir.txt",
-        hook_before_remove: "printf '%s' \"$SYMPHONY_WORKFLOW_DIR\" > #{before_remove_marker}"
+        hook_after_create: "printf '%s\\n%s' \"$SYMPHONY_WORKFLOW_DIR\" \"$SYMPHONY_WORKFLOW_FILE\" > after-create-workflow-dir.txt",
+        hook_before_remove: "printf '%s\\n%s' \"$SYMPHONY_WORKFLOW_DIR\" \"$SYMPHONY_WORKFLOW_FILE\" > #{before_remove_marker}"
       )
 
       File.ln_s!("../agavemindlab/WORKFLOW.md", project_workflow)
@@ -1613,10 +1615,12 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       assert {:ok, workspace} = Workspace.create_for_issue("MT-WORKFLOW-DIR")
 
       assert File.read!(Path.join(workspace, "after-create-workflow-dir.txt")) ==
-               Path.expand(project_dir)
+               Path.expand(project_dir) <> "\n" <> Path.expand(project_workflow)
 
       assert {:ok, _removed} = Workspace.remove(workspace)
-      assert File.read!(before_remove_marker) == Path.expand(project_dir)
+
+      assert File.read!(before_remove_marker) ==
+               Path.expand(project_dir) <> "\n" <> Path.expand(project_workflow)
     after
       File.rm_rf(test_root)
     end
@@ -1638,6 +1642,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
         workspace_root: workspace_root,
         hook_after_create: "printf '%s\\n%s\\n%s\\n' \"$SYMPHONY_LINEAR_PROJECT_ID\" \"$SYMPHONY_LINEAR_PROJECT_SLUG\" \"$SYMPHONY_LINEAR_PROJECT_NAME\" > after-create-project-env.txt",
         hook_before_run: "printf '%s\\n%s\\n%s\\n' \"$SYMPHONY_LINEAR_PROJECT_ID\" \"$SYMPHONY_LINEAR_PROJECT_SLUG\" \"$SYMPHONY_LINEAR_PROJECT_NAME\" > before-run-project-env.txt",
+        hook_before_turn: "printf '%s\\n%s\\n%s\\n' \"$SYMPHONY_LINEAR_PROJECT_ID\" \"$SYMPHONY_LINEAR_PROJECT_SLUG\" \"$SYMPHONY_LINEAR_PROJECT_NAME\" > before-turn-project-env.txt",
         hook_before_remove: "printf '%s\\n%s\\n%s\\n' \"$SYMPHONY_LINEAR_PROJECT_ID\" \"$SYMPHONY_LINEAR_PROJECT_SLUG\" \"$SYMPHONY_LINEAR_PROJECT_NAME\" > #{before_remove_marker}"
       )
 
@@ -1651,11 +1656,15 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
 
       assert {:ok, workspace} = Workspace.create_for_issue(issue)
       assert :ok = Workspace.run_before_run_hook(workspace, issue)
+      assert :ok = Workspace.run_before_turn_hook(workspace, issue)
 
       assert File.read!(Path.join(workspace, "after-create-project-env.txt")) ==
                "project-id\nproject-slug\nProject Name\n"
 
       assert File.read!(Path.join(workspace, "before-run-project-env.txt")) ==
+               "project-id\nproject-slug\nProject Name\n"
+
+      assert File.read!(Path.join(workspace, "before-turn-project-env.txt")) ==
                "project-id\nproject-slug\nProject Name\n"
 
       assert :ok = Workspace.remove_issue_workspaces(issue)
@@ -1714,7 +1723,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     end
   end
 
-  test "canonical workflow installs missing skills and preserves repo-owned skills" do
+  test "canonical workflow snapshots missing skills at turn start and preserves repo-owned skills" do
     test_root =
       Path.join(
         System.tmp_dir!(),
@@ -1736,6 +1745,10 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
 
       canonical_workflow = Path.expand("../workflows/agavemindlab/WORKFLOW.md", File.cwd!())
       canonical_skills = Path.expand("../workflows/agavemindlab/skills", File.cwd!())
+
+      canonical_snapshot =
+        Path.expand("../workflows/agavemindlab/snapshot-shared-skills.sh", File.cwd!())
+
       canonical_dir = Path.join(test_root, "agavemindlab")
       clone_source = Path.join(test_root, "clone-source")
       fake_bin_dir = Path.join(test_root, "bin")
@@ -1748,8 +1761,9 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       File.mkdir_p!(project_dir)
       create_clone_source_repo!(clone_source)
       install_fake_gh!(fake_bin_dir)
-      File.ln_s!(canonical_workflow, Path.join(canonical_dir, "WORKFLOW.md"))
-      File.ln_s!(canonical_skills, Path.join(canonical_dir, "skills"))
+      File.cp!(canonical_workflow, Path.join(canonical_dir, "WORKFLOW.md"))
+      File.cp!(canonical_snapshot, Path.join(canonical_dir, "snapshot-shared-skills.sh"))
+      File.cp_r!(canonical_skills, Path.join(canonical_dir, "skills"))
       File.ln_s!("../agavemindlab/WORKFLOW.md", project_workflow)
       File.ln_s!("../agavemindlab/skills", Path.join(project_dir, "skills"))
 
@@ -1775,6 +1789,12 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
 
       File.chmod!(Path.join(project_dir, "setup.sh"), 0o755)
       File.chmod!(Path.join(project_dir, "teardown.sh"), 0o755)
+      File.chmod!(Path.join(canonical_dir, "snapshot-shared-skills.sh"), 0o755)
+      System.cmd("git", ["-C", test_root, "init", "-b", "main"])
+      System.cmd("git", ["-C", test_root, "config", "user.name", "Test User"])
+      System.cmd("git", ["-C", test_root, "config", "user.email", "test@example.com"])
+      System.cmd("git", ["-C", test_root, "add", "agavemindlab", "symphony"])
+      System.cmd("git", ["-C", test_root, "commit", "-m", "workflow fixture"])
 
       System.put_env(workflow_root_env_var, workspace_root)
       System.put_env("PATH", fake_bin_dir <> ":" <> (previous_path || ""))
@@ -1786,6 +1806,8 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       Workflow.set_workflow_file_path(Path.expand(project_workflow))
 
       assert {:ok, workspace} = Workspace.create_for_issue("MT-SKILL-INSTALL")
+      refute File.exists?(Path.join([workspace, ".agents", "skills", "phase-implementation"]))
+      assert :ok = Workspace.run_before_turn_hook(workspace, "MT-SKILL-INSTALL")
 
       assert File.exists?(Path.join([workspace, ".agents", "skills", "phase-implementation", "SKILL.md"]))
       assert File.exists?(Path.join([workspace, ".agents", "skills", "symphony-commit", "SKILL.md"]))
@@ -1793,6 +1815,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       assert File.read!(Path.join([workspace, ".agents", "skills", "linear", "SKILL.md"])) == "repo version\n"
 
       exclude = File.read!(Path.join([workspace, ".git", "info", "exclude"]))
+      assert exclude =~ ".symphony/"
       assert exclude =~ ".agents/skills/phase-implementation"
       assert exclude =~ ".agents/skills/symphony-commit"
       assert exclude =~ ".agents/skills/symphony-linear"
@@ -2384,6 +2407,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
         workspace_root: workspace_root,
         worker_ssh_hosts: ["worker-01:2200"],
         hook_before_run: "echo before-run",
+        hook_before_turn: "echo before-turn",
         hook_after_run: "echo after-run",
         hook_before_remove: "echo before-remove"
       )
@@ -2400,6 +2424,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       assert Config.settings!().workspace.root == workspace_root
       assert {:ok, ^workspace_path} = Workspace.create_for_issue(issue, "worker-01:2200")
       assert :ok = Workspace.run_before_run_hook(workspace_path, issue, "worker-01:2200")
+      assert :ok = Workspace.run_before_turn_hook(workspace_path, issue, "worker-01:2200")
       assert :ok = Workspace.run_after_run_hook(workspace_path, issue, "worker-01:2200")
       assert :ok = Workspace.remove_issue_workspaces(issue, "worker-01:2200")
 
@@ -2419,6 +2444,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       assert trace =~ "Project"
       assert trace =~ "export SYMPHONY_LINEAR_PROJECT_NAME"
       assert trace =~ "echo before-run"
+      assert trace =~ "echo before-turn"
       assert trace =~ "echo after-run"
       assert trace =~ "echo before-remove"
       assert trace =~ "rm -rf"
