@@ -428,6 +428,30 @@ defmodule SymphonyElixir.CoreTest do
     assert maestro_reviewer =~ "Missing optional reviewer output is an"
   end
 
+  test "escalated implementation guidance names the stopped state and executable routes" do
+    implementation_skill =
+      File.read!(Path.expand("../workflows/agavemindlab/skills/phase-implementation/SKILL.md", File.cwd!()))
+
+    workflow = shared_workflow_prompt() |> String.replace(~r/\s+/, " ")
+
+    assert implementation_skill =~ "workflow 已停止并等待 `Human Review`"
+    assert implementation_skill =~ "由人工将 issue 移至 `In Progress`"
+    assert implementation_skill =~ "回复 `/rework implementation` 并将 issue 移至 `Rework`"
+    assert implementation_skill =~ "继续当前 Implementation review/fix loop"
+    assert implementation_skill =~ "回复 `/rework design` 并将 issue 移至 `Rework`"
+    assert implementation_skill =~ "不要移至 `Merging`"
+    refute implementation_skill =~ "建议回 Design 或继续 Implementation"
+    assert implementation_skill =~ "Maestro only recommends"
+    assert implementation_skill =~ "a human must reactivate the issue"
+    refute implementation_skill =~ "Maestro routes it"
+
+    assert workflow =~
+             "`/rework implementation` or a human-authored move to `In Progress` resumes Implementation"
+
+    assert workflow =~ "`/rework design` targets Design"
+    assert workflow =~ "return the issue to `Human Review` and stop"
+  end
+
   test "cross-phase rollback supersedes stale target-through-awaiting artifacts" do
     workflow = shared_workflow_prompt()
 
