@@ -103,13 +103,23 @@ Maestro OAuth app identity.
    If checkout fails, remove `symphony:maestro` if Linear auth works, then stop.
 3. Identify the current awaiting-review phase artifact and current PR/head when
    one exists. Record that artifact/head and the latest human feedback/state
-   activity as the pre-review snapshot. A prior reply qualifies for
-   deduplication only when it is a Maestro preflight reply, matches the same
+   activity as the pre-review snapshot. A prior reply is a deduplication
+   candidate only when it is a Maestro preflight reply, matches the same
    artifact/head, and no newer human feedback or human-authored state action
-   exists. For a qualifying reply, write no second review. If it carries the
-   auto-rework marker below and the artifact is not `Review verdict: ESCALATED`, retry the `Rework` state update and leave `symphony:maestro`;
-   if it carries the auto-approve marker, retry the `In Progress` state update and leave `symphony:maestro`; otherwise keep
-   `Human Review`, remove the label, and stop.
+   exists. For an ESCALATED judgment card, authenticated means a non-empty
+   `SYMPHONY_MAESTRO_ACTOR_ID`, `user.id == SYMPHONY_MAESTRO_ACTOR_ID`,
+   `user.name == "Maestro"`, `user.app == true`, and no `botActor`; any missing
+   or mismatched provenance is not a deduplication candidate. First select the
+   newest authenticated matching card
+   and require every decision, routing, rationale, direction, and
+   decision-specific field below exactly once, non-empty, and internally
+   consistent. Complete unique card validation precedes deduplication and
+   `symphony:maestro` removal; never fall back to an older valid card. A malformed newest card remains retryable:
+   keep the trigger label and continue
+   with a fresh review that can post a corrected newer card. A completely valid
+   candidate qualifies for deduplication; write no second review. For ordinary request changes, if it carries the auto-rework marker and the artifact is not `Review verdict: ESCALATED`, retry the `Rework` state update and leave `symphony:maestro`;
+   if it carries the auto-approve marker, retry the `In Progress` state update and leave `symphony:maestro`;
+   otherwise keep `Human Review`, remove the label, and stop.
 4. Read `.agents/skills/maestro/agents/maestro-reviewer.md` and apply it directly
    in this fresh preflight session, collecting Linear / GitHub / repository
    evidence plus Codex session transcripts referenced by phase artifact
@@ -124,8 +134,9 @@ Maestro OAuth app identity.
 
 ## Apply The Recommendation
 
-Every reply starts with `🤖 Maestro 预审核:`, includes `建议回复方式` and
-`置信度：<N>/10`, and records the reviewed artifact id and Head. When
+Every reply starts with `🤖 Maestro 预审核:`, records the reviewed artifact id
+and Head, and includes `置信度：<N>/10`. Ordinary replies include
+`建议回复方式`; ESCALATED replies use the judgment card below instead. When
 confidence is below 10/10, name the concrete evidence gap, ambiguity, or risk
 that prevents a higher score and link it to `依据` or `注意`.
 
@@ -139,11 +150,20 @@ that prevents a higher score and link it to `依据` or `注意`.
   Requirements, Design, Implementation, and Deployment review, except an `ESCALATED` Implementation review.
   With auto-rework disabled, leave the issue in `Human Review` and remove the
   label.
-- For `Review verdict: ESCALATED`, require the reviewer recommendation to cite
-  decisive Codex-session events and draft either `/rework implementation ...`,
-  `/rework design ...`, or a human clarification. Never auto-rework it: leave
-  the issue in `Human Review`, remove `symphony:maestro`, and wait for a newer
-  human action.
+- For `Review verdict: ESCALATED`, post a reviewable advisory card with
+  `收敛判断` (`continue implementation`, `rework design`, or
+  `ask clarification`), `建议 target phase`, `建议 issue status`,
+  `执行状态: awaiting human action`, evidence-based `判断理由`, and `下一轮建议方向`.
+  `rework design` also requires `失效的 Design assumption`,
+  `建议修改的机制或边界`, `下一轮 proof / acceptance criteria`, and
+  `不受影响的既有约束`; `ask clarification` requires one
+  `待人工回答的问题` and its `回答判定标准`. The card contains no `/rework ...` draft,
+  `建议回复方式: request changes`, or auto-Rework marker. Never change the issue
+  state for this branch. After posting, re-read that reply by id and apply the
+  same authentication, artifact/Head binding, and complete unique-card checks
+  used for deduplication. Only after the reread proves the new card is
+  authenticated, complete, unique, and bound may you remove `symphony:maestro`
+  and wait for a newer human action; otherwise leave the label and stop.
 - When the recommendation is `approve`, reply in the current artifact thread
   with the reviewer-selected content, artifact id, Head, confidence, and short
   rationale. Only when all hold — `MAESTRO_AUTO_APPROVE` is `true`/`1`; the

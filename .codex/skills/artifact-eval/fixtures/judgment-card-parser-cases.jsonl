@@ -1,0 +1,13 @@
+{"id":"plain","field":"收敛判断","replacement":"收敛判断: continue implementation","accepted":true}
+{"id":"bold","field":"收敛判断","replacement":"**收敛判断**: continue implementation","accepted":true}
+{"id":"single-emphasis","field":"收敛判断","replacement":"*收敛判断*: continue implementation","accepted":true}
+{"id":"case-insensitive-target","field":"建议 target phase","replacement":"建议 target phase: implementation","accepted":true}
+{"id":"case-insensitive-status","field":"建议 issue status","replacement":"建议 issue status: in progress","accepted":true}
+{"id":"case-insensitive-execution","field":"执行状态","replacement":"执行状态: AWAITING HUMAN ACTION","accepted":true}
+{"id":"heading","field":"收敛判断","replacement":"### 收敛判断: continue implementation","accepted":false}
+{"id":"multiline-empty-first-line","field":"收敛判断","replacement":"收敛判断:\ncontinue implementation","accepted":false}
+{"id":"underscore-enum","field":"收敛判断","replacement":"收敛判断: continue_implementation","accepted":false}
+{"id":"hyphen-enum","field":"收敛判断","replacement":"收敛判断: continue-implementation","accepted":false}
+{"id":"fenced","field":"收敛判断","replacement":"```\n收敛判断: continue implementation\n```","accepted":false}
+{"id":"duplicate","field":"收敛判断","replacement":"收敛判断: continue implementation\n收敛判断: continue implementation","accepted":false}
+{"id":"unmatched-emphasis","field":"收敛判断","replacement":"**收敛判断*: continue implementation","accepted":false}

@@ -16,8 +16,58 @@ defmodule SymphonyElixir.PhaseEvents do
   @confidence_label_regex ~r/置信度\s*[:：]?\s*(\d+(?:\.\d+)?)/u
   @marker_decoration_regex ~r/\A[\s>#*_`~-]+/u
   @needs_clarification_regex ~r/(?:\A|\n)\s*###\s+NEEDS CLARIFICATION\b|\[NEEDS CLARIFICATION/iu
+  @judgment_labels ["收敛判断", "建议 target phase", "建议 issue status", "执行状态"]
+  @artifact_id_labels ["Implementation artifact id", "Reviewed Implementation artifact id"]
+  @base_detail_labels ["PR Head", "判断理由", "下一轮建议方向"]
+  @rework_detail_labels [
+    "失效的 Design assumption",
+    "建议修改的机制或边界",
+    "下一轮 proof / acceptance criteria",
+    "不受影响的既有约束"
+  ]
+  @clarification_detail_labels ["待人工回答的问题", "回答判定标准"]
+  @card_labels @judgment_labels ++
+                 @artifact_id_labels ++
+                 @base_detail_labels ++
+                 @rework_detail_labels ++ @clarification_detail_labels
+  @judgment_label_source Enum.map_join(@card_labels, "|", &Regex.escape/1)
+  @line_prefix_source "\\s*(?:[-+>]\\s+)*"
+  @judgment_field_regex Regex.compile!(
+                          "\\A#{@line_prefix_source}(?<label>#{@judgment_label_source}|\\*(?:#{@judgment_label_source})\\*|\\*\\*(?:#{@judgment_label_source})\\*\\*)\\s*[:：]\\s*(?<value>.*?)\\s*\\z",
+                          "iu"
+                        )
+  @fence_regex Regex.compile!(
+                 "\\A#{@line_prefix_source}(?<delimiter>`{3,}|~{3,})(?<suffix>.*)\\z",
+                 "u"
+               )
+  @judgment_values %{
+    "收敛判断" => %{
+      "continue implementation" => "continue_implementation",
+      "rework design" => "rework_design",
+      "ask clarification" => "ask_clarification"
+    },
+    "建议 target phase" => %{
+      "requirements" => "Requirements",
+      "design" => "Design",
+      "implementation" => "Implementation",
+      "deployment" => "Deployment"
+    },
+    "建议 issue status" => %{
+      "in progress" => "In Progress",
+      "rework" => "Rework",
+      "unchanged" => "unchanged"
+    },
+    "执行状态" => %{"awaiting human action" => "awaiting_human_action"}
+  }
+  @convergence_contracts %{
+    "continue_implementation" => {"Implementation", "In Progress"},
+    "rework_design" => {"Design", "Rework"},
+    "ask_clarification" => {"Implementation", "unchanged"}
+  }
 
   @recommendation_markers [
+    {"continue implementation", "continue_implementation"},
+    {"rework design", "rework_design"},
     {"request changes", "request_changes"},
     {"clarification", "ask_clarification"},
     {"merge nudge", "merge_nudge"},
@@ -27,6 +77,9 @@ defmodule SymphonyElixir.PhaseEvents do
   ]
 
   @type comment :: %{
+          optional(:author_id) => String.t() | nil,
+          optional(:author_app) => boolean() | :unknown,
+          optional(:bot_actor_present) => boolean() | :unknown,
           id: String.t(),
           body: String.t(),
           created_at: DateTime.t() | String.t() | nil,
@@ -37,9 +90,10 @@ defmodule SymphonyElixir.PhaseEvents do
         }
   @type event :: map()
 
-  @spec derive([comment()]) :: [event()]
-  def derive(comments) when is_list(comments) do
-    derive_sorted(comments, &comment_events/2)
+  @spec derive([comment()], keyword()) :: [event()]
+  def derive(comments, opts \\ []) when is_list(comments) do
+    maestro_actor_id = Keyword.get(opts, :maestro_actor_id, System.get_env("SYMPHONY_MAESTRO_ACTOR_ID"))
+    derive_sorted(comments, &comment_events(&1, &2, maestro_actor_id))
   end
 
   @doc """
@@ -48,10 +102,12 @@ defmodule SymphonyElixir.PhaseEvents do
   from `derive/1`, whose phase-events-only contract other consumers
   (routing brief, agreement stats) rely on.
   """
-  @spec derive_all([comment()]) :: [event()]
-  def derive_all(comments) when is_list(comments) do
+  @spec derive_all([comment()], keyword()) :: [event()]
+  def derive_all(comments, opts \\ []) when is_list(comments) do
+    maestro_actor_id = Keyword.get(opts, :maestro_actor_id, System.get_env("SYMPHONY_MAESTRO_ACTOR_ID"))
+
     derive_sorted(comments, fn comment, artifact_phases ->
-      comment_events(comment, artifact_phases) ++ human_comment_events(comment)
+      comment_events(comment, artifact_phases, maestro_actor_id) ++ human_comment_events(comment)
     end)
   end
 
@@ -119,29 +175,48 @@ defmodule SymphonyElixir.PhaseEvents do
         do: {id, phase}
   end
 
-  defp comment_events(%{parent_id: nil} = comment, _artifact_phases) do
+  defp comment_events(%{parent_id: nil} = comment, _artifact_phases, _maestro_actor_id) do
     case phase_of_artifact(comment.body) do
       nil -> []
       phase -> [published_event(comment, phase)]
     end
   end
 
-  defp comment_events(%{parent_id: parent_id} = comment, artifact_phases) do
+  defp comment_events(%{parent_id: parent_id} = comment, artifact_phases, maestro_actor_id) do
     case Map.fetch(artifact_phases, parent_id) do
-      {:ok, phase} -> reply_events(comment, phase)
+      {:ok, phase} -> reply_events(comment, phase, maestro_actor_id)
       :error -> []
     end
   end
 
-  defp reply_events(comment, phase) do
+  defp reply_events(comment, phase, maestro_actor_id) do
     case reply_marker(comment.body) do
-      :maestro_review -> [maestro_review_event(comment, phase)]
-      :approved -> [closing_event(comment, phase, "phase_approved")]
-      :auto_advanced -> [closing_event(comment, phase, "phase_auto_advanced")]
-      :reworked -> [rework_event(comment, phase)]
-      :rollback -> [rollback_event(comment, phase)]
-      nil -> []
+      :maestro_review ->
+        if maestro_comment?(comment, maestro_actor_id), do: [maestro_review_event(comment, phase)], else: []
+
+      :approved ->
+        [closing_event(comment, phase, "phase_approved")]
+
+      :auto_advanced ->
+        [closing_event(comment, phase, "phase_auto_advanced")]
+
+      :reworked ->
+        [rework_event(comment, phase)]
+
+      :rollback ->
+        [rollback_event(comment, phase)]
+
+      nil ->
+        []
     end
+  end
+
+  defp maestro_comment?(comment, maestro_actor_id) do
+    is_binary(maestro_actor_id) and String.trim(maestro_actor_id) != "" and
+      Map.get(comment, :author_id) == maestro_actor_id and
+      Map.get(comment, :author_name) == "Maestro" and
+      Map.get(comment, :author_app) == true and
+      Map.get(comment, :bot_actor_present) == false
   end
 
   defp human_comment_events(%{author_is_bot: false} = comment) do
@@ -211,24 +286,147 @@ defmodule SymphonyElixir.PhaseEvents do
   end
 
   defp maestro_review_event(comment, phase) do
-    %{
-      event_type: "maestro_review",
-      event_id: "maestro_review:" <> comment.id,
-      phase: phase,
-      artifact_comment_id: comment.parent_id,
-      recommendation: maestro_recommendation(comment.body),
-      confidence: maestro_confidence(comment.body),
-      auto: String.contains?(comment.body, "🤖 auto"),
-      comment_id: comment.id,
-      occurred_at: occurred_at(comment.created_at)
-    }
+    judgment_fields = judgment_fields(comment.body)
+
+    Map.merge(
+      %{
+        event_type: "maestro_review",
+        event_id: "maestro_review:" <> comment.id,
+        phase: phase,
+        artifact_comment_id: comment.parent_id,
+        recommendation: maestro_recommendation(comment.body, judgment_fields, comment.parent_id),
+        confidence: maestro_confidence(comment.body),
+        auto: String.contains?(comment.body, "🤖 auto"),
+        comment_id: comment.id,
+        occurred_at: occurred_at(comment.created_at)
+      },
+      maestro_judgment_fields(judgment_fields)
+    )
   end
 
-  defp maestro_recommendation(body) do
+  defp maestro_judgment_fields(fields) do
+    if Enum.any?(fields, &match?({"收敛判断", _value}, &1)) do
+      %{
+        target_phase: judgment_value(fields, "建议 target phase"),
+        target_status: judgment_value(fields, "建议 issue status"),
+        execution_state: judgment_value(fields, "执行状态")
+      }
+    else
+      %{}
+    end
+  end
+
+  defp judgment_fields(body) do
     body
     |> String.split("\n")
-    |> Enum.find_value("unknown", &recommendation_from_line/1)
+    |> Enum.reduce({nil, []}, fn line, {open_fence, fields} ->
+      cond do
+        fence = fence(line) ->
+          {next_open_fence(open_fence, fence), fields}
+
+        open_fence ->
+          {open_fence, fields}
+
+        captures = Regex.named_captures(@judgment_field_regex, line) ->
+          label = String.trim(captures["label"], "*")
+          {nil, [{label, captures["value"]} | fields]}
+
+        true ->
+          {nil, fields}
+      end
+    end)
+    |> elem(1)
+    |> Enum.reverse()
   end
+
+  defp fence(line) do
+    case Regex.named_captures(@fence_regex, line) do
+      %{"delimiter" => delimiter, "suffix" => suffix} ->
+        {String.first(delimiter), String.length(delimiter), suffix}
+
+      nil ->
+        nil
+    end
+  end
+
+  defp fence_closes?({character, minimum_length}, {character, length, suffix}),
+    do: length >= minimum_length and String.trim(suffix) == ""
+
+  defp fence_closes?(_open_fence, _fence), do: false
+  defp opening_fence({character, length, _suffix}), do: {character, length}
+
+  defp next_open_fence(open_fence, fence),
+    do: if(fence_closes?(open_fence, fence), do: nil, else: open_fence || opening_fence(fence))
+
+  defp judgment_value(fields, label) do
+    case Enum.filter(fields, &match?({^label, _value}, &1)) do
+      [{^label, value}] ->
+        @judgment_values
+        |> Map.fetch!(label)
+        |> Map.get(String.downcase(value))
+
+      _other ->
+        nil
+    end
+  end
+
+  defp maestro_recommendation(body, fields, artifact_comment_id) do
+    recommendations =
+      if Enum.any?(@judgment_labels, &String.contains?(body, &1)) do
+        [convergence_recommendation(fields, artifact_comment_id)]
+      else
+        body |> String.split("\n") |> Enum.map(&recommendation_from_line/1)
+      end
+      |> Enum.reject(&is_nil/1)
+
+    case recommendations do
+      [recommendation] -> recommendation
+      _other -> "unknown"
+    end
+  end
+
+  defp convergence_recommendation(fields, artifact_comment_id) do
+    recommendation = judgment_value(fields, "收敛判断")
+
+    if Map.get(@convergence_contracts, recommendation) ==
+         {judgment_value(fields, "建议 target phase"), judgment_value(fields, "建议 issue status")} and
+         judgment_value(fields, "执行状态") == "awaiting_human_action" and
+         complete_card_details?(fields, recommendation, artifact_comment_id),
+       do: recommendation
+  end
+
+  defp complete_card_details?(fields, recommendation, artifact_comment_id) do
+    exact_artifact_id_matches?(fields, artifact_comment_id) and
+      Enum.all?(@base_detail_labels, &exact_nonempty_field?(fields, &1)) and
+      Enum.all?(decision_detail_labels(recommendation), &exact_nonempty_field?(fields, &1))
+  end
+
+  defp exact_artifact_id_matches?(fields, artifact_comment_id) do
+    case Enum.filter(fields, fn {label, _value} -> label in @artifact_id_labels end) do
+      [{_label, value}] -> normalize_artifact_id(value) == artifact_comment_id
+      _other -> false
+    end
+  end
+
+  defp normalize_artifact_id(value) do
+    value = String.trim(value)
+
+    case Regex.run(~r/\A`([^`]+)`\z/u, value, capture: :all_but_first) do
+      [artifact_id] -> artifact_id
+      nil -> if String.contains?(value, "`"), do: nil, else: value
+    end
+  end
+
+  defp exact_nonempty_field?(fields, label) do
+    case Enum.filter(fields, &match?({^label, _value}, &1)) do
+      [{^label, value}] -> String.trim(value) != ""
+      _other -> false
+    end
+  end
+
+  defp decision_detail_labels("rework_design"), do: @rework_detail_labels
+  defp decision_detail_labels("ask_clarification"), do: @clarification_detail_labels
+  defp decision_detail_labels(_recommendation), do: []
 
   defp recommendation_from_line(line) do
     if String.contains?(line, "建议回复方式") do

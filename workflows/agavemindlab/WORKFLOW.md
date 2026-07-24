@@ -267,6 +267,35 @@ Symphony only starts the agent when the issue is in an active state (`Todo`, `In
    - Identify the phase awaiting review = the most recent unresolved artifact with no closing reply. A closing reply closes the artifact for routing but does not by itself make it expired; do not resolve it unless the rework protocols below say to. The workpad `current_phase` should already name the awaiting phase; if the workpad is absent (brand-new branch), infer it as the most recent unresolved phase artifact without a closing reply. No artifacts at all → target phase is Requirements, go to step 6.
    - Gather new human feedback from two places: (a) replies in each unresolved Phase artifact's thread, including phase-closed artifacts in the current chain; inspect each artifact's `children` / thread replies first, and (b) standalone top-level **human** comments on the issue that are not replies to any artifact. When reading Linear comments, retain each comment's `parent { id }`; Linear may also return replies in `comments.nodes`, so never treat a parented reply node as standalone top-level feedback. A reply's feedback keeps the phase intent of that artifact. Exclude agent-authored `## 建议新建 issue` proposal comments — those are the consent channel handled by the first bullet, not feedback. Scan **every** unresolved artifact, not just the awaiting-review one — humans request cross-phase rework by commenting on the artifact they want changed (e.g. feedback on `## Design` while `## Implementation` awaits review). "New" = newer than the agent's last closing reply on that artifact (or, for standalone comments, newer than the agent's last action). Attribute each standalone comment to the phase it discusses; if unclear, assume the awaiting-review phase. If a comment refers back to an earlier round ("上次"/"之前提到的"), pull the specific resolved comment it points to per the `symphony-linear` skill's back-reference exception.
    - Gather the auto-rework signal separately from human feedback. It qualifies only when the issue is `Rework`, the Maestro-authored reply matches the current reviewed artifact/head, contains both `建议回复方式: request changes` and `🤖 auto: 已自动将 issue 置为 Rework`, and its `建议回复` starts with `/rework <phase>`. All other Maestro replies are advisory. An awaiting Implementation artifact with `Review verdict: ESCALATED` can never qualify, even if a legacy reply carries that marker.
+   - For an awaiting Implementation artifact with `Review verdict: ESCALATED`,
+     select the newest judgment card attributed by Linear to the configured
+     Maestro OAuth app: require non-empty `SYMPHONY_MAESTRO_ACTOR_ID`,
+     `user.id == SYMPHONY_MAESTRO_ACTOR_ID`, `user.app == true`, no `botActor`,
+     and `user.name == "Maestro"`; a matching body from any other principal is
+     not a Maestro card. Missing configuration fails closed. The card must also match the current
+     Implementation artifact id and PR Head. The card qualifies only when
+     `收敛判断`, `建议 target phase`, `建议 issue status`,
+     `执行状态: awaiting human action`, `判断理由`, and
+     `下一轮建议方向` each appear exactly once, are non-empty, and match
+     the documented decision/status mapping. `rework design` additionally
+     requires `失效的 Design assumption`, `建议修改的机制或边界`,
+     `下一轮 proof / acceptance criteria`, and `不受影响的既有约束`;
+     `ask clarification` requires one question and answer criterion.
+     Missing, duplicate, contradictory, or incomplete card fields fail closed.
+     On demand,
+     fully paginate Linear `Issue.history` for state changes after that valid
+     card, including `createdAt`, `fromState`, `toState`,
+     `actor { id name app }`, and `botActor { id name type subType }`. A state
+     action is human only when the latest direct `Human Review` → current-state transition
+     is the newest row that produced the current state, has a complete actor id
+     for audit, has `actor.app == false`, and has no `botActor`. Do not compare `actor.id`
+     with the Maestro card author, Implementation artifact author, or
+     an allowlist: Linear attributes a service using a user-actor token as that
+     regular user and cannot distinguish that token from the same user's UI
+     action. App and bot provenance remain fail-closed;
+     normal Symphony is not dispatched while the issue remains in `Human Review`.
+     Missing or ambiguous provenance fails closed. Do not add this
+     query to ordinary routing or engine precomputation.
    - When the awaiting-review phase is Implementation, the **PR is also a feedback channel** — but only for **human** reviewers. Humans often leave change requests as GitHub PR review comments instead of repeating them on Linear; gather new human PR review comments / inline threads / review states and treat them as feedback targeting Implementation. Bot / automated reviews (e.g. the configured `AUTOMATED_REVIEWER`) are **not** human intent: a bot approval never counts as a human approval, and a bot's comments are addressed by the Implementation PR feedback sweep, not by this intent check. Identify the author of each PR review/comment and drop bot ones before judging intent.
    - Note the Linear state (`In Progress` vs `Rework`).
 
@@ -279,13 +308,33 @@ Symphony only starts the agent when the issue is in an active state (`Todo`, `In
    **If the awaiting-review artifact still carries an unresolved clarification gate** (`### NEEDS CLARIFICATION`, or the legacy `[NEEDS CLARIFICATION]` marker) (the phase stopped on its blocked path, not for ordinary review), a new human reply in its thread is an **answer to that question**, not an approval or a new change request. Target phase = the current (awaiting-review) phase; do **not** write an approval reply. Re-open that phase's skill, which follows its own "On resume" path: fold each answer into a revised artifact, drop the resolved gate, and decide the phase exit again. When the revised artifact needs review, publication follows the same-phase Rework cycle even if the Linear state is `In Progress`: resolve the old artifact, post a fresh top-level artifact, and put the clarification summary on the new artifact; do not `commentUpdate` the old artifact. If an answer does not actually resolve a gate, the skill keeps it open, refines the question, and stops again (its "When blocked" / "On resume" defines the re-ask and the two-round escalation). This branch takes precedence over the intent read below.
 
    **ESCALATED human gate — run before every remaining intent rule.** When the
-   awaiting Implementation artifact has `Review verdict: ESCALATED`, ignore
-   every Maestro-authored reply as advisory, even if it says request changes,
-   carries an old machine disposition, or already moved the issue to an active
-   state. Require a newer human action: `/rework implementation` or a
-   human-authored move to `In Progress` resumes Implementation; `/rework design`
-   targets Design. Without that human action, return the issue to `Human Review`
-   and stop. Never treat `ESCALATED` as approval or open Deployment.
+   awaiting Implementation artifact has `Review verdict: ESCALATED`, the
+   Maestro card is advisory and cannot cross the gate. Preserve newer explicit
+   human comments and slash commands as the existing higher-fidelity intent channel;
+   apply the existing last-agent-action watermark below to them before using a
+   status-only mapping. A later card does not stale those comments; only status
+   actions must be newer than the valid card.
+   Otherwise consume only a current matching card followed by a newer proven
+   human state action:
+   - human `In Progress` + `continue implementation` → target Implementation;
+     copy the card's `判断理由` and `下一轮建议方向` into the workpad rework notes.
+   - human `Rework` + `rework design` → target Design through the existing
+     Cross-phase rework protocol; copy the invalid Design assumption, changed
+     mechanism/boundary, requested proof / acceptance criteria, preserved
+     constraints, and next-round direction into the workpad.
+   - `ask clarification` stays in `Human Review` while unanswered. A newer human
+     answer in the current artifact thread plus a proven human move to
+     `In Progress` resumes Implementation with the question and answer recorded
+     in the workpad.
+
+   A stale artifact/head, mismatched card/status, unreadable or partially
+   paginated history, missing action actor identity, `actor.app == true`, any
+   `botActor`, or a non-Human-Review origin returns the issue to `Human Review`
+   and stops. Before that fail-closed state write, perform a final live re-read
+   of the current state, relevant comment watermark, and fully paginated state
+   history; if any changed, discard the stale write and route from the new
+   evidence. Never treat a Maestro or integration state write as human approval.
+   Never treat `ESCALATED` as approval or open Deployment.
 
    **Maestro auto-rework.** When the qualifying signal from step 4 exists,
    route its `/rework <phase> ...` draft literally as a change request without

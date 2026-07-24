@@ -266,10 +266,11 @@ defmodule SymphonyElixir.CoreTest do
     assert prompt =~ "evidence"
     assert prompt =~ "Maestro OAuth app"
     assert prompt =~ "remove `symphony:maestro`"
-    assert prompt =~ "reviewer recommendation"
-    assert prompt =~ "/rework implementation"
-    assert prompt =~ "/rework design"
+    assert prompt =~ "judgment card"
+    assert prompt =~ "收敛判断"
+    assert prompt =~ "执行状态: awaiting human action"
     assert prompt =~ "Apply review state transitions"
+    assert prompt =~ "MAESTRO_AUTO_APPROVE"
     assert prompt =~ "MAESTRO_AUTO_REWORK"
     assert prompt =~ "🤖 auto: 已自动将 issue 置为 Rework"
     assert prompt =~ "Review verdict: ESCALATED"
@@ -409,7 +410,7 @@ defmodule SymphonyElixir.CoreTest do
     refute implementation_skill =~ "target_ordinal"
 
     assert workflow =~ "ESCALATED human gate"
-    assert workflow =~ "every Maestro-authored reply as advisory"
+    assert workflow =~ "Maestro card is advisory and cannot cross the gate"
     assert workflow =~ "Maestro auto-rework"
     assert workflow =~ "🤖 auto: 已自动将 issue 置为 Rework"
 
@@ -426,6 +427,96 @@ defmodule SymphonyElixir.CoreTest do
     assert maestro_workflow =~ "except an `ESCALATED` Implementation review"
     assert maestro_reviewer =~ "current-turn Codex session"
     assert maestro_reviewer =~ "Missing optional reviewer output is an"
+  end
+
+  test "ESCALATED Maestro emits an advisory judgment and routes only an attributable human state action" do
+    workflow = shared_workflow_prompt()
+
+    project_defaults =
+      File.read!(Path.expand("../workflows/agavemindlab/project.env.defaults", File.cwd!()))
+
+    maestro_workflow =
+      File.read!(Path.expand("../workflows/agavemindlab/MAESTRO_WORKFLOW.md", File.cwd!()))
+
+    maestro_reviewer =
+      File.read!(Path.expand("../.codex/skills/maestro/agents/maestro-reviewer.md", File.cwd!()))
+
+    maestro_skill =
+      File.read!(Path.expand("../.codex/skills/maestro/SKILL.md", File.cwd!()))
+
+    normalized_workflow = String.replace(workflow, ~r/\s+/, " ")
+    normalized_maestro_workflow = String.replace(maestro_workflow, ~r/\s+/, " ")
+
+    for prompt <- [maestro_reviewer, maestro_skill, maestro_workflow] do
+      assert prompt =~ "收敛判断"
+      assert prompt =~ "continue implementation"
+      assert prompt =~ "rework design"
+      assert prompt =~ "ask clarification"
+      assert prompt =~ "建议 target phase"
+      assert prompt =~ "建议 issue status"
+      assert prompt =~ "awaiting human action"
+      assert prompt =~ "判断理由"
+      assert prompt =~ "下一轮建议方向"
+      assert prompt =~ "待人工回答的问题"
+      assert prompt =~ "回答判定标准"
+    end
+
+    assert maestro_reviewer =~ "`continue implementation` to Implementation / `In Progress`"
+    assert maestro_reviewer =~ "to Design / `Rework`"
+    assert maestro_reviewer =~ "`ask clarification` to Implementation / `unchanged`"
+
+    for prompt <- [maestro_reviewer, maestro_skill, maestro_workflow] do
+      assert prompt =~ "失效的 Design assumption"
+      assert prompt =~ "建议修改的机制或边界"
+      assert prompt =~ "下一轮 proof / acceptance criteria"
+      assert prompt =~ "不受影响的既有约束"
+    end
+
+    assert maestro_workflow =~ "contains no `/rework"
+    assert normalized_maestro_workflow =~ "Never change the issue state"
+    assert maestro_workflow =~ "ordinary request changes"
+    refute maestro_workflow =~ "/rework implementation"
+    refute maestro_workflow =~ "/rework design"
+    refute maestro_reviewer =~ "/rework implementation"
+    refute maestro_reviewer =~ "/rework design"
+
+    assert workflow =~ "Issue.history"
+    assert normalized_workflow =~ "configured Maestro OAuth app"
+    assert workflow =~ "`user.id == SYMPHONY_MAESTRO_ACTOR_ID`"
+    assert workflow =~ "Missing configuration fails closed"
+    assert workflow =~ "`user.app == true`"
+    assert workflow =~ "`user.name == \"Maestro\"`"
+    assert normalized_workflow =~ "a matching body from any other"
+    assert workflow =~ "`actor.app == false`"
+    assert workflow =~ "has no `botActor`"
+    assert workflow =~ "Do not compare `actor.id`"
+    assert workflow =~ "latest direct `Human Review` → current-state transition"
+    assert workflow =~ "final live re-read"
+    refute workflow =~ "differs from the Maestro card author's actor id"
+    refute workflow =~ "differs from the current Implementation artifact author's actor id"
+    assert project_defaults =~ ~r/SYMPHONY_MAESTRO_ACTOR_ID="[0-9a-f-]{36}"/
+    assert workflow =~ "using a user-actor token"
+    assert normalized_workflow =~ "match the current Implementation artifact id and PR Head"
+    assert workflow =~ "exactly once"
+    assert workflow =~ "Missing, duplicate, contradictory, or incomplete card fields fail closed"
+    assert workflow =~ "human `In Progress` + `continue implementation`"
+    assert workflow =~ "human `Rework` + `rework design`"
+    assert workflow =~ "copy the card's `判断理由` and `下一轮建议方向`"
+    assert normalized_workflow =~ "existing Cross-phase rework protocol"
+    assert workflow =~ "Missing or ambiguous provenance fails closed"
+    assert maestro_workflow =~ "Complete unique card validation precedes deduplication"
+    assert maestro_workflow =~ "newest authenticated matching card"
+    assert maestro_workflow =~ ~r/non-empty\s+`SYMPHONY_MAESTRO_ACTOR_ID`/
+    assert maestro_workflow =~ "`user.id == SYMPHONY_MAESTRO_ACTOR_ID`"
+    assert maestro_workflow =~ "`user.app == true`"
+    assert maestro_workflow =~ "no `botActor`"
+    assert maestro_workflow =~ "A malformed newest card remains retryable"
+
+    assert maestro_workflow =~
+             ~r/Only after the reread proves the new card is\s+authenticated, complete, unique, and bound/
+
+    assert normalized_workflow =~
+             "Never treat a Maestro or integration state write as human approval"
   end
 
   test "cross-phase rollback supersedes stale target-through-awaiting artifacts" do
@@ -795,7 +886,10 @@ defmodule SymphonyElixir.CoreTest do
     end
 
     assert maestro_workflow =~
-             ~r/Every reply starts with `🤖 Maestro 预审核:`, includes `建议回复方式` and\s+`置信度：<N>\/10`/
+             ~r/Every reply starts with `🤖 Maestro 预审核:`, records the reviewed artifact id\s+and Head, and includes `置信度：<N>\/10`/
+
+    assert maestro_workflow =~ "Ordinary replies include"
+    assert maestro_workflow =~ "ESCALATED replies use the judgment card"
 
     refute maestro_workflow =~ "(when available) `置信度：<N>/10`"
     assert reviewer =~ "`置信度`: `N/10`"
@@ -1132,7 +1226,9 @@ defmodule SymphonyElixir.CoreTest do
     assert reviewer =~ "mutate Linear, GitHub, files, or issue state"
     refute reviewer =~ "MAESTRO_AUTO_REWORK"
     assert skill =~ "MAESTRO_AUTO_REWORK"
-    assert skill =~ "except an `ESCALATED` Implementation review"
+    assert skill =~ "Ordinary Maestro `request changes` pre-reviews auto-execute"
+    assert skill =~ "`ESCALATED` never appends that marker or changes state"
+    refute skill =~ "except an `ESCALATED` Implementation review: they append"
   end
 
   test "linear api token resolves from LINEAR_API_KEY env var" do

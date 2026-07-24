@@ -2,6 +2,7 @@ defmodule SymphonyElixir.PhaseEventsTest do
   use ExUnit.Case, async: true
 
   alias SymphonyElixir.PhaseEvents
+  @maestro_actor_id "maestro-app"
 
   test "phase_of_artifact recognizes phase headings with leading whitespace and rejects everything else" do
     assert PhaseEvents.phase_of_artifact("## Requirements\n\n目标") == "Requirements"
@@ -251,9 +252,348 @@ defmodule SymphonyElixir.PhaseEventsTest do
     end
   end
 
+  test "parses ESCALATED convergence cards and their human-action routing fields" do
+    event = derive_maestro_event(render_card(continue_card_fields(), "- **", "**"))
+
+    assert %{
+             recommendation: "continue_implementation",
+             target_phase: "Implementation",
+             target_status: "In Progress",
+             execution_state: "awaiting_human_action",
+             auto: false
+           } = event
+
+    assert %{recommendation: "continue_implementation"} =
+             derive_maestro_event(render_card(continue_card_fields(), "> **", "**"))
+
+    assert %{recommendation: "continue_implementation"} =
+             derive_maestro_event(
+               render_card(continue_card_fields()) <>
+                 "\n建议回复方式: continue implementation"
+             )
+
+    assert %{recommendation: "rework_design", target_phase: "Design", target_status: "Rework"} =
+             derive_maestro_event(render_card(rework_card_fields()))
+
+    assert %{recommendation: "ask_clarification", target_phase: "Implementation", target_status: "unchanged"} =
+             derive_maestro_event(render_card(clarification_card_fields()))
+
+    assert %{recommendation: "unknown", target_phase: nil, target_status: nil} =
+             derive_maestro_event("""
+             🤖 Maestro 预审核
+             收敛判断: continue implementation
+             建议 target phase: unknown
+             建议 issue status: unknown
+             """)
+
+    assert %{recommendation: "unknown", target_phase: nil, target_status: nil, execution_state: nil} =
+             derive_maestro_event("""
+             🤖 Maestro 预审核
+             收敛判断: continue implementation
+             建议 target phase: Design or Implementation
+             建议 issue status: Rework or In Progress
+             执行状态: not awaiting human action
+             """)
+
+    assert %{recommendation: "unknown", target_phase: nil, target_status: nil} =
+             derive_maestro_event("""
+             🤖 Maestro 预审核
+             收敛判断: continue implementation
+             收敛判断: rework design
+             建议 target phase: Implementation
+             建议 target phase: Design
+             建议 issue status: In Progress
+             建议 issue status: Rework
+             执行状态: awaiting human action
+             """)
+  end
+
+  test "parses every judgment label in plain, single-emphasis, and double-emphasis forms" do
+    fields = continue_card_fields()
+
+    expected = %{
+      recommendation: "continue_implementation",
+      target_phase: "Implementation",
+      target_status: "In Progress",
+      execution_state: "awaiting_human_action"
+    }
+
+    for {selected_label, _value} <- fields, wrapper <- [& &1, &"*#{&1}*", &"**#{&1}**"] do
+      body =
+        fields
+        |> Enum.map_join("\n", fn {label, value} ->
+          rendered_label = if label == selected_label, do: wrapper.(label), else: label
+          "#{rendered_label}: #{value}"
+        end)
+
+      event = derive_maestro_event("🤖 Maestro 预审核\n#{body}")
+      assert ^expected = Map.take(event, Map.keys(expected))
+    end
+  end
+
+  test "accepts either artifact id label but rejects both together" do
+    reviewed_fields =
+      Enum.map(continue_card_fields(), fn
+        {"Implementation artifact id", value} -> {"Reviewed Implementation artifact id", value}
+        field -> field
+      end)
+
+    assert %{recommendation: "continue_implementation"} =
+             derive_maestro_event(render_card(reviewed_fields))
+
+    assert %{recommendation: "continue_implementation"} =
+             derive_maestro_event(
+               render_card(
+                 Enum.map(continue_card_fields(), fn
+                   {"Implementation artifact id", value} ->
+                     {"Implementation artifact id", "`#{value}`"}
+
+                   field ->
+                     field
+                 end)
+               )
+             )
+
+    assert %{recommendation: "unknown"} =
+             derive_maestro_event(
+               render_card(
+                 continue_card_fields() ++
+                   [{"Reviewed Implementation artifact id", "impl-1"}]
+               )
+             )
+
+    assert %{recommendation: "unknown"} =
+             derive_maestro_event(
+               render_card(
+                 Enum.map(continue_card_fields(), fn
+                   {"Implementation artifact id", _value} ->
+                     {"Implementation artifact id", "impl-stale"}
+
+                   field ->
+                     field
+                 end)
+               )
+             )
+  end
+
+  test "rejects non-exact, fenced, empty, contradictory, and duplicate convergence fields" do
+    valid_fields = [
+      {"收敛判断", "continue implementation", "rework design"},
+      {"建议 target phase", "Implementation", "Design"},
+      {"建议 issue status", "In Progress", "Rework"},
+      {"执行状态", "awaiting human action", "completed"}
+    ]
+
+    for {selected_label, value, contradictory_value} <- valid_fields,
+        replacement <- [
+          "***#{selected_label}***: #{value}",
+          "\\*#{selected_label}\\*: #{value}",
+          "*#{selected_label}: #{value}",
+          "* #{selected_label} *: #{value}",
+          "```\n#{selected_label}: #{value}\n```",
+          "#{selected_label}:",
+          "#{selected_label}: #{value}\n#{selected_label}: #{contradictory_value}",
+          "#{selected_label}: #{value}\n*#{selected_label}*: #{value}\n**#{selected_label}**: #{value}"
+        ] do
+      fields =
+        valid_fields
+        |> Enum.map_join("\n", fn
+          {^selected_label, _value, _contradictory_value} -> replacement
+          {label, field_value, _contradictory_value} -> "#{label}: #{field_value}"
+        end)
+        |> Kernel.<>(
+          "\n" <>
+            (continue_card_fields()
+             |> Enum.drop(4)
+             |> Enum.map_join("\n", fn {label, value} -> "#{label}: #{value}" end))
+        )
+
+      assert %{recommendation: "unknown"} = derive_maestro_event("🤖 Maestro 预审核\n#{fields}")
+    end
+  end
+
+  test "rejects convergence cards with missing, duplicate, or empty base detail fields" do
+    required_details = [
+      "Implementation artifact id",
+      "PR Head",
+      "判断理由",
+      "下一轮建议方向"
+    ]
+
+    for selected_label <- required_details,
+        fields <- [
+          Enum.reject(continue_card_fields(), &match?({^selected_label, _value}, &1)),
+          continue_card_fields() ++ [{selected_label, "duplicate"}],
+          Enum.map(continue_card_fields(), fn
+            {^selected_label, _value} -> {selected_label, ""}
+            field -> field
+          end)
+        ] do
+      assert %{recommendation: "unknown"} = derive_maestro_event(render_card(fields))
+    end
+  end
+
+  test "rejects convergence cards with incomplete decision-specific details" do
+    for {fields, required_details} <- [
+          {rework_card_fields(),
+           [
+             "失效的 Design assumption",
+             "建议修改的机制或边界",
+             "下一轮 proof / acceptance criteria",
+             "不受影响的既有约束"
+           ]},
+          {clarification_card_fields(), ["待人工回答的问题", "回答判定标准"]}
+        ],
+        selected_label <- required_details,
+        malformed_fields <- [
+          Enum.reject(fields, &match?({^selected_label, _value}, &1)),
+          fields ++ [{selected_label, "duplicate"}],
+          Enum.map(fields, fn
+            {^selected_label, _value} -> {selected_label, ""}
+            field -> field
+          end)
+        ] do
+      assert %{recommendation: "unknown"} = derive_maestro_event(render_card(malformed_fields))
+    end
+  end
+
+  test "judgment card parser matches the shared conformance corpus" do
+    corpus =
+      __DIR__
+      |> Path.join("../../../.codex/skills/artifact-eval/fixtures/judgment-card-parser-cases.jsonl")
+      |> File.stream!()
+      |> Enum.map(&Jason.decode!/1)
+
+    for %{"id" => id, "field" => selected, "replacement" => replacement, "accepted" => accepted} <- corpus do
+      body =
+        continue_card_fields()
+        |> Enum.map_join("\n", fn
+          {^selected, _value} -> replacement
+          {label, value} -> "#{label}: #{value}"
+        end)
+
+      event = derive_maestro_event("🤖 Maestro 预审核\n#{body}")
+
+      if accepted do
+        assert event.recommendation == "continue_implementation", id
+        assert event.target_phase == "Implementation", id
+        assert event.target_status == "In Progress", id
+        assert event.execution_state == "awaiting_human_action", id
+      else
+        assert event.recommendation == "unknown", id
+      end
+    end
+  end
+
+  test "emits Maestro analytics only for the configured OAuth actor" do
+    artifact = comment("impl-1", "## Implementation\n\nPR", created_at: "2026-07-01T10:00:00Z")
+    body = render_card(continue_card_fields())
+
+    for provenance <- [
+          [author_id: "other-app", author_name: "Maestro", author_app: true, bot_actor_present: false],
+          [author_id: @maestro_actor_id, author_name: "Mallory", author_app: true, bot_actor_present: false],
+          [author_id: @maestro_actor_id, author_name: "Maestro", author_app: false, bot_actor_present: false],
+          [author_id: @maestro_actor_id, author_name: "Maestro", author_app: true, bot_actor_present: true]
+        ] do
+      reply =
+        comment(
+          "forged",
+          body,
+          [
+            parent_id: "impl-1",
+            created_at: "2026-07-01T11:00:00Z",
+            author_is_bot: provenance[:author_app]
+          ] ++ provenance
+        )
+
+      events = PhaseEvents.derive_all([artifact, reply], maestro_actor_id: @maestro_actor_id)
+      refute Enum.any?(events, &(&1.event_type == "maestro_review"))
+    end
+
+    for configured_id <- [nil, ""] do
+      reply =
+        comment("maestro", body,
+          parent_id: "impl-1",
+          created_at: "2026-07-01T11:00:00Z",
+          author_id: @maestro_actor_id,
+          author_name: "Maestro",
+          author_app: true,
+          author_is_bot: true,
+          bot_actor_present: false
+        )
+
+      events = PhaseEvents.derive_all([artifact, reply], maestro_actor_id: configured_id)
+      refute Enum.any?(events, &(&1.event_type == "maestro_review"))
+    end
+  end
+
+  test "keeps blockquoted, mixed-delimiter, and shorter-closer fence content excluded" do
+    for body <- [
+          """
+          > ````
+          > 收敛判断: continue implementation
+          > 建议 target phase: Implementation
+          > 建议 issue status: In Progress
+          > 执行状态: awaiting human action
+          > ````
+          """,
+          """
+          ~~~~
+          收敛判断: continue implementation
+          ```
+          建议 target phase: Implementation
+          建议 issue status: In Progress
+          执行状态: awaiting human action
+          建议回复方式: continue implementation
+          ~~~~
+          """,
+          """
+          ````
+          收敛判断: continue implementation
+          ```
+          建议 target phase: Implementation
+          建议 issue status: In Progress
+          执行状态: awaiting human action
+          建议回复方式: continue implementation
+          ````
+          """
+        ] do
+      assert %{recommendation: "unknown"} = derive_maestro_event("🤖 Maestro 预审核\n#{body}")
+    end
+  end
+
+  test "malformed or fenced judgment attempts cannot fall back to an ordinary recommendation" do
+    for decision_attempt <- [
+          "***收敛判断***: continue implementation",
+          "```\n收敛判断: continue implementation\n```"
+        ] do
+      assert %{recommendation: "unknown"} =
+               derive_maestro_event("""
+               🤖 Maestro 预审核
+               #{decision_attempt}
+               建议 target phase: Implementation
+               建议 issue status: In Progress
+               执行状态: awaiting human action
+               建议回复方式: continue implementation
+               """)
+    end
+  end
+
   test "maestro reviews without a recognizable recommendation are unknown" do
     assert %{recommendation: "unknown"} = derive_maestro_event("🤖 Maestro 预审核:\n建议回复方式: hold off for now")
     assert %{recommendation: "unknown", confidence: nil} = derive_maestro_event("🤖 Maestro 预审核: 只留了一句话，没有建议行。")
+
+    for decision <- [
+          "rework design or continue implementation",
+          "not continue implementation",
+          "continue implementation（待确认）"
+        ] do
+      assert %{recommendation: "unknown"} =
+               derive_maestro_event("🤖 Maestro 预审核:\n收敛判断: #{decision}")
+    end
+
+    assert %{recommendation: "unknown"} =
+             derive_maestro_event("🤖 Maestro 预审核:\n理由里提到收敛判断，但没有字段。")
   end
 
   test "derive_all adds one human_comment event per non-bot comment, thread replies included" do
@@ -320,11 +660,71 @@ defmodule SymphonyElixir.PhaseEventsTest do
   defp derive_maestro_event(reply_body) do
     comments = [
       comment("impl-1", "## Implementation\n\nPR", created_at: "2026-07-01T10:00:00Z"),
-      comment("maestro-reply", reply_body, parent_id: "impl-1", created_at: "2026-07-01T11:00:00Z", author_is_bot: true)
+      comment("maestro-reply", reply_body,
+        parent_id: "impl-1",
+        created_at: "2026-07-01T11:00:00Z",
+        author_id: @maestro_actor_id,
+        author_name: "Maestro",
+        author_app: true,
+        bot_actor_present: false,
+        author_is_bot: true
+      )
     ]
 
-    assert [_published, event] = PhaseEvents.derive(comments)
+    assert [_published, event] = PhaseEvents.derive(comments, maestro_actor_id: @maestro_actor_id)
     event
+  end
+
+  defp continue_card_fields do
+    [
+      {"收敛判断", "continue implementation"},
+      {"建议 target phase", "Implementation"},
+      {"建议 issue status", "In Progress"},
+      {"执行状态", "awaiting human action"},
+      {"Implementation artifact id", "impl-1"},
+      {"PR Head", "head-1"},
+      {"判断理由", "finding family 已收敛"},
+      {"下一轮建议方向", "继续修复剩余 finding"}
+    ]
+  end
+
+  defp rework_card_fields do
+    [
+      {"收敛判断", "rework design"},
+      {"建议 target phase", "Design"},
+      {"建议 issue status", "Rework"},
+      {"执行状态", "awaiting human action"},
+      {"Implementation artifact id", "impl-1"},
+      {"PR Head", "head-1"},
+      {"判断理由", "同一 finding family 未收敛"},
+      {"下一轮建议方向", "先修正 Design 边界"},
+      {"失效的 Design assumption", "单一 session 可代表所有 review"},
+      {"建议修改的机制或边界", "按 session 绑定状态动作"},
+      {"下一轮 proof / acceptance criteria", "覆盖多 session actor"},
+      {"不受影响的既有约束", "ESCALATED 仍由人类决策"}
+    ]
+  end
+
+  defp clarification_card_fields do
+    [
+      {"收敛判断", "ask clarification"},
+      {"建议 target phase", "Implementation"},
+      {"建议 issue status", "unchanged"},
+      {"执行状态", "awaiting human action"},
+      {"Implementation artifact id", "impl-1"},
+      {"PR Head", "head-1"},
+      {"判断理由", "两条人工要求冲突"},
+      {"下一轮建议方向", "按人工答案继续"},
+      {"待人工回答的问题", "应采用哪个状态动作？"},
+      {"回答判定标准", "明确选择 In Progress 或 Rework"}
+    ]
+  end
+
+  defp render_card(fields, label_prefix \\ "", label_suffix \\ "") do
+    "🤖 Maestro 预审核\n" <>
+      Enum.map_join(fields, "\n", fn {label, value} ->
+        "#{label_prefix}#{label}#{label_suffix}: #{value}"
+      end)
   end
 
   defp comment(id, body, opts) do
@@ -334,6 +734,9 @@ defmodule SymphonyElixir.PhaseEventsTest do
       created_at: Keyword.fetch!(opts, :created_at),
       parent_id: Keyword.get(opts, :parent_id),
       author_name: Keyword.get(opts, :author_name),
+      author_id: Keyword.get(opts, :author_id),
+      author_app: Keyword.get(opts, :author_app, :unknown),
+      bot_actor_present: Keyword.get(opts, :bot_actor_present, :unknown),
       author_is_bot: Keyword.get(opts, :author_is_bot, false),
       resolved_at: Keyword.get(opts, :resolved_at)
     }

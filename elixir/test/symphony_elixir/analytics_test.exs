@@ -599,6 +599,112 @@ defmodule SymphonyElixir.AnalyticsTest do
     assert Analytics.maestro_verdict(review.("unknown", "Design"), "Rework") == :excluded
   end
 
+  test "scores ESCALATED convergence decisions from routed phase outcomes, not state alone" do
+    review = fn recommendation -> %{"recommendation" => recommendation, "phase" => "Implementation"} end
+
+    assert Analytics.maestro_verdict(review.("continue_implementation"), "In Progress") == :pending
+    assert Analytics.maestro_verdict(review.("rework_design"), "Rework") == :pending
+
+    assert Analytics.maestro_verdict(
+             review.("continue_implementation"),
+             "In Progress",
+             %{target_phase: "Implementation"}
+           ) == :agreed
+
+    assert Analytics.maestro_verdict(
+             review.("rework_design"),
+             "Rework",
+             %{target_phase: "Design"}
+           ) == :agreed
+
+    assert Analytics.maestro_verdict(
+             review.("continue_implementation"),
+             "Merging",
+             %{target_phase: "Implementation"}
+           ) == :overridden
+
+    assert Analytics.maestro_verdict(
+             review.("continue_implementation"),
+             "In Progress",
+             %{target_phase: "Design"}
+           ) == :overridden
+
+    assert Analytics.maestro_verdict(
+             review.("continue_implementation"),
+             "In Progress",
+             %{target_phase: nil}
+           ) == :pending
+
+    assert Analytics.maestro_verdict(
+             review.("continue_implementation"),
+             "In Progress",
+             %{target_phase: "Unknown"}
+           ) == :pending
+  end
+
+  test "dashboard agreement for ESCALATED decisions follows the next phase outcome" do
+    path = tmp_path("maestro-escalated-agreement.ndjson")
+
+    [
+      %{
+        event_type: :maestro_review,
+        event_id: "maestro:continue",
+        issue_id: "issue-continue",
+        phase: "Implementation",
+        recommendation: "continue_implementation",
+        occurred_at: "2026-07-15T10:00:00Z"
+      },
+      %{event_type: :run_started, issue_id: "issue-continue", state: "In Progress", recorded_at: "2026-07-15T10:05:00Z"},
+      %{
+        event_type: :phase_published,
+        event_id: "phase_published:malformed",
+        issue_id: "issue-continue",
+        occurred_at: "2026-07-15T10:07:00Z"
+      },
+      %{
+        event_type: :phase_published,
+        event_id: "phase_published:continue",
+        issue_id: "issue-continue",
+        phase: "Implementation",
+        occurred_at: "2026-07-15T10:10:00Z"
+      },
+      %{
+        event_type: :maestro_review,
+        event_id: "maestro:design",
+        issue_id: "issue-design",
+        phase: "Implementation",
+        recommendation: "rework_design",
+        occurred_at: "2026-07-15T11:00:00Z"
+      },
+      %{event_type: :run_started, issue_id: "issue-design", state: "Rework", recorded_at: "2026-07-15T11:05:00Z"},
+      %{
+        event_type: :phase_rollback,
+        event_id: "phase_rollback:design",
+        issue_id: "issue-design",
+        from_phase: "Implementation",
+        target_phase: "Design",
+        occurred_at: "2026-07-15T11:10:00Z"
+      },
+      %{
+        event_type: :maestro_review,
+        event_id: "maestro:state-only",
+        issue_id: "issue-state-only",
+        phase: "Implementation",
+        recommendation: "continue_implementation",
+        occurred_at: "2026-07-15T12:00:00Z"
+      },
+      %{event_type: :run_started, issue_id: "issue-state-only", state: "In Progress", recorded_at: "2026-07-15T12:05:00Z"},
+      %{event_type: :phase_published, issue_id: "issue-invalid-time", occurred_at: "invalid"}
+    ]
+    |> Enum.each(&Analytics.record_event(&1, path: path))
+
+    %{metrics: quality_metrics} = path |> then(&Analytics.summary(path: &1)) |> panel("quality_rework")
+
+    assert %{label: "Maestro reviews", value: 3, status: "direct"} in quality_metrics
+    assert %{label: "Maestro agreement rate", value: "100.0%", status: "direct"} in quality_metrics
+    assert %{label: "Maestro overridden", value: 0, status: "direct"} in quality_metrics
+  end
+
   test "summarizes latest token totals per run without double-counting snapshots" do
     path = tmp_path("token-snapshots.ndjson")
 

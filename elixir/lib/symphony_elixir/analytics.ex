@@ -13,6 +13,8 @@ defmodule SymphonyElixir.Analytics do
   @lock_timeout_ms 5_000
 
   @windows [:h24, :d7, :d30, :all]
+  @convergence_recommendations ["continue_implementation", "rework_design"]
+  @valid_phases ["Requirements", "Design", "Implementation", "Deployment"]
 
   @type event :: map()
   @type window :: :h24 | :d7 | :d30 | :all
@@ -564,13 +566,18 @@ defmodule SymphonyElixir.Analytics do
 
   defp maestro_metrics(events) do
     run_starts = run_started_entries(events)
+    reviews = Enum.filter(events, &(Map.get(&1, "event_type") == "maestro_review"))
 
-    events
-    |> Enum.filter(&(Map.get(&1, "event_type") == "maestro_review"))
-    |> Enum.reduce(%{review_count: 0, agreed: 0, overridden: 0, pending: 0}, fn review, acc ->
+    phase_outcomes =
+      if Enum.any?(reviews, &convergence_review?/1), do: phase_outcome_entries(events), else: []
+
+    Enum.reduce(reviews, %{review_count: 0, agreed: 0, overridden: 0, pending: 0}, fn review, acc ->
+      outcome = if convergence_review?(review), do: next_phase_outcome(review, phase_outcomes, reviews)
+      verdict = maestro_verdict(review, next_run_state(review, run_starts), outcome)
+
       acc
       |> Map.update!(:review_count, &(&1 + 1))
-      |> tally_maestro_verdict(maestro_verdict(review, next_run_state(review, run_starts)))
+      |> tally_maestro_verdict(verdict)
     end)
   end
 
@@ -578,20 +585,41 @@ defmodule SymphonyElixir.Analytics do
   defp tally_maestro_verdict(acc, verdict), do: Map.update!(acc, verdict, &(&1 + 1))
 
   @doc """
-  Classifies whether the human verdict (the state of the next `run_started`
-  dispatch for the issue, or `nil` when none exists yet) agreed with a
-  `maestro_review` event's recommendation.
+  Classifies whether the next observed human route agreed with a
+  `maestro_review` event's recommendation. Ordinary recommendations use the
+  next dispatch state; convergence recommendations require a phase outcome.
   """
   @spec maestro_verdict(map(), String.t() | nil) :: :agreed | :overridden | :pending | :excluded
   def maestro_verdict(review, next_state) when is_map(review) do
-    classify_maestro_verdict(Map.get(review, "recommendation"), Map.get(review, "phase"), next_state)
+    maestro_verdict(review, next_state, nil)
   end
 
-  defp classify_maestro_verdict("request_changes", _phase, "Rework"), do: :agreed
-  defp classify_maestro_verdict("request_changes", _phase, next_state) when next_state in ["In Progress", "Merging"], do: :overridden
-  defp classify_maestro_verdict("request_changes", _phase, _next_state), do: :pending
+  @doc false
+  @spec maestro_verdict(map(), String.t() | nil, map() | nil) :: :agreed | :overridden | :pending | :excluded
+  def maestro_verdict(review, next_state, phase_outcome) when is_map(review) do
+    classify_maestro_verdict(
+      Map.get(review, "recommendation"),
+      Map.get(review, "phase"),
+      next_state,
+      phase_outcome
+    )
+  end
 
-  defp classify_maestro_verdict("approve", phase, next_state) when phase in ["Requirements", "Design"] do
+  defp classify_maestro_verdict("continue_implementation", _phase, next_state, outcome),
+    do: convergence_verdict("Implementation", next_state, outcome)
+
+  defp classify_maestro_verdict("rework_design", _phase, next_state, outcome),
+    do: convergence_verdict("Design", next_state, outcome)
+
+  defp classify_maestro_verdict("request_changes", _phase, "Rework", _outcome), do: :agreed
+
+  defp classify_maestro_verdict("request_changes", _phase, next_state, _outcome)
+       when next_state in ["In Progress", "Merging"],
+       do: :overridden
+
+  defp classify_maestro_verdict("request_changes", _phase, _next_state, _outcome), do: :pending
+
+  defp classify_maestro_verdict("approve", phase, next_state, _outcome) when phase in ["Requirements", "Design"] do
     case next_state do
       "In Progress" -> :agreed
       "Rework" -> :overridden
@@ -599,9 +627,20 @@ defmodule SymphonyElixir.Analytics do
     end
   end
 
-  defp classify_maestro_verdict("approve", "Implementation", next_state), do: merge_expectation_verdict(next_state)
-  defp classify_maestro_verdict("merge_nudge", _phase, next_state), do: merge_expectation_verdict(next_state)
-  defp classify_maestro_verdict(_recommendation, _phase, _next_state), do: :excluded
+  defp classify_maestro_verdict("approve", "Implementation", next_state, _outcome),
+    do: merge_expectation_verdict(next_state)
+
+  defp classify_maestro_verdict("merge_nudge", _phase, next_state, _outcome), do: merge_expectation_verdict(next_state)
+  defp classify_maestro_verdict(_recommendation, _phase, _next_state, _outcome), do: :excluded
+
+  defp convergence_verdict(_expected_phase, "Merging", _outcome), do: :overridden
+  defp convergence_verdict(expected_phase, _next_state, %{target_phase: expected_phase}), do: :agreed
+
+  defp convergence_verdict(_expected_phase, _next_state, %{target_phase: other_phase})
+       when other_phase in @valid_phases,
+       do: :overridden
+
+  defp convergence_verdict(_expected_phase, _next_state, _outcome), do: :pending
 
   defp merge_expectation_verdict("Merging"), do: :agreed
   defp merge_expectation_verdict("Rework"), do: :overridden
@@ -634,6 +673,61 @@ defmodule SymphonyElixir.Analytics do
            |> Enum.filter(&(&1.issue_id == issue_id and DateTime.compare(&1.recorded_at, reviewed_at) == :gt))
            |> Enum.min_by(& &1.recorded_at, DateTime, fn -> nil end) do
       state
+    else
+      _ -> nil
+    end
+  end
+
+  @doc false
+  @spec convergence_review?(map()) :: boolean()
+  def convergence_review?(review), do: Map.get(review, "recommendation") in @convergence_recommendations
+
+  @doc false
+  @spec phase_outcome_entries([map()]) :: [map()]
+  def phase_outcome_entries(events) do
+    events
+    |> Enum.filter(&(Map.get(&1, "event_type") in ["phase_published", "phase_rollback"]))
+    |> Enum.flat_map(fn event ->
+      with target_phase when target_phase in @valid_phases <- outcome_phase(event),
+           %DateTime{} = occurred_at <- parse_datetime(Map.get(event, "occurred_at") || Map.get(event, "recorded_at")) do
+        [
+          %{
+            issue_id: Map.get(event, "issue_id"),
+            occurred_at: occurred_at,
+            target_phase: target_phase,
+            event_id: Map.get(event, "event_id")
+          }
+        ]
+      else
+        _invalid -> []
+      end
+    end)
+  end
+
+  defp outcome_phase(%{"event_type" => "phase_published"} = event), do: Map.get(event, "phase")
+  defp outcome_phase(event), do: Map.get(event, "target_phase")
+
+  @doc false
+  @spec next_phase_outcome(map(), [map()], [map()]) :: map() | nil
+  def next_phase_outcome(review, phase_outcomes, reviews) do
+    with issue_id when not is_nil(issue_id) <- Map.get(review, "issue_id"),
+         %DateTime{} = reviewed_at <- maestro_reviewed_at(review) do
+      next_reviewed_at =
+        reviews
+        |> Enum.filter(fn candidate ->
+          Map.get(candidate, "issue_id") == issue_id and
+            match?(%DateTime{}, maestro_reviewed_at(candidate)) and
+            DateTime.compare(maestro_reviewed_at(candidate), reviewed_at) == :gt
+        end)
+        |> Enum.map(&maestro_reviewed_at/1)
+        |> Enum.min(DateTime, fn -> nil end)
+
+      phase_outcomes
+      |> Enum.filter(fn outcome ->
+        outcome.issue_id == issue_id and DateTime.compare(outcome.occurred_at, reviewed_at) == :gt and
+          (is_nil(next_reviewed_at) or DateTime.compare(outcome.occurred_at, next_reviewed_at) == :lt)
+      end)
+      |> Enum.min_by(& &1.occurred_at, DateTime, fn -> nil end)
     else
       _ -> nil
     end
