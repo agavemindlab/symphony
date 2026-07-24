@@ -435,10 +435,10 @@ defmodule SymphonyElixir.CoreTest do
     workflow = shared_workflow_prompt() |> String.replace(~r/\s+/, " ")
 
     assert implementation_skill =~ "workflow 已停止并等待 `Human Review`"
-    assert implementation_skill =~ "将 issue 移至 `In Progress`"
-    assert implementation_skill =~ "`/rework implementation`"
+    assert implementation_skill =~ "由人工将 issue 移至 `In Progress`"
+    assert implementation_skill =~ "回复 `/rework implementation` 并将 issue 移至 `Rework`"
     assert implementation_skill =~ "继续当前 Implementation review/fix loop"
-    assert implementation_skill =~ "`/rework design`"
+    assert implementation_skill =~ "回复 `/rework design` 并将 issue 移至 `Rework`"
     assert implementation_skill =~ "不要移至 `Merging`"
     refute implementation_skill =~ "建议回 Design 或继续 Implementation"
 

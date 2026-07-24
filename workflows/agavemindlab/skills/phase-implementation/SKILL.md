@@ -287,7 +287,7 @@ comfort.
 
 ### Human action needed
 
-> 👉 **需要人工处理**：<`CLEAN`：审查 PR；无异议请将 issue 移至 `Merging`，需要修改则移至 `Rework`。`ESCALATED`：workflow 已停止并等待 `Human Review`；不要移至 `Merging`。若判断继续 review/fix 仍可收敛，将 issue 移至 `In Progress` 或回复 `/rework implementation`，以继续当前 Implementation review/fix loop；若需重做设计，回复 `/rework design`。>
+> 👉 **需要人工处理**：<`CLEAN`：审查 PR；无异议请将 issue 移至 `Merging`，需要修改则移至 `Rework`。`ESCALATED`：workflow 已停止并等待 `Human Review`；不要移至 `Merging`。若判断继续 review/fix 仍可收敛，由人工将 issue 移至 `In Progress`，以继续当前 Implementation review/fix loop；也可回复 `/rework implementation` 并将 issue 移至 `Rework`。若需重做设计，回复 `/rework design` 并将 issue 移至 `Rework`。>
 > - 若 blocked：写成可执行 runbook，包含操作系统/账号/项目/workspace、要配置的 key/权限/变量及类型或 sensitive 标记、secret 值从哪里取得或生成但不贴值、配置后如何重跑验证、通过判据。
 
 ### 风险/注意（optional: non-merge caveats only）
