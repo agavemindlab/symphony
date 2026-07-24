@@ -619,6 +619,38 @@ defmodule SymphonyElixir.CoreTest do
   end
 
   @tag :prompt_contract
+  test "Maestro rejects Requirements that expand delivery scope to build validation machinery" do
+    repo_root = Path.expand("..", File.cwd!())
+
+    reviewer =
+      File.read!(Path.join(repo_root, ".codex/skills/maestro/agents/maestro-reviewer.md"))
+      |> String.replace(~r/\s+/, " ")
+
+    assert reviewer =~ "Once Requirements is accepted"
+    refute reviewer =~ "Once Requirements exists"
+
+    assert reviewer =~
+             "human reply > accepted Requirements > current artifact > previous artifact > description"
+
+    for contract <- [
+          "Reject Requirements that silently change the stated delivery scope",
+          "Narrowing delivery requires an explicit parent/subissue boundary or cited human approval",
+          "Any delivery-scope expansion requires cited human approval of that added deliverable",
+          "turning a means of verification into a required deliverable is one example",
+          "For verification evidence, require the smallest close test: a scenario, observable behavioral outcome, and pass condition",
+          "Tests, replays, harnesses, model runs, prior failures, and scrubbed regression scenarios may supply evidence",
+          "create no infrastructure requirement unless it is itself part of explicit human-approved delivery scope",
+          "`request changes` with a draft whose first line starts `/rework requirements`",
+          "never `/rework design` for any unapproved Requirements scope change"
+        ] do
+      assert reviewer =~ contract
+    end
+
+    refute reviewer =~ "DEV-5510"
+    refute reviewer =~ "replay infrastructure"
+  end
+
+  @tag :prompt_contract
   test "DEV-5517 Maestro confidence explains why a higher score is unsupported without changing verdict routing" do
     repo_root = Path.expand("..", File.cwd!())
 
